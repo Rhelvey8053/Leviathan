@@ -1,0 +1,70 @@
+{
+  "environment": "prod",
+
+  "markets": {
+    "max_fetch": 1000,
+    "max_events": 150,
+    "edge_threshold": 0.08,
+    "min_volume": 500,
+    "max_volume_filter": 150000,
+    "min_days_to_close": 0,
+    "max_days_to_close": 180,
+    "bucket_min_volume": {
+      "INTRADAY":  50,
+      "WEEKLY":    200,
+      "MONTHLY":   500,
+      "QUARTERLY": 500,
+      "LONG":      200
+    },
+    "efficient_market_keywords": [
+      "CPI", "Federal Reserve", "Fed rate", "nonfarm payroll",
+      "jobs report", "GDP", "inflation rate", "FOMC", "unemployment rate"
+    ],
+    "categories": []
+  },
+
+  "whales": {
+    "size_multiplier": 5,
+    "volume_spike_hours": 1,
+    "lookback_trades": 100
+  },
+
+  "scoring": {
+    "scorer_model": "claude-sonnet-4-6",
+    "support_model": "claude-haiku-4-5-20251001",
+    "max_markets_per_run": 5,
+    "confidence_threshold": "MED"
+  },
+
+  "accounts": {
+    "enabled": true,
+    "min_positions": 3,
+    "min_pct_pnl": 10.0,
+    "min_cash_pnl": 25.0,
+    "max_wallets_to_track": 50,
+    "max_wallets_per_scan": 20,
+    "cache_ttl_hours": 24,
+    "discovery_sample_size": 300
+  },
+
+  "external_markets": {
+    "enabled": true,
+    "manifold_limit": 500,
+    "min_match_score": 0.45,
+    "min_price_gap": 0.0
+  },
+
+  "polymarket": {
+    "enabled": true,
+    "max_fetch": 500,
+    "min_match_score": 0.50,
+    "min_price_gap": 0.0
+  },
+
+  "report": {
+    "email_to": "reed.helvey@gmail.com",
+    "email_from": "",
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587
+  }
+}
