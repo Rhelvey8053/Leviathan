@@ -1,0 +1,6 @@
+.env
+calls.csv
+runs.csv
+winning_accounts.json
+__pycache__/
+*.pyc
