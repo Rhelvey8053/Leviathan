@@ -14,49 +14,52 @@ Sources:
 import requests
 from polymarket import _match_score  # reuse the same fuzzy matching logic
 
+_STOP = {
+    "will", "the", "a", "an", "be", "in", "on", "by", "to", "of", "or",
+    "and", "is", "for", "at", "it", "its", "who", "what", "when", "which",
+    "that", "this", "have", "has", "do", "does", "not", "than", "more",
+}
+
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
-def _fetch_manifold(limit: int = 500) -> list[dict]:
+def _search_manifold(titles: list[str], results_per_query: int = 8) -> list[dict]:
     """
-    Returns open Manifold binary markets sorted by liquidity (highest first).
-    Only markets with a probability value are included.
+    Searches Manifold for binary markets relevant to each Kalshi title.
+    Uses /v0/search-markets (keyword-based) — more reliable than bulk liquidity fetch.
+    Returns deduplicated binary markets that have a probability set.
     """
-    markets = []
-    before  = None
+    seen_ids: set[str] = set()
+    results: list[dict] = []
 
-    while len(markets) < limit:
-        params = {
-            "limit":  min(100, limit - len(markets)),
-            "filter": "open",
-            "sort":   "liquidity",
-        }
-        if before:
-            params["before"] = before
+    for title in titles:
+        words     = [w.strip(".,?!:()") for w in title.split()]
+        key_words = [w for w in words if w.lower() not in _STOP and len(w) > 2]
+        term      = " ".join(key_words[:5])[:50].strip()
+        if not term:
+            continue
 
         try:
             resp = requests.get(
-                "https://api.manifold.markets/v0/markets",
-                params=params,
-                timeout=15,
+                "https://api.manifold.markets/v0/search-markets",
+                params={
+                    "term":         term,
+                    "filter":       "open",
+                    "contractType": "BINARY",
+                    "limit":        results_per_query,
+                },
+                timeout=10,
             )
             resp.raise_for_status()
-            page = resp.json()
+            for m in resp.json():
+                mid = m.get("id")
+                if mid and mid not in seen_ids and m.get("probability") is not None:
+                    seen_ids.add(mid)
+                    results.append(m)
         except Exception:
-            break
+            pass
 
-        if not isinstance(page, list) or not page:
-            break
-
-        markets.extend(page)
-        if len(page) < 100:
-            break
-        before = page[-1].get("id")
-
-    return [
-        m for m in markets
-        if m.get("outcomeType") == "BINARY" and m.get("probability") is not None
-    ]
+    return results
 
 
 def _fetch_predictit() -> list[dict]:
@@ -199,10 +202,11 @@ def cross_reference(flagged_markets: list[dict], config: dict) -> dict[str, list
     if not cfg.get("enabled", True):
         return {}
 
-    manifold_limit = cfg.get("manifold_limit", 500)
+    results_per_query = cfg.get("manifold_results_per_query", 8)
 
-    print("  [ext] Fetching Manifold...", end=" ", flush=True)
-    manifold = _fetch_manifold(manifold_limit)
+    titles = [m.get("title", "") for m in flagged_markets if m.get("title")]
+    print(f"  [ext] Searching Manifold ({len(titles)} queries)...", end=" ", flush=True)
+    manifold = _search_manifold(titles, results_per_query)
     print(f"{len(manifold)} binary markets")
 
     print("  [ext] Fetching PredictIt...", end=" ", flush=True)

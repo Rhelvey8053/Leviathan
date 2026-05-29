@@ -81,6 +81,14 @@ def main():
         print("      Cannot proceed without valid auth. Exiting.")
         return
 
+    # Resolve any prior calls that have since settled
+    try:
+        resolved = logger.resolve_outcomes(config)
+        if resolved:
+            print(f"      {resolved} prior call(s) resolved — track record updated")
+    except Exception as e:
+        print(f"      Outcome resolution failed: {e}")
+
     # Step 2 — Fetch markets via events catalog
     print("[2/8] Fetching markets via events catalog...")
     try:

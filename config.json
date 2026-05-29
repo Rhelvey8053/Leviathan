@@ -49,7 +49,7 @@
 
   "external_markets": {
     "enabled": true,
-    "manifold_limit": 500,
+    "manifold_results_per_query": 8,
     "min_match_score": 0.45,
     "min_price_gap": 0.0
   },
