@@ -128,6 +128,67 @@ def get_week_signals(days: int = 7) -> list[dict]:
     return sorted(rows, key=lambda r: r["_ts"], reverse=True)
 
 
+def resolve_outcomes(config: dict) -> int:
+    """
+    Checks all unresolved calls (empty outcome) against the Kalshi API.
+    Fills outcome (YES/NO), result (WIN/LOSS), and pnl_if_traded for settled markets.
+    Returns count of newly resolved calls.
+    """
+    import kalshi as _kalshi
+
+    if not os.path.exists(CALLS_CSV):
+        return 0
+
+    try:
+        with open(CALLS_CSV, "r", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return 0
+
+    unresolved = [r for r in rows if not r.get("outcome")]
+    if not unresolved:
+        return 0
+
+    resolved_count = 0
+    for row in unresolved:
+        ticker = row.get("ticker", "")
+        if not ticker:
+            continue
+        try:
+            market   = _kalshi.fetch_market(config, ticker)
+            result   = (market.get("result") or "").lower()
+            if result not in ("yes", "no"):
+                continue  # still open
+
+            outcome   = result.upper()
+            direction = (row.get("direction") or "").upper()
+            win       = (direction == outcome)
+
+            try:
+                pnl = round(float(row.get("edge") or 0) * (1 if win else -1), 4)
+            except (ValueError, TypeError):
+                pnl = ""
+
+            row["outcome"]       = outcome
+            row["result"]        = "WIN" if win else "LOSS"
+            row["pnl_if_traded"] = pnl
+            resolved_count += 1
+        except Exception:
+            pass
+
+    if resolved_count > 0:
+        try:
+            with open(CALLS_CSV, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=CALLS_FIELDS)
+                writer.writeheader()
+                writer.writerows(rows)
+        except PermissionError:
+            print(f"  [logger] calls.csv is locked — could not save {resolved_count} resolved outcome(s)")
+            return 0
+
+    return resolved_count
+
+
 def get_stats() -> dict:
     """
     Returns aggregate stats from calls.csv.
