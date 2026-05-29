@@ -44,7 +44,7 @@
     "max_wallets_to_track": 50,
     "max_wallets_per_scan": 20,
     "cache_ttl_hours": 24,
-    "discovery_sample_size": 300
+    "discovery_sample_size": 1000
   },
 
   "external_markets": {
