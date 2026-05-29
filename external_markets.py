@@ -13,6 +13,8 @@ Sources:
 
 import requests
 from polymarket import _match_score  # reuse the same fuzzy matching logic
+import metaculus
+import odds_api as _odds_api
 
 _STOP = {
     "will", "the", "a", "an", "be", "in", "on", "by", "to", "of", "or",
@@ -141,10 +143,14 @@ def _norm_predictit(m: dict) -> list[dict]:
 
 # ── Index + matching ──────────────────────────────────────────────────────────
 
-def build_index(manifold: list[dict], predictit: list[dict]) -> list[dict]:
+def build_index(manifold: list[dict], predictit: list[dict],
+                odds: list[dict] | None = None) -> list[dict]:
     """
     Combines and normalizes markets from all sources into a single flat index.
     Each entry: {title, probability, volume, source, url}
+    manifold: already-normalized dicts (Manifold + Metaculus pass through directly)
+    predictit: raw PredictIt market dicts (normalized internally)
+    odds: already-normalized OddsAPI dicts (pass through directly)
     """
     index = []
 
@@ -157,6 +163,12 @@ def build_index(manifold: list[dict], predictit: list[dict]) -> list[dict]:
     for m in predictit:
         try:
             index.extend(_norm_predictit(m))
+        except Exception:
+            pass
+
+    for m in (odds or []):
+        try:
+            index.append(m)
         except Exception:
             pass
 
@@ -203,17 +215,37 @@ def cross_reference(flagged_markets: list[dict], config: dict) -> dict[str, list
         return {}
 
     results_per_query = cfg.get("manifold_results_per_query", 8)
+    meta_per_query    = cfg.get("metaculus_results_per_query", 6)
 
     titles = [m.get("title", "") for m in flagged_markets if m.get("title")]
+
     print(f"  [ext] Searching Manifold ({len(titles)} queries)...", end=" ", flush=True)
     manifold = _search_manifold(titles, results_per_query)
     print(f"{len(manifold)} binary markets")
+
+    import os as _os
+    if cfg.get("metaculus_enabled", True) and _os.getenv("METACULUS_API_TOKEN"):
+        print(f"  [ext] Searching Metaculus ({len(titles)} queries)...", end=" ", flush=True)
+        meta_markets = metaculus.fetch_for_titles(titles, meta_per_query)
+        print(f"{len(meta_markets)} questions")
+    else:
+        meta_markets = []
+        if cfg.get("metaculus_enabled", True):
+            print("  [ext] Metaculus skipped (add METACULUS_API_TOKEN to .env)")
 
     print("  [ext] Fetching PredictIt...", end=" ", flush=True)
     predictit = _fetch_predictit()
     print(f"{len(predictit)} markets")
 
-    index = build_index(manifold, predictit)
+    odds_markets = []
+    if cfg.get("odds_api_enabled", True):
+        print("  [ext] Fetching OddsAPI...", end=" ", flush=True)
+        events       = _odds_api.fetch_events(config)
+        odds_markets = _odds_api.normalize_events(events)
+        cached       = "(cached)" if _odds_api._cache_valid() else ""
+        print(f"{len(odds_markets)//2} games {cached}".strip())
+
+    index = build_index(manifold + meta_markets, predictit, odds_markets)
     print(f"  [ext] Index built: {len(index)} normalized entries")
 
     results = {}
