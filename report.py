@@ -444,19 +444,27 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict) -
 
 # ── Send ──────────────────────────────────────────────────────────────────────
 
+def _unsubscribe_footer(token: str) -> str:
+    return (
+        "\n\n" + "-" * 68 + "\n"
+        "Leviathan  ·  Prediction Market Intelligence  ·  For informational purposes only\n"
+        f"To unsubscribe: python subscribers.py remove {token}\n"
+        "or reply to this email with 'UNSUBSCRIBE' in the subject line."
+    )
+
+
 def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
                 subject_override: str = "") -> None:
+    import subscribers as _subs
+
     report_cfg   = config.get("report", {})
-    email_to     = report_cfg.get("email_to", "")
-    email_from   = report_cfg.get("email_from") or email_to
+    email_from   = report_cfg.get("email_from") or report_cfg.get("email_to", "")
     smtp_host    = report_cfg.get("smtp_host", "smtp.gmail.com")
     smtp_port    = report_cfg.get("smtp_port", 587)
     app_password = os.getenv("GMAIL_APP_PASSWORD")
 
     if not app_password:
         raise RuntimeError("GMAIL_APP_PASSWORD not set in environment")
-    if not email_to:
-        raise RuntimeError("report.email_to not set in config.json")
 
     if subject_override:
         subject = subject_override
@@ -469,15 +477,43 @@ def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
             f"{whale_flags} whale flag{'s' if whale_flags!=1 else ''}"
         )
 
-    msg            = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"]    = email_from
-    msg["To"]      = email_to
+    # Build recipient list: owner (from config) always included, plus active subscribers
+    owner        = report_cfg.get("email_to", "")
+    active_subs  = _subs.get_active_subscribers()  # list of dicts with email + token
+    sub_emails   = {s["email"]: s["token"] for s in active_subs}
+
+    # Owner gets a plain footer (no unsubscribe token needed)
+    recipients: list[tuple[str, str | None]] = []
+    if owner:
+        recipients.append((owner, None))
+    for sub in active_subs:
+        if sub["email"] != owner:
+            recipients.append((sub["email"], sub["token"]))
+
+    if not recipients:
+        raise RuntimeError("No recipients configured (set report.email_to in config.json or add subscribers)")
 
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.ehlo()
         server.starttls()
         server.login(email_from, app_password)
-        server.sendmail(email_from, email_to, msg.as_string())
 
-    print(f"  [report] Email sent to {email_to}")
+        sent = 0
+        for email_to, token in recipients:
+            footer      = _unsubscribe_footer(token) if token else (
+                "\n\n" + "-" * 68 + "\n"
+                "Leviathan  ·  Prediction Market Intelligence  ·  For informational purposes only"
+            )
+            full_body   = body + footer
+            msg         = MIMEText(full_body, "plain", "utf-8")
+            msg["Subject"] = subject
+            msg["From"]    = email_from
+            msg["To"]      = email_to
+            try:
+                server.sendmail(email_from, email_to, msg.as_string())
+                sent += 1
+            except Exception as e:
+                print(f"  [report] Failed to send to {email_to}: {e}")
+
+    n_subs = len(recipients) - (1 if owner else 0)
+    print(f"  [report] Sent to {sent} recipient(s) ({n_subs} subscriber(s))")
