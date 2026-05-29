@@ -50,6 +50,19 @@
   "external_markets": {
     "enabled": true,
     "manifold_results_per_query": 8,
+    "metaculus_enabled": true,
+    "metaculus_results_per_query": 6,
+    "odds_api_enabled": true,
+    "odds_api_sports": [
+      "americanfootball_nfl",
+      "americanfootball_ncaaf",
+      "basketball_nba",
+      "basketball_ncaab",
+      "baseball_mlb",
+      "icehockey_nhl",
+      "soccer_epl",
+      "soccer_usa_mls"
+    ],
     "min_match_score": 0.45,
     "min_price_gap": 0.0
   },
