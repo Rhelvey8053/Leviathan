@@ -1,7 +1,7 @@
 import csv
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 CALLS_CSV = os.path.join(os.path.dirname(__file__), "calls.csv")
@@ -83,6 +83,49 @@ def log_run(run_data: dict) -> None:
             writer.writerow(row)
     except PermissionError:
         print(f"  [logger] runs.csv is locked (close it in Excel) — run not logged")
+
+
+def get_recent_tickers(days: int = 7) -> set[str]:
+    """
+    Returns the set of tickers that have already been signalled in the last N days.
+    Used to detect duplicate signals across runs.
+    """
+    if not os.path.exists(CALLS_CSV):
+        return set()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    tickers = set()
+    try:
+        with open(CALLS_CSV, "r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    ts = datetime.fromisoformat(row.get("timestamp", "").replace("Z", "+00:00"))
+                    if ts >= cutoff:
+                        tickers.add(row.get("ticker", ""))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return tickers
+
+
+def get_week_signals(days: int = 7) -> list[dict]:
+    """Returns all signal rows from the past N days, newest first."""
+    if not os.path.exists(CALLS_CSV):
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = []
+    try:
+        with open(CALLS_CSV, "r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    ts = datetime.fromisoformat(row.get("timestamp", "").replace("Z", "+00:00"))
+                    if ts >= cutoff:
+                        rows.append({**row, "_ts": ts})
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return sorted(rows, key=lambda r: r["_ts"], reverse=True)
 
 
 def get_stats() -> dict:

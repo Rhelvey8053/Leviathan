@@ -40,18 +40,8 @@ def load_config() -> dict:
 
 
 def estimate_cost(token_info: dict, model: str) -> float:
-    pricing = {
-        "claude-sonnet-4-6":        {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30},
-        "claude-haiku-4-5-20251001": {"input": 0.25, "output":  1.25, "cache_write": 0.30, "cache_read": 0.03},
-    }
-    p = pricing.get(model, {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30})
-    return round(
-        (token_info.get("input_tokens",       0) / 1_000_000) * p["input"]  +
-        (token_info.get("output_tokens",      0) / 1_000_000) * p["output"] +
-        (token_info.get("cache_write_tokens", 0) / 1_000_000) * p["cache_write"] +
-        (token_info.get("cache_read_tokens",  0) / 1_000_000) * p["cache_read"],
-        6,
-    )
+    # Scoring runs via claude CLI (Pro subscription) — no per-token API billing
+    return 0.0
 
 
 def main():
@@ -230,10 +220,7 @@ def main():
     try:
         if flagged_markets:
             claude_scores, token_info = scorer.score_markets(flagged_markets, config)
-            print(
-                f"      Scored {len(claude_scores)} markets. "
-                f"Tokens: {token_info['input_tokens']}in / {token_info['output_tokens']}out"
-            )
+            print(f"      Scored {len(claude_scores)} markets via claude CLI")
         else:
             print("      No flagged markets to score.")
     except Exception as e:
@@ -286,25 +273,47 @@ def main():
 
     run_meta["signals_generated"] = len(final_signals)
 
+    # Tag signals as new or repeat (seen in past 7 days)
+    recent_tickers = logger.get_recent_tickers(days=7)
+    for sig in final_signals:
+        sig["is_repeat"] = sig.get("ticker", "") in recent_tickers
+    new_signals    = [s for s in final_signals if not s.get("is_repeat")]
+    repeat_signals = [s for s in final_signals if s.get("is_repeat")]
+
     # Step 7 — Log signals
     print("[7/8] Logging signals...")
     try:
-        for sig in final_signals:
+        for sig in new_signals:  # only log new signals to avoid duplicate rows
             logger.log_signal(sig)
         run_meta["runtime_ms"] = int((time.time() - start_time) * 1000)
         logger.log_run(run_meta)
-        print(f"      Logged {len(final_signals)} signal(s)")
+        print(f"      Logged {len(new_signals)} new, {len(repeat_signals)} repeat signal(s)")
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
+
+    # Weekly digest — send on Sundays or if explicitly triggered
+    now_local = datetime.now(timezone.utc)
+    if now_local.weekday() == 6:  # Sunday
+        try:
+            week_sigs = logger.get_week_signals(days=7)
+            if week_sigs:
+                weekly_body = report.compile_weekly_digest(week_sigs, logger.get_stats(), config)
+                report.send_report(weekly_body, [], 0, config,
+                                   subject_override=f"Leviathan Weekly — {now_local.strftime('%b %d, %Y')}")
+                print("      Weekly digest sent")
+        except Exception as e:
+            print(f"      Weekly digest failed: {e}")
 
     # Step 8 — Compile and email report
     print("[8/8] Sending report...")
     try:
         stats = logger.get_stats()
-        body  = report.compile_report(final_signals, whale_only, stats, run_meta, config)
-        report.send_report(body, final_signals, run_meta["whale_flags"], config,
-                           run_meta=run_meta, whale_only=whale_only, stats=stats)
+        body  = report.compile_report(final_signals, whale_only, stats, run_meta, config,
+                                      all_filtered=filtered,
+                                      new_signals=new_signals,
+                                      repeat_signals=repeat_signals)
+        report.send_report(body, final_signals, run_meta["whale_flags"], config)
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
