@@ -156,6 +156,9 @@ def build_prompt(markets: list[dict]) -> str:
                 f"strong {'buying' if ob_dir == 'YES' else 'selling'} pressure."
             )
 
+        if m.get("price_trend"):
+            lines.append(f"   Price trend: {m['price_trend']}")
+
         if m.get("base_rate") is not None:
             lines.append(f"   Base rate estimate: {m['base_rate'] * 100:.1f}%")
 
@@ -180,28 +183,39 @@ def score_markets(flagged_markets: list[dict], config: dict) -> tuple[list[dict]
 
     # Exclude ANTHROPIC_API_KEY so the CLI uses Pro OAuth instead of the (empty) API key
     import os as _os
+    import time as _time
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
-    result = subprocess.run(
-        [
-            claude_cmd,
-            "--print",
-            "--system-prompt", SYSTEM_PROMPT,
-            "--allowedTools", "WebSearch",
-            "--output-format", "text",
-        ],
-        input=user_prompt,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        encoding="utf-8",
-        errors="replace",
-        env=clean_env,
-    )
+    max_retries = 2
+    result = None
+    for attempt in range(max_retries + 1):
+        result = subprocess.run(
+            [
+                claude_cmd,
+                "--print",
+                "--system-prompt", SYSTEM_PROMPT,
+                "--allowedTools", "WebSearch",
+                "--output-format", "text",
+            ],
+            input=user_prompt,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            encoding="utf-8",
+            errors="replace",
+            env=clean_env,
+        )
+        if result.returncode == 0:
+            break
+        if attempt < max_retries:
+            _time.sleep(5)
 
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(f"scorer.py: claude CLI returned exit {result.returncode}: {err[:300]}")
+        raise RuntimeError(
+            f"scorer.py: claude CLI returned exit {result.returncode} "
+            f"after {max_retries + 1} attempt(s): {err[:300]}"
+        )
 
     all_text = result.stdout.strip()
     if not all_text:

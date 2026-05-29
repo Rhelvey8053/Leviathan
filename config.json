@@ -3,7 +3,7 @@
 
   "markets": {
     "max_fetch": 1000,
-    "max_events": 150,
+    "max_events": 400,
     "edge_threshold": 0.08,
     "min_volume": 500,
     "max_volume_filter": 150000,
@@ -11,10 +11,10 @@
     "max_days_to_close": 180,
     "bucket_min_volume": {
       "INTRADAY":  50,
-      "WEEKLY":    200,
-      "MONTHLY":   500,
-      "QUARTERLY": 500,
-      "LONG":      200
+      "WEEKLY":    150,
+      "MONTHLY":   400,
+      "QUARTERLY": 250,
+      "LONG":      100
     },
     "efficient_market_keywords": [
       "CPI", "Federal Reserve", "Fed rate", "nonfarm payroll",
@@ -32,7 +32,7 @@
   "scoring": {
     "scorer_model": "claude-sonnet-4-6",
     "support_model": "claude-haiku-4-5-20251001",
-    "max_markets_per_run": 5,
+    "max_markets_per_run": 10,
     "confidence_threshold": "MED"
   },
 
