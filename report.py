@@ -49,7 +49,10 @@ def _wrap(text: str, indent: int = 2, width: int = W) -> list[str]:
 def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
     out = [
         s for s in signals
-        if CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2) <= threshold_rank
+        if (
+            CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2) <= threshold_rank
+            or s.get("second_pass")  # always include second-pass signals
+        )
         and s.get("direction", "PASS") != "PASS"
     ]
     out.sort(key=lambda s: (
@@ -84,8 +87,9 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     edge_s = f"{edge_v*100:+.1f} pp"
 
     # Header line
-    num = f"[{index}]  " if index else ""
-    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}")
+    num        = f"[{index}]  " if index else ""
+    pass_label = "  [SECOND PASS — LOW CONVICTION]" if s.get("second_pass") else ""
+    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}")
     lines.append(f"{ticker}  ·  {close_fmt}" if close_fmt else ticker)
     lines.append("")
 

@@ -178,12 +178,29 @@ def main():
     for m in flagged_markets:
         m["smart_money"] = smart_money.get(m.get("ticker"), [])
 
-    # Step 5 — Whale detection + order book depth
+    # Step 5 — Whale detection + order book depth + price history
     print("[5/8] Checking whale activity and order book depth...")
     try:
-        trades_by_ticker  = {}
+        trades_by_ticker    = {}
         orderbook_by_ticker = {}
-        for ticker in [m["ticker"] for m in flagged_markets if m.get("ticker")]:
+        history_by_ticker   = {}
+
+        _period_map = {
+            "INTRADAY":  86400,
+            "WEEKLY":    86400 * 3,
+            "MONTHLY":   86400 * 7,
+            "QUARTERLY": 86400 * 14,
+            "LONG":      86400 * 30,
+        }
+        _period_label = {
+            "INTRADAY": "24h", "WEEKLY": "3d", "MONTHLY": "7d",
+            "QUARTERLY": "14d", "LONG": "30d",
+        }
+
+        for m in flagged_markets:
+            ticker = m.get("ticker")
+            if not ticker:
+                continue
             try:
                 trades_by_ticker[ticker] = kalshi.fetch_trades(config, ticker)
             except Exception:
@@ -193,6 +210,20 @@ def main():
                 orderbook_by_ticker[ticker] = scanner.compute_orderbook_signal(ob)
             except Exception:
                 orderbook_by_ticker[ticker] = {}
+            try:
+                horizon = m.get("time_horizon", "MONTHLY")
+                period  = _period_map.get(horizon, 86400 * 7)
+                label   = _period_label.get(horizon, "7d")
+                hist    = kalshi.fetch_market_history(config, ticker, period_seconds=period)
+                prices  = [float(h["yes_price"]) for h in hist if h.get("yes_price")]
+                if len(prices) >= 2:
+                    start  = prices[0]
+                    end    = prices[-1]
+                    change = (end - start) * 100
+                    trend  = "rising" if change > 1 else ("declining" if change < -1 else "stable")
+                    history_by_ticker[ticker] = f"{change:+.1f}% ({start*100:.1f}% → {end*100:.1f}%) — {trend} ({label})"
+            except Exception:
+                pass
 
         whale_results = {
             w["ticker"]: w
@@ -207,8 +238,9 @@ def main():
     for m in flagged_markets:
         ticker = m.get("ticker")
         whale  = whale_results.get(ticker)
-        m["whale_data"]     = whale
-        m["whale_reversal"] = scanner.compute_whale_reversal(m, whale)
+        m["whale_data"]      = whale
+        m["whale_reversal"]  = scanner.compute_whale_reversal(m, whale)
+        m["price_trend"]     = history_by_ticker.get(ticker)
         m.update(orderbook_by_ticker.get(ticker) or {})
         if (m["whale_reversal"] or m.get("ob_flag")) and not m.get("flag"):
             m["flag"] = True
@@ -278,6 +310,41 @@ def main():
             final_signals.append(signal)
         elif whale.get("whale_detected"):
             whale_only.append({**whale, "title": m.get("title", "")})
+
+    # Second pass: if nothing cleared the threshold, include LOW confidence rather than returning empty
+    if not final_signals and claude_scores:
+        print("      No MED/HIGH signals — widening to LOW confidence for second pass...")
+        for m in flagged_markets:
+            ticker = m.get("ticker", "")
+            cs     = scored_by_ticker.get(ticker)
+            if not cs or cs.get("direction", "PASS") == "PASS":
+                continue
+            if cs.get("confidence") == "LOW":
+                whale  = whale_results.get(ticker, {})
+                signal = {
+                    **cs,
+                    "title":           m.get("title", cs.get("title", "")),
+                    "whale_detected":  whale.get("whale_detected", False),
+                    "whale_direction": whale.get("whale_direction"),
+                    "whale_reversal":  m.get("whale_reversal", False),
+                    "drift_flag":      m.get("drift_flag", False),
+                    "price_drift":     m.get("price_drift"),
+                    "spread_wide":     m.get("spread_wide", False),
+                    "spread_pct":      m.get("spread_pct"),
+                    "ob_flag":         m.get("ob_flag", False),
+                    "ob_imbalance":    m.get("ob_imbalance"),
+                    "ob_direction":    m.get("ob_direction"),
+                    "time_horizon":    m.get("time_horizon", "MONTHLY"),
+                    "poly":            m.get("poly"),
+                    "ext_markets":     m.get("ext_markets", []),
+                    "ext_consensus":   m.get("ext_consensus", {}),
+                    "smart_money":     m.get("smart_money", []),
+                    "run_id":          run_id,
+                    "second_pass":     True,
+                }
+                final_signals.append(signal)
+        if final_signals:
+            print(f"      Second pass found {len(final_signals)} LOW confidence signal(s)")
 
     run_meta["signals_generated"] = len(final_signals)
 
