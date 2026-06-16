@@ -91,3 +91,59 @@ The `BR_NONE` fallback fires on every market type the scanner has no heuristic f
 2. **Expand heuristic base rates** — the current list covers ~8 market types (rain, elections, IPOs, etc.). Adding sports outcomes, crypto prices, and legislative events would convert more BR_NONE flags into EDGE flags with real edge estimates.
 
 3. **Re-run sweep after flag logic change** — once BR_NONE is tightened, re-snapshot and re-sweep to confirm the flag rate drops and EDGE/DRIFT flags are the majority path.
+
+---
+
+## Goal 1d — Config-driven flag modes + comparison report
+
+**Branch:** `flag-modes-1d`
+**Snapshot:** `data/snapshots/markets_20260616_043836.json` — 2,428 markets (prod, same as 1c)
+**Full report:** `reports/flag_modes.md`
+
+### What changed
+
+`scanner.score_market` now reads `config.markets.flag_mode` (default `"passthrough"`) to control the flag condition. Three modes:
+
+| Mode | Flag trigger |
+|------|-------------|
+| `passthrough` | `raw_edge > threshold` OR `base_rate is None` OR `drift` (original behavior) |
+| `strict_anomaly_only` | `drift_flag` only (whale applies post-hoc via main.py) |
+| `strict_with_heuristic` | `drift_flag` OR `(base_rate is not None AND raw_edge > threshold)` |
+
+Each scored market now returns `flag_path` (`EDGE` / `BR_NONE` / `DRIFT` / `HEURISTIC` / `None`) and `flag_mode`.
+
+### Candidate counts at production thresholds
+
+| Mode | Survived filter | Flagged | % flagged | EDGE | BR_NONE | DRIFT | HEURISTIC |
+|------|----------------|---------|-----------|------|---------|-------|-----------|
+| `passthrough` | 21 | 21 | 100.0% | 7 | 14 | 0 | 0 |
+| `strict_anomaly_only` | 21 | 18 | 85.7% | 0 | 0 | 18 | 0 |
+| `strict_with_heuristic` | 21 | 18 | 85.7% | 0 | 0 | 18 | 0 |
+
+> **Note:** These are candidate volumes only. Signal correctness cannot be judged until markets resolve.
+
+### Key finding
+
+**Drift is far more active than Goal 1c suggested.** The threshold_sweep classifier checked `BR_NONE` before `DRIFT`, so drift markets were mis-classified as `BR_NONE` and DRIFT appeared as 0. With the corrected `flag_path` logic, 18 of 21 filtered markets have `drift_flag=True` — the order-book mid is >5% away from last traded price on 86% of candidates.
+
+On this snapshot, `strict_anomaly_only` and `strict_with_heuristic` are equivalent (HEURISTIC=0 because no heuristic-matched market survived filter without also having drift). On a snapshot with more heuristic matches (rain forecasts, political markets with large price gaps), they would diverge.
+
+### Recommendation
+
+**Use `strict_with_heuristic`.** It removes the 14 BR_NONE catch-all flags while keeping markets where a heuristic estimate meaningfully disagrees with price. The config default remains `"passthrough"` — no silent behavior change until Reed switches.
+
+### Tests
+
+17 new tests added to `tests/test_scanner.py` (98 total, all pass). Key pins:
+- BR_NONE-no-anomaly market does NOT flag under `strict_anomaly_only`
+- Drift-only market flags under all three modes
+- Heuristic edge flags as `HEURISTIC` under `strict_with_heuristic`
+- Unknown `flag_mode` raises `ValueError`
+
+### Top 3 next steps
+
+1. **Switch config to `strict_with_heuristic`** — the BR_NONE catch-all is confirmed noise. Until this is switched, every run sends 100% of filtered markets to Claude regardless of signal quality.
+
+2. **Add more heuristic base rates** — on today's snapshot HEURISTIC=0 because no heuristic-matched markets survived without drift. Adding sports outcomes, crypto price levels, and legislative events would surface the HEURISTIC path and improve the `strict_with_heuristic` advantage over `strict_anomaly_only`.
+
+3. **Log `flag_path` to the DB** — `log_signal` in logger.py should persist `flag_path` and `flag_mode` alongside each signal so resolved outcomes can be segmented by flag type (e.g., do DRIFT flags resolve correctly more often than HEURISTIC flags?).
