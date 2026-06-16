@@ -78,17 +78,21 @@ def _init_db() -> None:
         """)
         # Additive schema migration — non-destructive, safe to run repeatedly.
         for col in [
-            "contract_type    TEXT",
-            "segment          TEXT",
-            "entry_price      REAL",
-            "resolution_date  TEXT",
-            "logged_under     TEXT",
-            "source           TEXT    DEFAULT 'paper'",
-            "from_signal      INTEGER DEFAULT 0",
-            "signal_call_id   TEXT",
-            "direction_aligned INTEGER",
-            "fill_count       INTEGER",
-            "fill_fee         REAL",
+            "contract_type         TEXT",
+            "segment               TEXT",
+            "entry_price           REAL",
+            "resolution_date       TEXT",
+            "logged_under          TEXT",
+            "source                TEXT    DEFAULT 'paper'",
+            "from_signal           INTEGER DEFAULT 0",
+            "signal_call_id        TEXT",
+            "direction_aligned     INTEGER",
+            "fill_count            INTEGER",
+            "fill_fee              REAL",
+            "market_price_at_probe REAL",
+            "claude_estimate       REAL",
+            "divergence            REAL",
+            "predicted_direction   TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -466,6 +470,42 @@ def get_stats() -> dict:
     }
 
 
+def log_probe(probe: dict) -> str:
+    """
+    Insert a research probe result as source='research_probe', segment='research_probe'.
+    Probe rows are unresolved at log time — resolve_outcomes settles them later.
+    Returns the new call_id.
+    """
+    call_id = str(uuid.uuid4())[:8]
+    try:
+        with _db() as conn:
+            conn.execute("""
+                INSERT OR IGNORE INTO signals
+                (call_id, timestamp, ticker, title, market_price, direction,
+                 confidence, outcome, result, source, segment,
+                 market_price_at_probe, claude_estimate, divergence, predicted_direction)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                call_id,
+                datetime.now(timezone.utc).isoformat(),
+                probe.get("ticker", ""),
+                probe.get("title", ""),
+                probe.get("market_price_at_probe"),
+                probe.get("predicted_direction", ""),
+                probe.get("confidence", ""),
+                "", "",
+                "research_probe",
+                "research_probe",
+                probe.get("market_price_at_probe"),
+                probe.get("claude_estimate"),
+                probe.get("divergence"),
+                probe.get("predicted_direction", ""),
+            ))
+    except Exception as e:
+        print(f"  [logger] log_probe: failed for {probe.get('ticker')}: {e}")
+    return call_id
+
+
 def get_stats_real() -> dict:
     """Stats for real Kalshi fills — separate from paper signals."""
     try:
@@ -501,4 +541,75 @@ def get_stats_real() -> dict:
         "matched_signals": matched,
         "aligned":         aligned,
         "total_net_pnl":   total_pnl,
+    }
+
+
+def get_stats_probe(high_divergence_threshold: float = 0.10) -> dict:
+    """
+    Stats for research_probe rows.
+    Once probe rows resolve, reports hit rate and high-divergence hit rate.
+    At run time, all rows are unresolved — call again after settlement.
+
+    NOTE: run-one divergences are hypotheses only. Edge verdict requires
+    resolved outcomes and cannot be determined until markets settle.
+    """
+    try:
+        with _db() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='research_probe'"
+            ).fetchone()[0]
+            resolved = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='research_probe' "
+                "AND outcome != '' AND outcome IS NOT NULL"
+            ).fetchone()[0]
+            correct = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='research_probe' AND result='WIN'"
+            ).fetchone()[0]
+            # High-divergence subset: |divergence| >= threshold
+            hi_total = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='research_probe' "
+                "AND ABS(divergence) >= ?", (high_divergence_threshold,)
+            ).fetchone()[0]
+            hi_resolved = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='research_probe' "
+                "AND ABS(divergence) >= ? AND outcome != '' AND outcome IS NOT NULL",
+                (high_divergence_threshold,)
+            ).fetchone()[0]
+            hi_correct = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='research_probe' "
+                "AND ABS(divergence) >= ? AND result='WIN'",
+                (high_divergence_threshold,)
+            ).fetchone()[0]
+            avg_div = conn.execute(
+                "SELECT AVG(ABS(divergence)) FROM signals WHERE source='research_probe' "
+                "AND divergence IS NOT NULL"
+            ).fetchone()[0]
+    except Exception:
+        return {"total_probes": 0, "resolved": 0, "hit_rate": None,
+                "hi_div_total": 0, "hi_div_resolved": 0, "hi_div_hit_rate": None,
+                "avg_abs_divergence": None, "verdict": "PENDING — no resolved probes yet"}
+
+    hit_rate    = (correct / resolved * 100)    if resolved    else None
+    hi_hit_rate = (hi_correct / hi_resolved * 100) if hi_resolved else None
+
+    if resolved == 0:
+        verdict = "PENDING — no resolved probes yet. Divergences logged, awaiting settlement."
+    elif resolved < total:
+        verdict = f"PARTIAL — {resolved}/{total} probes resolved. Full verdict pending."
+    else:
+        verdict = (
+            f"COMPLETE — {hit_rate:.0f}% overall hit rate, "
+            f"{hi_hit_rate:.0f}% on high-divergence (>={high_divergence_threshold*100:.0f}%) calls."
+            if hit_rate is not None else "COMPLETE — insufficient data."
+        )
+
+    return {
+        "total_probes":      total,
+        "resolved":          resolved,
+        "hit_rate":          hit_rate,
+        "hi_div_total":      hi_total,
+        "hi_div_resolved":   hi_resolved,
+        "hi_div_hit_rate":   hi_hit_rate,
+        "avg_abs_divergence": avg_div,
+        "verdict":           verdict,
     }
