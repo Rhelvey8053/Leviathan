@@ -479,10 +479,8 @@ def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
 
     # Build recipient list: owner (from config) always included, plus active subscribers
     owner        = report_cfg.get("email_to", "")
-    active_subs  = _subs.get_active_subscribers()  # list of dicts with email + token
-    sub_emails   = {s["email"]: s["token"] for s in active_subs}
+    active_subs  = _subs.get_active_subscribers()
 
-    # Owner gets a plain footer (no unsubscribe token needed)
     recipients: list[tuple[str, str | None]] = []
     if owner:
         recipients.append((owner, None))

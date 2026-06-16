@@ -244,7 +244,7 @@ def resolve_outcomes(config: dict) -> int:
     try:
         with _db() as conn:
             rows = conn.execute(
-                "SELECT call_id, ticker, direction, edge FROM signals "
+                "SELECT call_id, ticker, direction, market_price FROM signals "
                 "WHERE outcome IS NULL OR outcome = ''"
             ).fetchall()
     except Exception:
@@ -264,10 +264,20 @@ def resolve_outcomes(config: dict) -> int:
             if result not in ("yes", "no"):
                 continue
 
-            outcome   = result.upper()
-            direction = (row["direction"] or "").upper()
-            win       = direction == outcome
-            pnl       = round(float(row["edge"] or 0) * (1 if win else -1), 4)
+            outcome      = result.upper()
+            direction    = (row["direction"] or "").upper()
+            win          = direction == outcome
+            market_price = float(row["market_price"] or 0)
+
+            # Correct binary contract payoff per $1 notional:
+            # YES bought at p: win → +(1-p), lose → -p
+            # NO  bought at (1-p): win → +p,   lose → -(1-p)
+            if direction == "YES":
+                pnl = round((1.0 - market_price) if win else -market_price, 4)
+            elif direction == "NO":
+                pnl = round(market_price if win else -(1.0 - market_price), 4)
+            else:
+                pnl = 0.0
 
             with _db() as conn:
                 conn.execute(
@@ -275,8 +285,8 @@ def resolve_outcomes(config: dict) -> int:
                     (outcome, "WIN" if win else "LOSS", pnl, row["call_id"])
                 )
             resolved_count += 1
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [logger] resolve_outcomes: failed on {ticker}: {e}")
 
     return resolved_count
 

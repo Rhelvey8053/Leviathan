@@ -108,7 +108,7 @@ def fetch_events(config: dict) -> list[dict]:
     if not api_key:
         return []
 
-    sports     = config.get("odds_api", {}).get("sports", DEFAULT_SPORTS)
+    sports     = config.get("external_markets", {}).get("odds_api_sports", DEFAULT_SPORTS)
     all_events = []
 
     for sport in sports:
