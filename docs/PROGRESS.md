@@ -147,3 +147,80 @@ On this snapshot, `strict_anomaly_only` and `strict_with_heuristic` are equivale
 2. **Add more heuristic base rates** — on today's snapshot HEURISTIC=0 because no heuristic-matched markets survived without drift. Adding sports outcomes, crypto price levels, and legislative events would surface the HEURISTIC path and improve the `strict_with_heuristic` advantage over `strict_anomaly_only`.
 
 3. **Log `flag_path` to the DB** — `log_signal` in logger.py should persist `flag_path` and `flag_mode` alongside each signal so resolved outcomes can be segmented by flag type (e.g., do DRIFT flags resolve correctly more often than HEURISTIC flags?).
+
+---
+
+## Goal 1e — Attribution fix + drift recalibration
+
+**Branch:** `drift-fix-1e`
+**Snapshot:** `data/snapshots/markets_20260616_043836.json` — same as 1c/1d
+**Full report:** `reports/flag_modes.md` (updated with all four parts)
+
+### Attribution bug (fixed)
+
+`flag_path` recorded only the first branch to fire, so results varied by mode even for the same signal. Under `passthrough`, BR_NONE was checked before DRIFT — markets with both signals were labelled BR_NONE, and DRIFT appeared as 0 in the comparison table.
+
+**Fix:** Each scored market now returns three independent boolean fields:
+- `sig_edge`: `raw_edge > threshold`
+- `sig_drift`: passes both abs AND pct drift thresholds
+- `sig_br_none`: `base_rate is None and mid_price is not None`
+
+These are computed before any mode branching and are identical across all modes. The `flag_path` field still records which branch caused the flag (mode-dependent).
+
+**Corrected signal presence (mode-independent, 21 filtered markets):**
+
+| Signal | Count | % of filtered |
+|--------|-------|---------------|
+| `sig_edge` | 7 | 33% |
+| `sig_drift` | 18 | 86% |
+| `sig_br_none` | 14 | 67% |
+| Both edge AND drift | 7 | 33% |
+
+Key finding: under `passthrough`, DRIFT=0 in the old flag_path table but `sig_drift`=18. All 7 EDGE markets also have drift. The 14 BR_NONE markets had their drift masked by the BR_NONE branch firing first.
+
+### Drift recalibration
+
+**Root cause of 86% drift-fire rate:** `compute_drift_signal` previously used only a percentage threshold (`>5%`). A 0.5-cent move at a 5-cent price = 10% drift — triggering on bid/ask rounding noise.
+
+**Fix:** `compute_drift_signal` now requires BOTH:
+- `abs_drift > drift_min_abs` (new config key, default `0.0`)
+- `pct_drift > drift_min_pct` (was hardcoded `0.05`, now from config)
+
+Config keys are at current-behavior defaults (`drift_min_abs=0.0, drift_min_pct=0.05`) — pending Reed's choice from the grid.
+
+**Drift-by-price-bucket diagnosis:**
+
+| Bucket | N | Drift% (pct>5%) | Avg abs |
+|--------|---|----------------|---------|
+| Low [0.05-0.15) | 11 | 100% | 0.027 |
+| MidLo [0.15-0.35) | 3 | 67% | 0.028 |
+| Mid [0.35-0.65) | 5 | 80% | 0.034 |
+| High [0.65-0.95] | 2 | 50% | 0.055 |
+
+**Threshold sweep (drift-fire rate as % of 21 filtered markets):**
+
+| drift_min_abs | pct>5% | pct>7% | pct>10% | pct>15% | pct>20% |
+|---------------|--------|--------|---------|---------|---------|
+| abs>0.01 | 71% | 71% | 57% | 38% | 38% |
+| abs>0.02 | 67% | 67% | 52% | 33% | 33% |
+| abs>0.03 | 52% | 52% | 38% | 24% | 24% |
+| abs>0.04 | 38% | 38% | 24% | 14% | 14% |
+| abs>0.05 | 10% | 10% | 5% | 0% | 0% |
+
+**Recommended starting point: `abs>0.03, pct>0.05`** — drops from 18 to 11 drift flags (52%), eliminating 0.5-1.5 cent noise moves. The (0.03, 0.10) cell (38%) is the next step. No mode is selective until drift is tightened — currently 86% of filtered markets pass the pct-only gate.
+
+### Tests
+
+9 new tests added to `tests/test_scanner.py` (107 total, all pass). Key pins:
+- Market with both edge AND drift: `sig_edge=True` AND `sig_drift=True` under all three modes, regardless of which sets `flag_path`
+- `sig_br_none=True` only on markets with no heuristic match
+- Tiny abs move (0.005) at low price suppressed when `drift_min_abs=0.02`
+- Both conditions required: large abs + small pct = no flag; small abs + large pct = no flag
+
+### Top 3 next steps
+
+1. **Reed sets `drift_min_abs` and `drift_min_pct`** — the sweep grid is in `reports/flag_modes.md`. Recommended start: (0.03, 0.05). This is the one change that makes the drift signal meaningful rather than noise-dominated.
+
+2. **Re-run `flag_mode_compare.py` after choosing drift thresholds** — the report regenerates automatically from config. The updated drift-fire rate will determine whether `strict_with_heuristic` is actually selective or still forwards most filtered markets.
+
+3. **Log `sig_*` fields to the DB** — now that `sig_edge`, `sig_drift`, and `sig_br_none` are always computed, logging them alongside each signal enables future analysis of which signal types predict correct outcomes (once markets resolve).
