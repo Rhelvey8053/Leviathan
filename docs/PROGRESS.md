@@ -56,3 +56,38 @@ None. All logic was already correct after Goal 1 remediation. The tests confirm 
 2. **Add `test_report.py`** — `compile_report` and `send_report` have no tests. Email sending should be mocked; test that signal cards render correctly and that `[SECOND PASS — LOW CONVICTION]` is stamped on second-pass signals.
 
 3. **Integration smoke test** — a single end-to-end test that mocks all external calls (Kalshi, Polymarket, Claude CLI) and runs `main.main()` to verify the pipeline completes without exception and logs at least one run row to the DB. This would catch wiring regressions that unit tests on individual modules can't see.
+
+---
+
+## Goal 1c — Threshold sweep over live Kalshi snapshot
+
+**Branch:** `sweep-1c`
+**Snapshot:** `data/snapshots/markets_20260616_043836.json` — 2,428 markets from 400 events (prod)
+**Grid:** 27 combinations (edge × price bounds × volume multiplier)
+**Full report:** `reports/threshold_sweep.md`
+
+### Key finding
+
+**100% flag rate across all 27 combinations.** Every market that survives `filter_markets` is immediately flagged by `score_market`. No threshold knob changes this.
+
+Flag path breakdown at production settings (edge=0.08, price=[0.05,0.95], vol×1.0):
+
+| Path | Count | Share |
+|------|-------|-------|
+| `BR_NONE` (base_rate=None fallback) | 14 | 67% |
+| `EDGE` (heuristic base rate + edge > threshold) | 7 | 33% |
+| `DRIFT` (order-book mid drift) | 0 | 0% |
+
+The `BR_NONE` fallback fires on every market type the scanner has no heuristic for — which is most of them. The filter is the only real gate.
+
+### Recommended config
+
+**Stick with production thresholds.** Moving price bounds to [0.10, 0.90] halves the candidate count (21 → 11) but still flags everything. The candidate volume (21 markets) is already workable for Claude to score. The real improvement is in the flag logic: the `BR_NONE` catch-all should be replaced with a require-signal rule (only flag if `EDGE`, `DRIFT`, or `whale` fired — not just "has a price").
+
+### Top 3 next steps
+
+1. **Fix the BR_NONE catch-all** — require at least one real anomaly signal (edge > threshold, drift > 5%, or whale detected) for a market to be flagged. This turns `score_market` from a pass-through into actual pre-filtering, reducing Claude calls and improving signal quality.
+
+2. **Expand heuristic base rates** — the current list covers ~8 market types (rain, elections, IPOs, etc.). Adding sports outcomes, crypto prices, and legislative events would convert more BR_NONE flags into EDGE flags with real edge estimates.
+
+3. **Re-run sweep after flag logic change** — once BR_NONE is tightened, re-snapshot and re-sweep to confirm the flag rate drops and EDGE/DRIFT flags are the majority path.
