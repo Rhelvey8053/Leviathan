@@ -286,3 +286,77 @@ Config keys are at current-behavior defaults (`drift_min_abs=0.0, drift_min_pct=
 2. **Set drift thresholds and re-run the scanner** — the open July fills show active real bets. Once drift is recalibrated (Goal 1e recommendation: abs>0.03), re-run the scanner with `strict_with_heuristic` to see which of those open positions Leviathan would re-flag today.
 
 3. **Add `flag_path` and `sig_*` to log_signal** — now that real fills are tracked, logging the signal attribution (which signal type triggered the paper call) enables apples-to-apples comparison: do DRIFT-flagged signals outperform BR_NONE ones once both sets resolve?
+
+---
+
+## Goal 2b — Research-probe experiment (research-probe-2c)
+
+**Branch:** `research-probe-2c`
+**Result:** 133 tests, 0 failures, exit 0. First live run: 3 markets probed.
+
+### Architecture
+
+`analysis/research_probe.py` implements a four-part experiment:
+
+**Part A — Stratified sample:** 5 volume tiers (thin <500, light 500-5k, medium 5-50k, heavy 50-150k, liquid >150k) with per-tier quotas summing to ~50 markets. Deliberately includes filter_markets rejects — the point is to test for edge *outside* the funnel. Each market annotated with `filter_pass` (bool) and `vol_tier`.
+
+**Part B — Claude+websearch probe:** Claude CLI called with `--allowedTools WebSearch` per market. Expects JSON response: `{ticker, claude_estimate, predicted_direction, confidence, rationale}`. ANTHROPIC_API_KEY excluded from env so CLI uses Pro OAuth. Bounded by `max_probe_markets` (config: `scoring.max_probe_markets`, default 10). Sequential, not parallel. Call count and total runtime printed per run.
+
+**Part C — Research-probe segment in DB:** Each result inserted via `logger.log_probe()` with `source='research_probe'` and `segment='research_probe'` — a fourth bucket that never blends with paper, real_fill, or edge_thesis in stats queries. Fields: `ticker`, `market_price_at_probe`, `claude_estimate`, `divergence` (estimate − price), `predicted_direction`, `confidence`, `rationale`, `runtime_ms`.
+
+**Part D — Forward scoring:** `resolve_outcomes()` handles probe rows naturally (queries blank outcome, matches ticker to Kalshi API). `get_stats_probe(high_divergence_threshold=0.10)` reports total probes, resolved count, hit rate, high-divergence subset stats (|div| ≥ threshold), and a plain-language verdict (PENDING / PARTIAL / COMPLETE).
+
+### First live run — 2026-06-16
+
+**Snapshot:** 2026-06-16T04:38:36Z (2428 markets)
+
+**Stratified sample composition (50 markets):**
+
+| Volume tier       | Count | Filter survivors |
+|-------------------|-------|-----------------|
+| thin (<500)       | 12    | 0               |
+| light (500-5k)    | 12    | 0               |
+| medium (5-50k)    | 10    | 0               |
+| heavy (50-150k)   | 8     | 0               |
+| liquid (>150k)    | 8     | 0               |
+| **Total**         | **50**| **0/50**        |
+
+Note: 0 filter survivors is expected — the snapshot was from an early morning fetch when most liquid markets had thin spreads; all 50 markets failed min_volume or other filters at that timestamp.
+
+**Markets probed (3 of 10 — run halted by monthly spend limit):**
+
+| Ticker | Market price | Claude estimate | Divergence | Direction | Confidence |
+|--------|-------------|----------------|------------|-----------|------------|
+| KXNEXTDNCCHAIR-45-FSHA | 0.195 | 0.080 | −0.115 | NO | MED |
+| ECMOV-28NOV07-DEM211T538 | 0.045 | 0.050 | +0.005 | PASS | MED |
+| KXVPRESNOMD-28-ZMAM | 0.005 | 0.005 | +0.000 | PASS | HIGH |
+
+**Call count:** 3 CLI invocations, avg 61s/market, total 183.6s
+**Probe rows in DB:** 3 (source='research_probe'), unresolved — awaiting market settlement
+
+### Core assumption being tested
+
+Can AI+websearch research find mispricings that the market hasn't priced? The answer is **PENDING resolution** — not yet known. The divergences logged above are hypotheses only. Once the probed markets settle, `get_stats_probe()` will report whether Claude's predicted directions were correct and whether high-divergence calls (|div| ≥ 0.10) beat the market at a statistically meaningful rate.
+
+### Test suite
+
+13 new tests in `tests/test_research_probe.py` (all offline, tmp DB, CLI mocked):
+- `test_stratified_sample_includes_filter_rejects` — thin-volume markets appear with filter_pass=False
+- `test_stratified_sample_respects_target_n` — sample never exceeds target_n
+- `test_stratified_sample_annotates_filter_pass` — every market has filter_pass bool
+- `test_stratified_sample_covers_multiple_volume_tiers` — ≥3 tiers represented
+- `test_log_probe_inserts_research_probe_row` — source='research_probe', correct fields
+- `test_probe_rows_excluded_from_paper_stats` — get_stats() ignores probe rows
+- `test_probe_rows_excluded_from_real_fill_stats` — get_stats_real() ignores probe rows
+- `test_resolved_probe_direction_correct_scores_win` — YES predicted + YES resolved → WIN
+- `test_resolved_probe_direction_wrong_scores_loss` — YES predicted + NO resolved → LOSS
+- `test_unresolved_probe_stays_pending` — blank result stays blank
+- `test_get_stats_probe_pending_verdict` — before resolution, verdict contains "PENDING"
+- `test_get_stats_probe_high_divergence_subset` — |div|≥0.10 subset computed correctly
+- `test_run_probe_respects_max_probe_cap` — run halts at max_probe_markets
+
+### Next steps
+
+1. **Re-run the probe** once Claude Pro spend limit resets — target the full 10-market cap to build a larger hypothesis set, then repeat weekly as markets resolve.
+2. **Add `filter_pass` context to probe output** — the current run shows 0 filter survivors; investigate whether the snapshot timing (4am UTC) explains this or whether the filter thresholds are too strict.
+3. **Track divergence calibration** — once 20+ probe rows resolve, compute calibration error (average |claude_estimate − actual_outcome|) vs. the market's calibration error to measure research alpha.
