@@ -55,7 +55,7 @@ python main.py
 Run once as Administrator:
 
 ```powershell
-.\schedule_setup.ps1
+.\scripts\schedule_setup.ps1
 ```
 
 Registers a Task Scheduler job that fires every day at 7:00 AM.
@@ -87,7 +87,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 | `logger.py` | SQLite persistence (signals + run history) |
 | `report.py` | Plain-text report compiler and email sender |
 | `subscribers.py` | Newsletter subscriber management |
-| `schedule_setup.ps1` | Windows Task Scheduler registration script |
+| `scripts/schedule_setup.ps1` | Windows Task Scheduler registration script |
 | `config.json` | All thresholds and settings |
 
 ## Data sources

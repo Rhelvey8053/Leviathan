@@ -1,0 +1,21 @@
+/goal AUDIT.md exists at the repo root on a branch named audit, is committed, and is printed in full in the transcript. This goal is READ-ONLY: create and commit exactly one new file (AUDIT.md) plus an optional throwaway read-only instrumentation script; modify NO existing source, place NO trades, call NO order endpoints. AUDIT.md must contain all of:
+
+(1) PIPELINE MAP: trace main.py's 8 steps, listing for each which module/functions it calls and what each reads. Note that scoring runs via the local claude CLI subprocess (scorer.py), not the Anthropic API, despite what LEVIATHAN_HANDOFF.md and config.json describe; document what that means for the no-paid-calls-in-loops rule and for cost.
+
+(2) THRESHOLD INVENTORY: every filter, threshold, and tunable across scanner.py, whales.py, accounts.py, and config.json with current value and file:line. Flag config keys that the code never reads and code constants that should be in config.
+
+(3) THE FUNNEL — highest priority: trace how a market survives each stage: events fetched -> non-KXMVE events -> markets fetched -> filter_markets survivors -> flag=True -> scored by claude -> cleared confidence_threshold -> logged. Determine the real cut points by static analysis, and if a read-only run is possible, run it and report actual counts. Note that calls.csv.migrated shows 23 signals already logged across runs on 2026-05-23 and 2026-05-29, so the pipeline DOES produce signals — the task is to find where it leaks or over-produces, not to explain zero output. Specifically assess: (a) the duplicated MVE filtering — main.py skips KXMVE event tickers while scanner.py checks a possibly-nonexistent mve_collection_ticker field; (b) whether score_market's flag logic (base_rate almost always None, so flag fires on nearly every priced market) makes the upstream filter the only real gate; (c) what the LOW-confidence second pass in main.py does to signal volume and quality.
+
+(4) PAYOFF/RESOLUTION BUG — flag explicitly: in logger.resolve_outcomes, pnl_if_traded is computed as edge * (1 if win else -1). This is NOT correct binary-contract payout (a YES bought at 0.04 that wins returns ~0.96/contract, not 0.04). Document the bug, its location, and that it will corrupt the track record and the future BG4 profitability gate if not fixed.
+
+(5) WHALE/ACCOUNTS INTEGRITY: review whales.py, accounts.py, and winning_accounts.json. Document that winning-wallet selection in _score_wallet/_is_winner ranks on avg_pct_pnl and total_cash_pnl across mostly-UNRESOLVED positions (resolved_count near zero, win_rate often null), that the cached winners are concentrated in short-cycle crypto up/down contracts, and that this selects for luck not skill. List what must change to rank on resolved outcomes and exclude coin-flip markets.
+
+(6) SIGNAL MIX: note that the actually-logged signals are all longer-dated political/event markets priced at 1-4% (tiny-probability contracts where an 8pp edge is mostly estimate noise), while the tracked wallets trade crypto coin-flips — so the two halves of the system look at different market types, neither cleanly in the intended edge-thesis sweet spot.
+
+(7) DATA LAYER: describe the SQLite schema (signals + runs) in logger.py and how resolve_outcomes works, and assess whether the schema can take contract_type and segment fields cleanly or needs a migration.
+
+(8) FRAGILITY: dead code, silent except/pass blocks that hide failures, fields read but never populated, missing error handling.
+
+(9) OPEN QUESTIONS: anything unresolvable from code alone that Reed must answer.
+
+Or stop after 18 turns.
