@@ -5,6 +5,8 @@
     "max_fetch": 1000,
     "max_events": 400,
     "edge_threshold": 0.08,
+    "drift_min_abs": 0.0,
+    "drift_min_pct": 0.05,
     "min_market_price": 0.05,
     "max_market_price": 0.95,
     "min_volume": 500,

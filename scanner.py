@@ -125,17 +125,29 @@ def compute_spread_signal(yes_bid: float, yes_ask: float, mid: float) -> dict:
     return {"spread_pct": round(spread_pct, 4), "spread_wide": spread_pct > 0.05}
 
 
-def compute_drift_signal(mid: float, market: dict) -> dict:
+def compute_drift_signal(
+    mid: float,
+    market: dict,
+    drift_min_abs: float = 0.0,
+    drift_min_pct: float = 0.05,
+) -> dict:
     """
     Drift between current order-book mid and the last traded price.
-    >5% drift = order book has moved away from fair value → mean reversion candidate.
-    Uses last_price_dollars already present in every market dict (no extra API call).
+    Requires BOTH a minimum absolute move AND a minimum percentage move to flag,
+    preventing tiny cent-level moves at very low prices from triggering on pct alone.
+    Thresholds come from config (markets.drift_min_abs / markets.drift_min_pct).
     """
     last = float(market.get("last_price_dollars") or 0)
     if not last or mid is None:
-        return {"price_drift": None, "drift_flag": False}
-    drift = (mid - last) / last
-    return {"price_drift": round(drift, 4), "drift_flag": abs(drift) > 0.05}
+        return {"price_drift": None, "price_drift_abs": None, "drift_flag": False}
+    abs_drift = abs(mid - last)
+    pct_drift = abs_drift / last
+    drift_flag = abs_drift > drift_min_abs and pct_drift > drift_min_pct
+    return {
+        "price_drift":     round((mid - last) / last, 4),
+        "price_drift_abs": round(abs_drift, 4),
+        "drift_flag":      drift_flag,
+    }
 
 
 def compute_whale_reversal(market: dict, whale: dict | None) -> bool:
@@ -254,6 +266,8 @@ def score_market(market: dict, config: dict) -> dict:
     mkt_cfg        = config.get("markets", {})
     edge_threshold = mkt_cfg.get("edge_threshold", 0.08)
     flag_mode      = mkt_cfg.get("flag_mode", "passthrough")
+    drift_min_abs  = mkt_cfg.get("drift_min_abs", 0.0)
+    drift_min_pct  = mkt_cfg.get("drift_min_pct", 0.05)
 
     yes_bid = float(market.get("yes_bid_dollars") or market.get("yes_bid") or 0)
     yes_ask = float(market.get("yes_ask_dollars") or market.get("yes_ask") or 0)
@@ -268,10 +282,12 @@ def score_market(market: dict, config: dict) -> dict:
         raw_edge = None
 
     spread = compute_spread_signal(yes_bid, yes_ask, mid_price or 0)
-    drift  = compute_drift_signal(mid_price or 0, market)
+    drift  = compute_drift_signal(mid_price or 0, market, drift_min_abs, drift_min_pct)
 
-    has_edge  = raw_edge is not None and raw_edge > edge_threshold
-    has_drift = drift["drift_flag"]
+    # All signals computed independently of flag_mode — truthful regardless of branch order.
+    has_edge    = raw_edge is not None and raw_edge > edge_threshold
+    has_drift   = drift["drift_flag"]
+    has_br_none = base_rate is None and mid_price is not None
 
     flag      = False
     flag_path = None   # "EDGE" | "BR_NONE" | "DRIFT" | "HEURISTIC" | None
@@ -308,6 +324,10 @@ def score_market(market: dict, config: dict) -> dict:
         "flag":          flag,
         "flag_path":     flag_path,
         "flag_mode":     flag_mode,
+        # Per-signal presence — always set, independent of mode and branch order.
+        "sig_edge":      has_edge,
+        "sig_drift":     has_drift,
+        "sig_br_none":   has_br_none,
         "time_horizon":  market.get("time_horizon", "MONTHLY"),
         **spread,
         **drift,
