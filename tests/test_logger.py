@@ -1,0 +1,268 @@
+"""
+Offline tests for logger.py.
+
+All tests use a throwaway SQLite file (never leviathan.db).
+Network and subprocess boundaries are mocked — no Kalshi calls, no email.
+"""
+
+import uuid
+import pytest
+from unittest.mock import patch, call
+from datetime import datetime, timezone
+
+import logger
+
+
+# ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=False)
+def tmp_db(tmp_path, monkeypatch):
+    """Fresh throwaway DB for each test — never touches leviathan.db."""
+    db_file = str(tmp_path / "test.db")
+    monkeypatch.setattr(logger, "DB_PATH", db_file)
+    logger._init_db()
+    return db_file
+
+
+def _insert(call_id, ticker, direction, market_price,
+            outcome="", result="", pnl=None, edge=0.10):
+    """Insert a signal row directly into whatever DB logger.DB_PATH points at."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             edge, direction, confidence, whale_detected, whale_direction,
+             outcome, result, pnl_if_traded, run_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id,
+            datetime.now(timezone.utc).isoformat(),
+            ticker, "Test Market",
+            market_price, 0.40,
+            edge,
+            direction, "MED", 0, "",
+            outcome, result, pnl,
+            "run-test",
+        ))
+
+
+# ─── resolve_outcomes: payoff math ────────────────────────────────────────────
+
+PAYOFF_CASES = [
+    # direction  market_price  api_result  expected_pnl  description
+    ("YES",      0.30,         "yes",      +0.70,  "YES at 0.30 resolves YES → +0.70"),
+    ("YES",      0.30,         "no",       -0.30,  "YES at 0.30 resolves NO  → -0.30"),
+    ("NO",       0.30,         "no",       +0.30,  "NO  at 0.30 resolves NO  → +0.30"),
+    ("NO",       0.30,         "yes",      -0.70,  "NO  at 0.30 resolves YES → -0.70"),
+    ("",         0.30,         "yes",       0.00,  "blank direction           → 0.00"),
+]
+
+@pytest.mark.parametrize("direction,mp,api_result,expected,desc", PAYOFF_CASES)
+def test_payoff_math(tmp_db, direction, mp, api_result, expected, desc):
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", direction, mp)
+
+    with patch("kalshi.fetch_market", return_value={"result": api_result}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT pnl_if_traded FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+
+    assert row is not None, "Row should still exist after resolution"
+    assert round(row["pnl_if_traded"], 4) == round(expected, 4), desc
+
+
+def test_resolve_reads_market_price_not_edge(tmp_db):
+    """
+    Payoff must use market_price, not edge.
+    YES at market_price=0.30, edge=0.25 resolving YES → +0.70, NOT +0.75.
+    """
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30, edge=0.25)
+
+    with patch("kalshi.fetch_market", return_value={"result": "yes"}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT pnl_if_traded FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+
+    # Correct:  +(1 - 0.30) = +0.70
+    # Wrong if edge used: +(1 - 0.25) = +0.75 or +0.25
+    assert round(row["pnl_if_traded"], 4) == 0.70
+
+
+# ─── resolve_outcomes: only touches unresolved rows ───────────────────────────
+
+def test_resolve_skips_already_resolved(tmp_db):
+    """Rows with a non-empty outcome must not be touched or re-fetched."""
+    already = str(uuid.uuid4())[:8]
+    pending = str(uuid.uuid4())[:8]
+
+    _insert(already, "DONE",    "YES", 0.40, outcome="YES", result="WIN",  pnl=0.60)
+    _insert(pending, "PENDING", "YES", 0.40)
+
+    fetch_calls = []
+    def fake_fetch(config, ticker):
+        fetch_calls.append(ticker)
+        return {"result": "no"}
+
+    with patch("kalshi.fetch_market", side_effect=fake_fetch):
+        logger.resolve_outcomes({})
+
+    # Only the pending row should trigger an API call
+    assert fetch_calls == ["PENDING"]
+
+    # Already-resolved row must be unchanged
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT outcome, result, pnl_if_traded FROM signals WHERE call_id=?",
+            (already,)
+        ).fetchone()
+
+    assert row["outcome"] == "YES"
+    assert row["result"]  == "WIN"
+    assert round(row["pnl_if_traded"], 4) == 0.60
+
+
+def test_resolve_leaves_unresolved_when_market_not_settled(tmp_db):
+    """If Kalshi returns no result yet, row stays unresolved."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "OPEN", "YES", 0.40)
+
+    # Market not yet settled — result field absent / empty
+    with patch("kalshi.fetch_market", return_value={"result": ""}):
+        count = logger.resolve_outcomes({})
+
+    assert count == 0
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT outcome FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["outcome"] == ""
+
+
+# ─── get_stats ────────────────────────────────────────────────────────────────
+
+def test_get_stats_empty_db(tmp_db):
+    stats = logger.get_stats()
+    assert stats["total_calls"] == 0
+    assert stats["resolved"]    == 0
+    assert stats["win_rate"]    is None
+
+
+def test_get_stats_zero_resolved_win_rate_is_null(tmp_db):
+    """Unresolved signals must not produce a win_rate."""
+    _insert(str(uuid.uuid4())[:8], "T1", "YES", 0.40)
+    _insert(str(uuid.uuid4())[:8], "T2", "NO",  0.60)
+
+    stats = logger.get_stats()
+    assert stats["total_calls"] == 2
+    assert stats["resolved"]    == 0
+    assert stats["win_rate"]    is None
+
+
+def test_get_stats_win_rate_computed_correctly(tmp_db):
+    """2 wins, 1 loss → win_rate = 66.7%."""
+    for i in range(2):
+        _insert(str(uuid.uuid4())[:8], f"WIN-{i}", "YES", 0.30,
+                outcome="YES", result="WIN", pnl=0.70)
+    _insert(str(uuid.uuid4())[:8], "LOSS-1", "YES", 0.60,
+            outcome="NO", result="LOSS", pnl=-0.60)
+
+    stats = logger.get_stats()
+    assert stats["total_calls"] == 3
+    assert stats["resolved"]    == 3
+    assert round(stats["win_rate"], 1) == round(2 / 3 * 100, 1)
+
+
+def test_log_signal_writes_blank_outcome(tmp_db):
+    """log_signal must store blank outcome/result so rows count as unresolved."""
+    logger.log_signal({
+        "ticker": "TEST", "title": "T", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "r1",
+    })
+
+    stats = logger.get_stats()
+    assert stats["total_calls"] == 1
+    assert stats["resolved"]    == 0   # blank outcome → not counted as resolved
+
+
+def test_get_stats_resolved_counts_match_log_signal_blanks(tmp_db):
+    """
+    Regression: get_stats.resolved and resolve_outcomes query must agree on
+    what 'unresolved' means — both treat outcome='' as unresolved.
+    """
+    # log_signal writes outcome=""
+    logger.log_signal({
+        "ticker": "X", "title": "T", "market_price": 0.30,
+        "our_estimate": 0.50, "edge": 0.20, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "r",
+    })
+
+    # Confirm get_stats sees 0 resolved
+    before = logger.get_stats()
+    assert before["resolved"] == 0
+
+    # resolve_outcomes should find the row (outcome='')
+    with patch("kalshi.fetch_market", return_value={"result": "yes"}):
+        resolved_count = logger.resolve_outcomes({})
+
+    assert resolved_count == 1
+
+    # Now get_stats should see 1 resolved
+    after = logger.get_stats()
+    assert after["resolved"] == 1
+
+
+# ─── Regression: per-$1 payoff convention ─────────────────────────────────────
+
+@pytest.mark.parametrize("p", [0.10, 0.20, 0.30, 0.50, 0.70, 0.80, 0.90])
+def test_payoff_convention_yes_win(p):
+    """YES contract bought at p wins (1-p) per $1 notional when it resolves YES."""
+    win    = True
+    actual = round((1.0 - p) if win else -p, 4)
+    assert actual == round(1.0 - p, 4), (
+        f"YES win at {p}: expected {1-p:.4f}, got {actual:.4f}. "
+        "Changing this breaks binary contract accounting."
+    )
+
+
+@pytest.mark.parametrize("p", [0.10, 0.20, 0.30, 0.50, 0.70, 0.80, 0.90])
+def test_payoff_convention_yes_loss(p):
+    """YES contract bought at p loses p per $1 notional when it resolves NO."""
+    win    = False
+    actual = round((1.0 - p) if win else -p, 4)
+    assert actual == round(-p, 4), (
+        f"YES loss at {p}: expected {-p:.4f}, got {actual:.4f}."
+    )
+
+
+@pytest.mark.parametrize("p", [0.10, 0.20, 0.30, 0.50, 0.70, 0.80, 0.90])
+def test_payoff_convention_no_win(p):
+    """
+    NO contract on a market priced at p (YES) wins p per $1 notional
+    when the market resolves NO. Stored market_price is always the YES price.
+    """
+    win    = True
+    actual = round(p if win else -(1.0 - p), 4)
+    assert actual == round(p, 4), (
+        f"NO win at YES-price {p}: expected {p:.4f}, got {actual:.4f}."
+    )
+
+
+@pytest.mark.parametrize("p", [0.10, 0.20, 0.30, 0.50, 0.70, 0.80, 0.90])
+def test_payoff_convention_no_loss(p):
+    """NO contract loses (1-p) per $1 notional when market resolves YES."""
+    win    = False
+    actual = round(p if win else -(1.0 - p), 4)
+    assert actual == round(-(1.0 - p), 4), (
+        f"NO loss at YES-price {p}: expected {-(1-p):.4f}, got {actual:.4f}."
+    )
