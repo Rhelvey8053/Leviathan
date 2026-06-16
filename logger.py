@@ -34,6 +34,14 @@ def _db():
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
+def _add_col(conn, col_def: str) -> None:
+    """Add a column to signals if it doesn't already exist (idempotent)."""
+    col_name = col_def.split()[0]
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    if col_name not in existing:
+        conn.execute(f"ALTER TABLE signals ADD COLUMN {col_def}")
+
+
 def _init_db() -> None:
     with _db() as conn:
         conn.executescript("""
@@ -68,6 +76,23 @@ def _init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_signals_ts     ON signals(timestamp);
             CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
         """)
+        # Additive schema migration — non-destructive, safe to run repeatedly.
+        for col in [
+            "contract_type    TEXT",
+            "segment          TEXT",
+            "entry_price      REAL",
+            "resolution_date  TEXT",
+            "logged_under     TEXT",
+            "source           TEXT    DEFAULT 'paper'",
+            "from_signal      INTEGER DEFAULT 0",
+            "signal_call_id   TEXT",
+            "direction_aligned INTEGER",
+            "fill_count       INTEGER",
+            "fill_fee         REAL",
+        ]:
+            _add_col(conn, col)
+        # Tag all pre-existing rows (source IS NULL) as paper signals.
+        conn.execute("UPDATE signals SET source='paper' WHERE source IS NULL")
     _migrate_csv()
 
 
@@ -160,8 +185,8 @@ def log_signal(signal: dict) -> None:
                 INSERT OR IGNORE INTO signals
                 (call_id,timestamp,ticker,title,market_price,our_estimate,
                  edge,direction,confidence,whale_detected,whale_direction,
-                 outcome,result,pnl_if_traded,run_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 outcome,result,pnl_if_traded,run_id,source)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -177,6 +202,7 @@ def log_signal(signal: dict) -> None:
                 "", "",  # outcome, result — filled by resolve_outcomes
                 None,    # pnl_if_traded
                 signal.get("run_id", ""),
+                "paper",
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -203,6 +229,97 @@ def log_run(run_data: dict) -> None:
             ))
     except Exception as e:
         print(f"  [logger] Failed to log run: {e}")
+
+
+# ── Real fills ───────────────────────────────────────────────────────────────
+
+def pull_real_fills(config: dict) -> dict:
+    """
+    Fetch all real Kalshi fills and insert them as source='real_fill' rows.
+    Matches each fill against prior paper signals by ticker; sets from_signal,
+    signal_call_id, and direction_aligned accordingly.
+    Returns a summary dict: pulled, matched, aligned, contradictory.
+    """
+    import kalshi as _kalshi
+
+    fills = _kalshi.fetch_fills(config)
+    if not fills:
+        return {"pulled": 0, "matched": 0, "aligned": 0, "contradictory": 0}
+
+    try:
+        with _db() as conn:
+            sig_rows = conn.execute(
+                "SELECT call_id, ticker, direction FROM signals "
+                "WHERE source='paper' OR source IS NULL "
+                "ORDER BY timestamp ASC"
+            ).fetchall()
+    except Exception:
+        sig_rows = []
+
+    # Most-recent paper signal per ticker (last in ASC order wins)
+    ticker_signals: dict = {}
+    for row in sig_rows:
+        if row["ticker"]:
+            ticker_signals[row["ticker"]] = dict(row)
+
+    pulled = len(fills)
+    matched = aligned = contradictory = 0
+
+    for fill in fills:
+        ticker      = fill.get("ticker", "")
+        side        = (fill.get("side") or "").upper()   # "YES" / "NO"
+        action      = (fill.get("action") or "").upper() # "BUY" / "SELL"
+        fill_price  = _to_float(fill.get("yes_price_dollars") or fill.get("no_price_dollars"))
+        fee         = _to_float(fill.get("fee_cost", 0)) or 0.0
+        count       = _to_int(fill.get("count")) or 1
+        created     = fill.get("created_time", "")
+
+        sig = ticker_signals.get(ticker)
+        from_sig     = 0
+        sig_call_id  = None
+        dir_aligned  = None
+
+        if sig:
+            from_sig    = 1
+            sig_call_id = sig["call_id"]
+            sig_dir     = (sig["direction"] or "").upper()
+            if sig_dir and side:
+                dir_aligned = 1 if sig_dir == side else 0
+            matched += 1
+            if dir_aligned == 1:
+                aligned += 1
+            elif dir_aligned == 0:
+                contradictory += 1
+
+        try:
+            with _db() as conn:
+                conn.execute("""
+                    INSERT OR IGNORE INTO signals
+                    (call_id, timestamp, ticker, title, market_price, our_estimate,
+                     edge, direction, confidence, whale_detected, whale_direction,
+                     outcome, result, pnl_if_traded, run_id,
+                     source, from_signal, signal_call_id, direction_aligned,
+                     entry_price, fill_count, fill_fee)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    str(uuid.uuid4())[:8],
+                    created, ticker, ticker,
+                    fill_price, None, None,
+                    side, action,
+                    0, None,
+                    "", "", None, "",
+                    "real_fill", from_sig, sig_call_id, dir_aligned,
+                    fill_price, count, fee,
+                ))
+        except Exception as e:
+            print(f"  [logger] pull_real_fills: failed on {ticker}: {e}")
+
+    return {
+        "pulled":        pulled,
+        "matched":       matched,
+        "aligned":       aligned,
+        "contradictory": contradictory,
+    }
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
@@ -245,8 +362,9 @@ def resolve_outcomes(config: dict) -> int:
     try:
         with _db() as conn:
             rows = conn.execute(
-                "SELECT call_id, ticker, direction, market_price FROM signals "
-                "WHERE outcome IS NULL OR outcome = ''"
+                "SELECT call_id, ticker, direction, market_price, "
+                "entry_price, fill_count, fill_fee, source "
+                "FROM signals WHERE outcome IS NULL OR outcome = ''"
             ).fetchall()
     except Exception:
         return 0
@@ -267,18 +385,27 @@ def resolve_outcomes(config: dict) -> int:
             if result not in ("yes", "no"):
                 continue
 
-            outcome      = result.upper()
-            direction    = (row["direction"] or "").upper()
-            win          = direction == outcome
-            market_price = float(row["market_price"] or 0)
+            outcome   = result.upper()
+            direction = (row["direction"] or "").upper()
+            win       = direction == outcome
 
-            # Correct binary contract payoff per $1 notional:
-            # YES bought at p: win → +(1-p), lose → -p
-            # NO  bought at (1-p): win → +p,   lose → -(1-p)
+            source = row["source"] or "paper"
+            if source == "real_fill":
+                # Use actual fill price; subtract fee per contract.
+                price       = float(row["entry_price"] or row["market_price"] or 0)
+                fill_count  = float(row["fill_count"] or 1)
+                fee_per_unit = float(row["fill_fee"] or 0) / fill_count
+            else:
+                price        = float(row["market_price"] or 0)
+                fee_per_unit = 0.0
+
+            # Binary contract payoff per $1 notional net of fees:
+            # YES bought at p: win → +(1-p) - fee, lose → -p - fee
+            # NO  bought at p: win → +p     - fee, lose → -(1-p) - fee
             if direction == "YES":
-                pnl = round((1.0 - market_price) if win else -market_price, 4)
+                pnl = round(((1.0 - price) if win else -price) - fee_per_unit, 4)
             elif direction == "NO":
-                pnl = round(market_price if win else -(1.0 - market_price), 4)
+                pnl = round((price if win else -(1.0 - price)) - fee_per_unit, 4)
             else:
                 pnl = 0.0
 
@@ -296,27 +423,32 @@ def resolve_outcomes(config: dict) -> int:
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
+# Paper signals are source='paper' or NULL (pre-migration rows).
+_PAPER = "source = 'paper' OR source IS NULL"
+
+
 def get_stats() -> dict:
+    """Stats for paper (simulated) signals only — never blends with real fills."""
     try:
         with _db() as conn:
-            total     = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+            total     = conn.execute(f"SELECT COUNT(*) FROM signals WHERE {_PAPER}").fetchone()[0]
             resolved  = conn.execute(
-                "SELECT COUNT(*) FROM signals WHERE outcome != '' AND outcome IS NOT NULL"
+                f"SELECT COUNT(*) FROM signals WHERE ({_PAPER}) AND outcome != '' AND outcome IS NOT NULL"
             ).fetchone()[0]
             wins      = conn.execute(
-                "SELECT COUNT(*) FROM signals WHERE result = 'WIN'"
+                f"SELECT COUNT(*) FROM signals WHERE ({_PAPER}) AND result = 'WIN'"
             ).fetchone()[0]
             avg_edge  = conn.execute(
-                "SELECT AVG(edge) FROM signals WHERE edge IS NOT NULL"
+                f"SELECT AVG(edge) FROM signals WHERE ({_PAPER}) AND edge IS NOT NULL"
             ).fetchone()[0]
             total_pnl = conn.execute(
-                "SELECT SUM(pnl_if_traded) FROM signals WHERE pnl_if_traded IS NOT NULL"
+                f"SELECT SUM(pnl_if_traded) FROM signals WHERE ({_PAPER}) AND pnl_if_traded IS NOT NULL"
             ).fetchone()[0]
             best  = conn.execute(
-                "SELECT * FROM signals WHERE edge IS NOT NULL ORDER BY edge DESC LIMIT 1"
+                f"SELECT * FROM signals WHERE ({_PAPER}) AND edge IS NOT NULL ORDER BY edge DESC LIMIT 1"
             ).fetchone()
             worst = conn.execute(
-                "SELECT * FROM signals WHERE edge IS NOT NULL ORDER BY edge ASC LIMIT 1"
+                f"SELECT * FROM signals WHERE ({_PAPER}) AND edge IS NOT NULL ORDER BY edge ASC LIMIT 1"
             ).fetchone()
     except Exception:
         return {"total_calls": 0, "resolved": 0, "win_rate": None,
@@ -331,4 +463,42 @@ def get_stats() -> dict:
         "total_hypothetical_pnl": total_pnl,
         "best_call":              dict(best)  if best  else None,
         "worst_call":             dict(worst) if worst else None,
+    }
+
+
+def get_stats_real() -> dict:
+    """Stats for real Kalshi fills — separate from paper signals."""
+    try:
+        with _db() as conn:
+            total    = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='real_fill'"
+            ).fetchone()[0]
+            resolved = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='real_fill' "
+                "AND outcome != '' AND outcome IS NOT NULL"
+            ).fetchone()[0]
+            wins     = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='real_fill' AND result='WIN'"
+            ).fetchone()[0]
+            matched  = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='real_fill' AND from_signal=1"
+            ).fetchone()[0]
+            aligned  = conn.execute(
+                "SELECT COUNT(*) FROM signals WHERE source='real_fill' AND direction_aligned=1"
+            ).fetchone()[0]
+            total_pnl = conn.execute(
+                "SELECT SUM(pnl_if_traded) FROM signals WHERE source='real_fill' "
+                "AND pnl_if_traded IS NOT NULL"
+            ).fetchone()[0]
+    except Exception:
+        return {"total_fills": 0, "resolved": 0, "win_rate": None,
+                "matched_signals": 0, "aligned": 0, "total_net_pnl": None}
+
+    return {
+        "total_fills":     total,
+        "resolved":        resolved,
+        "win_rate":        (wins / resolved * 100) if resolved else None,
+        "matched_signals": matched,
+        "aligned":         aligned,
+        "total_net_pnl":   total_pnl,
     }
