@@ -4,6 +4,7 @@ runs.csv
 *.migrated
 winning_accounts.json
 leviathan.db
+leviathan.db.bak*
 subscribers.json
 odds_cache.json
 __pycache__/
