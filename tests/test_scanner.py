@@ -406,3 +406,106 @@ def test_flag_path_always_returned():
         r = scanner.score_market(_market(), _cfg(mode))
         assert "flag_path" in r
         assert "flag_mode" in r
+
+
+# ── Signal attribution — sig_* fields ────────────────────────────────────────
+#
+# sig_edge / sig_drift / sig_br_none must reflect whether the signal FIRED,
+# independent of which mode is active and independent of branch evaluation order.
+# A market where both edge and drift are present must report both sig_edge=True
+# AND sig_drift=True under every mode, even when only one drives flag_path.
+
+def _edge_and_drift():
+    """
+    base_rate=0.40 (rain), mid=0.22 → edge=0.18>0.08.
+    last_price=0.30 → abs_drift=0.08, pct=27% > 5% → drift fires too.
+    Both signals are present simultaneously.
+    """
+    m = _market(mid=0.22, title="Will it rain tomorrow")
+    m["last_price_dollars"] = 0.30
+    return m
+
+
+def test_attribution_both_signals_reported_under_passthrough():
+    """passthrough takes EDGE path but sig_drift must still be True."""
+    r = scanner.score_market(_edge_and_drift(), _cfg("passthrough"))
+    assert r["sig_edge"]  is True
+    assert r["sig_drift"] is True
+    assert r["flag_path"] == "EDGE"   # branch order determines flag_path
+
+
+def test_attribution_both_signals_reported_under_strict_anomaly():
+    """strict_anomaly_only takes DRIFT path but sig_edge must still be True."""
+    r = scanner.score_market(_edge_and_drift(), _cfg("strict_anomaly_only"))
+    assert r["sig_edge"]  is True
+    assert r["sig_drift"] is True
+    assert r["flag_path"] == "DRIFT"
+
+
+def test_attribution_both_signals_reported_under_strict_heuristic():
+    """strict_with_heuristic takes DRIFT path but sig_edge must still be True."""
+    r = scanner.score_market(_edge_and_drift(), _cfg("strict_with_heuristic"))
+    assert r["sig_edge"]  is True
+    assert r["sig_drift"] is True
+    assert r["flag_path"] == "DRIFT"
+
+
+def test_attribution_br_none_market_sets_sig_br_none():
+    """Market with no heuristic and no drift must have sig_br_none=True, others False."""
+    r = scanner.score_market(_br_none_no_anomaly(), _cfg("passthrough"))
+    assert r["sig_br_none"] is True
+    assert r["sig_edge"]    is False
+    assert r["sig_drift"]   is False
+
+
+def test_attribution_fields_always_present():
+    """sig_* keys must appear in every scored market regardless of mode."""
+    for mode in ("passthrough", "strict_anomaly_only", "strict_with_heuristic"):
+        r = scanner.score_market(_market(), _cfg(mode))
+        assert "sig_edge"    in r
+        assert "sig_drift"   in r
+        assert "sig_br_none" in r
+
+
+# ── Dual-threshold drift (abs + pct) ─────────────────────────────────────────
+
+def _drift_abs_cfg(drift_min_abs: float, drift_min_pct: float) -> dict:
+    c = _cfg("passthrough")
+    c["markets"]["drift_min_abs"] = drift_min_abs
+    c["markets"]["drift_min_pct"] = drift_min_pct
+    return c
+
+
+def test_drift_tiny_abs_suppressed_by_abs_threshold():
+    """0.5¢ absolute move at 5.5¢ price: pct=9% passes but abs=0.005 < 0.02 → no drift."""
+    m = _market(mid=0.055, title="Some event")
+    m["last_price_dollars"] = 0.060  # abs=0.005, pct≈8.3%
+    r = scanner.score_market(m, _drift_abs_cfg(drift_min_abs=0.02, drift_min_pct=0.05))
+    assert r["drift_flag"] is False
+    assert r["sig_drift"]  is False
+
+
+def test_drift_requires_both_conditions():
+    """Large abs but pct below threshold → no drift flag."""
+    m = _market(mid=0.53, title="Some event")
+    m["last_price_dollars"] = 0.50  # abs=0.03>0.02, pct=6%<10%
+    r = scanner.score_market(m, _drift_abs_cfg(drift_min_abs=0.02, drift_min_pct=0.10))
+    assert r["drift_flag"] is False
+
+
+def test_drift_fires_when_both_thresholds_met():
+    """abs=0.05 > 0.02 AND pct=12.5% > 0.05 → drift fires."""
+    m = _market(mid=0.45, title="Some event")
+    m["last_price_dollars"] = 0.40  # abs=0.05, pct=12.5%
+    r = scanner.score_market(m, _drift_abs_cfg(drift_min_abs=0.02, drift_min_pct=0.05))
+    assert r["drift_flag"] is True
+    assert r["sig_drift"]  is True
+
+
+def test_drift_price_drift_abs_always_returned():
+    """price_drift_abs must be present in every scored market with a last price."""
+    m = _market(mid=0.40, title="Will it rain tomorrow")
+    m["last_price_dollars"] = 0.30
+    r = scanner.score_market(m, BASE_CFG)
+    assert "price_drift_abs" in r
+    assert r["price_drift_abs"] == pytest.approx(0.10)
