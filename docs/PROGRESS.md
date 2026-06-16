@@ -224,3 +224,65 @@ Config keys are at current-behavior defaults (`drift_min_abs=0.0, drift_min_pct=
 2. **Re-run `flag_mode_compare.py` after choosing drift thresholds** — the report regenerates automatically from config. The updated drift-fire rate will determine whether `strict_with_heuristic` is actually selective or still forwards most filtered markets.
 
 3. **Log `sig_*` fields to the DB** — now that `sig_edge`, `sig_drift`, and `sig_br_none` are always computed, logging them alongside each signal enables future analysis of which signal types predict correct outcomes (once markets resolve).
+
+---
+
+## Goal 2a — Real Kalshi fills pulled into ledger
+
+**Branch:** `real-fills-2b`
+**DB backup:** `leviathan.db.bak_2b` (taken before any schema changes)
+
+### What changed
+
+**kalshi.py:** `fetch_fills()` (GET /portfolio/fills, cursor-paginated) and `fetch_positions()` (GET /portfolio/positions) added. Both are GET-only, mirror the existing RSA auth pattern exactly, and warn on empty response without crashing.
+
+**logger.py schema:** 11 new columns added via idempotent, PRAGMA-checked `ALTER TABLE` (never drops or truncates). Existing 24 signals tagged `source='paper'`. New columns: `source`, `from_signal`, `signal_call_id`, `direction_aligned`, `entry_price`, `fill_count`, `fill_fee`, `contract_type`, `segment`, `resolution_date`, `logged_under`.
+
+`pull_real_fills()`: fetches all fills, inserts as `source='real_fill'`, matches each fill's ticker against prior paper signals, sets `from_signal`, `signal_call_id`, and `direction_aligned`.
+
+`resolve_outcomes()`: extended to handle real fills — uses `entry_price` (actual trade price) instead of `market_price`; subtracts `fill_fee / fill_count` per unit from P&L.
+
+`get_stats()`: now filters to `source='paper'` only. New `get_stats_real()` for real fill stats. Paper and real fill rows never blend in any stats query.
+
+### Fills pulled (live run 2026-06-16)
+
+| Metric | Value |
+|--------|-------|
+| Total fills pulled | 15 |
+| Matched a prior Leviathan signal | 5 |
+| Direction-aligned with signal | 4 |
+| Direction-contradictory | 1 |
+| Already resolved | 1 |
+| Open (pending July settlement) | 14 |
+
+**The 1 resolved fill:** KXAAAGASD-26APR13-4.125, direction=YES, resolved NO → LOSS, net P&L = -$0.73 (including fee). This is the only bet with a settled outcome so far.
+
+**The 14 open fills** are mostly July 2026 expiry markets (KXUSAEXPANDTERRITORY-26JUL01, KXTAIWANLVL4-26JUL01, KXIMPEACHCABINET-26JUL01 ×3, KXMEDIARELEASEPRISONBREAK-27JUL01 ×3, KXTVSEASONRELEASETHELASTOFUS-27JUL, KXIMPEACHCABINET-27JAN01 ×2, KXAILEGISLATION-27JAN01 ×2). They will auto-resolve when `resolve_outcomes` is called after market settlement.
+
+**Signal-matched fills:**
+- KXUSAEXPANDTERRITORY: NO fill, signal NO → aligned
+- KXTAIWANLVL4: NO fill, signal NO → aligned
+- KXIMPEACHCABINET-26JUL01: 2 YES fills (aligned) + 1 NO fill (contradictory — covers both sides)
+
+> **Note:** The real-bet sample (15 fills, 5 signal-matched) is far too small for statistical inference. It provides directional evidence that trades are being tracked correctly, not proof of model quality. Signal correctness requires resolved outcomes across many bets.
+
+> **Note on fee units:** Kalshi's `fee_cost` in the fills API response appears to be total dollar cost per fill event (not per contract). If `fill_count=1` understates actual contract count, fee-per-unit in resolved P&L may be overstated. Recommend verifying fee amounts against Kalshi's fee schedule before drawing P&L conclusions.
+
+### Tests
+
+13 new tests added to `tests/test_logger.py` (120 total, all pass). Key pins:
+- Schema migration idempotent (safe to run twice)
+- Existing rows survive migration and get tagged `source='paper'`
+- Fill matching known ticker → `from_signal=1`, correct `direction_aligned`
+- Fill on unknown ticker → `from_signal=0`, `signal_call_id=NULL`
+- Real-fill P&L net of fees with correct binary payoff (YES win/loss)
+- Unresolved real fill stays unresolved without error
+- `get_stats()` excludes real fills; `get_stats_real()` excludes paper signals
+
+### Top 3 next steps
+
+1. **Verify fee_cost units with Kalshi** — the resolved trade shows a large fee relative to contract price. Confirm whether `fee_cost` is total dollars for the fill or per-contract, and whether `count=1` reflects actual contract count. This affects real P&L accuracy.
+
+2. **Set drift thresholds and re-run the scanner** — the open July fills show active real bets. Once drift is recalibrated (Goal 1e recommendation: abs>0.03), re-run the scanner with `strict_with_heuristic` to see which of those open positions Leviathan would re-flag today.
+
+3. **Add `flag_path` and `sig_*` to log_signal** — now that real fills are tracked, logging the signal attribution (which signal type triggered the paper call) enables apples-to-apples comparison: do DRIFT-flagged signals outperform BR_NONE ones once both sets resolve?
