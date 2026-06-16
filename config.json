@@ -33,7 +33,6 @@
 
   "scoring": {
     "scorer_model": "claude-sonnet-4-6",
-    "support_model": "claude-haiku-4-5-20251001",
     "max_markets_per_run": 10,
     "confidence_threshold": "MED"
   },
