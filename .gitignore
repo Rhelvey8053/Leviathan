@@ -1,6 +1,10 @@
 .env
 calls.csv
 runs.csv
+*.migrated
 winning_accounts.json
+leviathan.db
+subscribers.json
+odds_cache.json
 __pycache__/
 *.pyc
