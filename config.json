@@ -37,7 +37,8 @@
     "scorer_model": "claude-sonnet-4-6",
     "max_markets_per_run": 10,
     "confidence_threshold": "MED",
-    "max_probe_markets": 10
+    "max_probe_markets": 10,
+    "max_probe_days_to_close": 365
   },
 
   "accounts": {
