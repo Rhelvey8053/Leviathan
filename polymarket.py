@@ -36,7 +36,8 @@ def fetch_markets(limit: int = 500) -> list[dict]:
             )
             resp.raise_for_status()
             page = resp.json()
-        except Exception:
+        except Exception as e:
+            print(f"  [poly] fetch_markets failed at offset {offset}: {e}")
             break
 
         if not page:

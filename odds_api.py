@@ -127,8 +127,8 @@ def fetch_events(config: dict) -> list[dict]:
                 continue  # sport has no current events
             resp.raise_for_status()
             all_events.extend(resp.json())
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [odds] Failed to fetch {sport}: {e}")
 
     _save_cache(all_events)
     return all_events

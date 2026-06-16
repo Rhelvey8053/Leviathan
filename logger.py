@@ -240,6 +240,7 @@ def resolve_outcomes(config: dict) -> int:
     Returns count of newly resolved calls.
     """
     import kalshi as _kalshi
+    import time as _time
 
     try:
         with _db() as conn:
@@ -254,7 +255,9 @@ def resolve_outcomes(config: dict) -> int:
         return 0
 
     resolved_count = 0
-    for row in rows:
+    for i, row in enumerate(rows):
+        if i > 0:
+            _time.sleep(0.25)  # 4 req/s — stay well under Kalshi rate limits
         ticker = row["ticker"]
         if not ticker:
             continue

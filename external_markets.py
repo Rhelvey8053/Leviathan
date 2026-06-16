@@ -58,8 +58,8 @@ def _search_manifold(titles: list[str], results_per_query: int = 8) -> list[dict
                 if mid and mid not in seen_ids and m.get("probability") is not None:
                     seen_ids.add(mid)
                     results.append(m)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [ext] Manifold query failed for '{term[:30]}': {e}")
 
     return results
 
@@ -82,7 +82,8 @@ def _fetch_predictit() -> list[dict]:
             m for m in resp.json().get("markets", [])
             if m.get("status") == "Open"
         ]
-    except Exception:
+    except Exception as e:
+        print(f"  [ext] PredictIt fetch failed: {e}")
         return []
 
 
@@ -157,20 +158,17 @@ def build_index(manifold: list[dict], predictit: list[dict],
     for m in manifold:
         try:
             index.append(_norm_manifold(m))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [ext] Skipping malformed Manifold entry: {e}")
 
     for m in predictit:
         try:
             index.extend(_norm_predictit(m))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [ext] Skipping malformed PredictIt entry: {e}")
 
     for m in (odds or []):
-        try:
-            index.append(m)
-        except Exception:
-            pass
+        index.append(m)
 
     return [e for e in index if e.get("title") and e.get("probability") is not None]
 
