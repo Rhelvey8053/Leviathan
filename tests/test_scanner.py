@@ -246,3 +246,163 @@ def test_score_markets_flagged_first():
     results = scanner.score_markets([unflagged, flagged], BASE_CFG)
     assert results[0]["flag"] is True
     assert results[1]["flag"] is False
+
+
+# ─── Flag modes ───────────────────────────────────────────────────────────────
+#
+# Five constructed market archetypes, each scored under all three flag modes.
+# Archetypes:
+#   1. BR_NONE-no-anomaly  — no heuristic match, no drift, no edge
+#   2. EDGE-only           — heuristic match with large edge, no drift
+#   3. DRIFT-only          — heuristic match with zero edge, large drift
+#   4. Totally-inert       — heuristic match with zero edge, no drift
+#   5. BR_NONE-with-drift  — no heuristic match, large drift
+#
+# Expected flag outcomes per mode:
+#
+#   Archetype              passthrough  strict_anomaly_only  strict_with_heuristic
+#   BR_NONE-no-anomaly     True(BR_NONE)  False                False
+#   EDGE-only              True(EDGE)     False                True(HEURISTIC)
+#   DRIFT-only             True(DRIFT)    True(DRIFT)          True(DRIFT)
+#   Totally-inert          False          False                False
+#   BR_NONE-with-drift     True(BR_NONE)  True(DRIFT)          True(DRIFT)
+
+def _cfg(flag_mode: str) -> dict:
+    """Return BASE_CFG with the given flag_mode injected."""
+    import copy
+    c = copy.deepcopy(BASE_CFG)
+    c["markets"]["flag_mode"] = flag_mode
+    return c
+
+
+# ── Archetype builders ────────────────────────────────────────────────────────
+
+def _br_none_no_anomaly():
+    """No heuristic, no drift. Pure BR_NONE candidate."""
+    return _market(mid=0.50, title="Some random event with no keywords")
+
+def _edge_only():
+    """base_rate=0.40 (rain), mid=0.22 → raw_edge=0.18>0.08, no drift."""
+    return _market(mid=0.22, title="Will it rain tomorrow")
+
+def _drift_only():
+    """base_rate=0.40 (rain), mid=0.40 → edge=0. drift=33% via last_price."""
+    m = _market(mid=0.40, title="Will it rain tomorrow")
+    m["last_price_dollars"] = 0.30
+    return m
+
+def _totally_inert():
+    """base_rate=0.40 (rain), mid=0.40 → edge=0, no drift. Nothing fires."""
+    return _market(mid=0.40, title="Will it rain tomorrow")
+
+def _br_none_with_drift():
+    """No heuristic, large drift. BR_NONE path in passthrough, DRIFT in strict."""
+    m = _market(mid=0.50, title="Some random event with no keywords")
+    m["last_price_dollars"] = 0.40   # drift ≈ 25%
+    return m
+
+
+# ── Mode: passthrough ─────────────────────────────────────────────────────────
+
+def test_passthrough_br_none_no_anomaly_flags():
+    r = scanner.score_market(_br_none_no_anomaly(), _cfg("passthrough"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "BR_NONE"
+
+def test_passthrough_edge_only_flags():
+    r = scanner.score_market(_edge_only(), _cfg("passthrough"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "EDGE"
+
+def test_passthrough_drift_only_flags():
+    r = scanner.score_market(_drift_only(), _cfg("passthrough"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "DRIFT"
+
+def test_passthrough_inert_does_not_flag():
+    r = scanner.score_market(_totally_inert(), _cfg("passthrough"))
+    assert r["flag"] is False
+    assert r["flag_path"] is None
+
+def test_passthrough_br_none_with_drift_flags_via_br_none():
+    """passthrough checks BR_NONE before DRIFT, so flag_path=BR_NONE wins."""
+    r = scanner.score_market(_br_none_with_drift(), _cfg("passthrough"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "BR_NONE"
+
+
+# ── Mode: strict_anomaly_only ─────────────────────────────────────────────────
+
+def test_strict_anomaly_br_none_no_anomaly_does_not_flag():
+    """Key regression: BR_NONE catch-all must be suppressed in strict mode."""
+    r = scanner.score_market(_br_none_no_anomaly(), _cfg("strict_anomaly_only"))
+    assert r["flag"] is False
+    assert r["flag_path"] is None
+
+def test_strict_anomaly_edge_only_does_not_flag():
+    """Edge alone (heuristic-derived) must not flag under strict_anomaly_only."""
+    r = scanner.score_market(_edge_only(), _cfg("strict_anomaly_only"))
+    assert r["flag"] is False
+    assert r["flag_path"] is None
+
+def test_strict_anomaly_drift_flags():
+    r = scanner.score_market(_drift_only(), _cfg("strict_anomaly_only"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "DRIFT"
+
+def test_strict_anomaly_inert_does_not_flag():
+    r = scanner.score_market(_totally_inert(), _cfg("strict_anomaly_only"))
+    assert r["flag"] is False
+
+def test_strict_anomaly_br_none_with_drift_flags_via_drift():
+    r = scanner.score_market(_br_none_with_drift(), _cfg("strict_anomaly_only"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "DRIFT"
+
+
+# ── Mode: strict_with_heuristic ───────────────────────────────────────────────
+
+def test_strict_heuristic_br_none_no_anomaly_does_not_flag():
+    """No heuristic match → still excluded even in strict_with_heuristic."""
+    r = scanner.score_market(_br_none_no_anomaly(), _cfg("strict_with_heuristic"))
+    assert r["flag"] is False
+    assert r["flag_path"] is None
+
+def test_strict_heuristic_edge_flags_as_heuristic():
+    """Heuristic base_rate with large edge → HEURISTIC path."""
+    r = scanner.score_market(_edge_only(), _cfg("strict_with_heuristic"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "HEURISTIC"
+
+def test_strict_heuristic_drift_flags():
+    r = scanner.score_market(_drift_only(), _cfg("strict_with_heuristic"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "DRIFT"
+
+def test_strict_heuristic_inert_does_not_flag():
+    """Heuristic matches but edge too small → no flag."""
+    r = scanner.score_market(_totally_inert(), _cfg("strict_with_heuristic"))
+    assert r["flag"] is False
+
+def test_strict_heuristic_br_none_with_drift_flags_via_drift():
+    r = scanner.score_market(_br_none_with_drift(), _cfg("strict_with_heuristic"))
+    assert r["flag"] is True
+    assert r["flag_path"] == "DRIFT"
+
+
+# ── Unknown mode raises ───────────────────────────────────────────────────────
+
+def test_unknown_flag_mode_raises():
+    import pytest
+    with pytest.raises(ValueError, match="Unknown flag_mode"):
+        scanner.score_market(_market(), _cfg("made_up_mode"))
+
+
+# ── flag_path present on all scored markets ───────────────────────────────────
+
+def test_flag_path_always_returned():
+    """score_market must return flag_path key regardless of mode or outcome."""
+    for mode in ("passthrough", "strict_anomaly_only", "strict_with_heuristic"):
+        r = scanner.score_market(_market(), _cfg(mode))
+        assert "flag_path" in r
+        assert "flag_mode" in r

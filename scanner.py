@@ -222,11 +222,38 @@ def compute_orderbook_signal(orderbook: dict) -> dict:
 def score_market(market: dict, config: dict) -> dict:
     """
     Scores a single market for mispricing.
-    Returns enriched market dict with mid_price, base_rate, raw_edge, flag,
-    spread_wide, spread_pct, price_drift, and drift_flag.
-    whale_reversal is computed separately in main.py after whale detection.
+
+    Returns the market enriched with mid_price, base_rate, raw_edge, flag,
+    flag_path, spread_wide, spread_pct, price_drift, and drift_flag.
+
+    Flag behaviour is controlled by config.markets.flag_mode (default "passthrough"):
+
+      "passthrough" (default / baseline)
+        flag if: raw_edge > threshold  OR  base_rate is None  OR  drift
+        This is the original behaviour — every priced market without a
+        matching heuristic is automatically a candidate.
+
+      "strict_anomaly_only"
+        flag ONLY if: drift_flag is True
+        (whale_detected would also trigger here, but whale detection runs in
+        main.py step 5, *after* score_market runs in step 3, so whale state
+        is unavailable at this point. main.py applies whale_reversal and
+        ob_flag post-hoc to set flag=True for whale markets.)
+        base_rate and raw_edge are still computed and returned for Claude
+        context, but do not trigger the flag under this mode.
+
+      "strict_with_heuristic"
+        flag if: drift_flag  OR  (base_rate is not None AND raw_edge > threshold)
+        Adds back the heuristic base-rate edge as a trigger on top of
+        strict_anomaly_only.  A market whose heuristic estimate disagrees
+        meaningfully with the current price is included; pure BR_NONE markets
+        (no matching heuristic) are still excluded.
+
+    whale_reversal is merged into flag by main.py after step 5 regardless of mode.
     """
-    edge_threshold = config.get("markets", {}).get("edge_threshold", 0.08)
+    mkt_cfg        = config.get("markets", {})
+    edge_threshold = mkt_cfg.get("edge_threshold", 0.08)
+    flag_mode      = mkt_cfg.get("flag_mode", "passthrough")
 
     yes_bid = float(market.get("yes_bid_dollars") or market.get("yes_bid") or 0)
     yes_ask = float(market.get("yes_ask_dollars") or market.get("yes_ask") or 0)
@@ -243,11 +270,35 @@ def score_market(market: dict, config: dict) -> dict:
     spread = compute_spread_signal(yes_bid, yes_ask, mid_price or 0)
     drift  = compute_drift_signal(mid_price or 0, market)
 
-    flag = (
-        (raw_edge is not None and raw_edge > edge_threshold)
-        or (base_rate is None and mid_price is not None)
-        or drift["drift_flag"]
-    )
+    has_edge  = raw_edge is not None and raw_edge > edge_threshold
+    has_drift = drift["drift_flag"]
+
+    flag      = False
+    flag_path = None   # "EDGE" | "BR_NONE" | "DRIFT" | "HEURISTIC" | None
+
+    if flag_mode == "passthrough":
+        if has_edge:
+            flag, flag_path = True, "EDGE"
+        elif base_rate is None and mid_price is not None:
+            flag, flag_path = True, "BR_NONE"
+        elif has_drift:
+            flag, flag_path = True, "DRIFT"
+
+    elif flag_mode == "strict_anomaly_only":
+        if has_drift:
+            flag, flag_path = True, "DRIFT"
+
+    elif flag_mode == "strict_with_heuristic":
+        if has_drift:
+            flag, flag_path = True, "DRIFT"
+        elif base_rate is not None and has_edge:
+            flag, flag_path = True, "HEURISTIC"
+
+    else:
+        raise ValueError(
+            f"Unknown flag_mode {flag_mode!r}. "
+            "Expected: passthrough | strict_anomaly_only | strict_with_heuristic"
+        )
 
     return {
         **market,
@@ -255,6 +306,8 @@ def score_market(market: dict, config: dict) -> dict:
         "base_rate":     base_rate,
         "raw_edge":      raw_edge,
         "flag":          flag,
+        "flag_path":     flag_path,
+        "flag_mode":     flag_mode,
         "time_horizon":  market.get("time_horizon", "MONTHLY"),
         **spread,
         **drift,
