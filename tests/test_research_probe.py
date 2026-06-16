@@ -108,6 +108,18 @@ def test_stratified_sample_covers_multiple_volume_tiers():
     assert len(tiers) >= 3, f"Expected coverage of >= 3 tiers, got {tiers}"
 
 
+def test_stratified_sample_max_days_to_close_excludes_far_markets():
+    """Markets closing beyond max_days_to_close must be excluded before sampling."""
+    near = [_raw_market(ticker=f"NEAR-{i}", volume=1000, days_out=30)  for i in range(10)]
+    far  = [_raw_market(ticker=f"FAR-{i}",  volume=1000, days_out=500) for i in range(10)]
+    sample = research_probe.stratified_sample(
+        near + far, target_n=20, max_days_to_close=180
+    )
+    tickers = {m["ticker"] for m in sample}
+    assert all(t.startswith("NEAR") for t in tickers), "Far markets must be excluded"
+    assert not any(t.startswith("FAR") for t in tickers)
+
+
 # ─── Part B/C: probe rows in DB ───────────────────────────────────────────────
 
 def _mock_probe_result(ticker="KXTEST", market_price=0.30, estimate=0.50):

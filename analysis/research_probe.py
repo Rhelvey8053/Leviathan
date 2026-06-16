@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -80,18 +81,37 @@ def _mid(m: dict) -> float | None:
     return (bid + ask) / 2 if (bid + ask) > 0 else None
 
 
+def _days_to_close(m: dict) -> float:
+    raw = m.get("close_time") or m.get("expiration_time") or ""
+    if not raw:
+        return float("inf")
+    try:
+        close = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return (close - datetime.now(timezone.utc)).total_seconds() / 86400
+    except Exception:
+        return float("inf")
+
+
 def stratified_sample(
     markets: list[dict],
     target_n: int = 50,
     filter_cfg: dict | None = None,
+    max_days_to_close: float | None = None,
     seed: int = 42,
 ) -> list[dict]:
     """
     Returns ~target_n markets stratified by volume tier.
     Annotates each with filter_pass=True/False so the composition is visible.
     Deliberately includes filter_markets rejects to test edge outside the funnel.
+    If max_days_to_close is set, markets closing further out are excluded before sampling.
     """
     rng = random.Random(seed)
+
+    # Apply close-time filter before binning
+    if max_days_to_close is not None:
+        before = len(markets)
+        markets = [m for m in markets if _days_to_close(m) <= max_days_to_close]
+        print(f"  [probe] max_days_to_close={max_days_to_close}: {len(markets)}/{before} markets kept")
 
     # Identify filter survivors for annotation
     survivors: set[str] = set()
@@ -284,12 +304,14 @@ def run_probe(config: dict | None = None) -> dict:
     if config is None:
         config = load_config()
 
-    max_probe = config.get("scoring", {}).get("max_probe_markets", 10)
-    markets, header = load_snapshot()
+    max_probe        = config.get("scoring", {}).get("max_probe_markets", 10)
+    max_days_to_close = config.get("scoring", {}).get("max_probe_days_to_close", None)
+    markets, header  = load_snapshot()
 
     print(f"Snapshot: {header.get('fetched_at')} ({header.get('market_count')} markets)")
 
-    sample = stratified_sample(markets, target_n=50, filter_cfg=config)
+    sample = stratified_sample(markets, target_n=50, filter_cfg=config,
+                               max_days_to_close=max_days_to_close)
     print_strata(sample)
 
     to_probe = sample[:max_probe]
