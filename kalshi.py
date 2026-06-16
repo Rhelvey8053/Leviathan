@@ -151,6 +151,39 @@ def fetch_trades(config: dict, ticker: str, limit: int = 0) -> list[dict]:
     return resp.json().get("trades", [])
 
 
+def fetch_recent_trades(config: dict, limit: int = 500) -> list[dict]:
+    """
+    GET /markets/trades — global recent trade feed, not per-market.
+    Returns up to `limit` trades across all markets, newest first.
+    Each trade: {ticker, count_fp, yes_price_dollars, taker_side,
+                 created_time, is_block_trade, trade_id}
+    """
+    base_url = _get_base_url(config)
+    path     = "/markets/trades"
+    trades   = []
+    cursor   = None
+    while len(trades) < limit:
+        params = {"limit": min(100, limit - len(trades))}
+        if cursor:
+            params["cursor"] = cursor
+        resp = requests.get(
+            f"{base_url}{path}",
+            headers=_auth_headers("GET", _vpath(path)),
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data  = resp.json()
+        page  = data.get("trades", [])
+        if not page:
+            break
+        trades.extend(page)
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+    return trades
+
+
 def fetch_events(config: dict, status: str = "open") -> list[dict]:
     """
     Returns open events. Events are the parent objects of standard binary
