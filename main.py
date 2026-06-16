@@ -108,8 +108,8 @@ def main():
                     if t and t not in seen:
                         seen.add(t)
                         all_markets.append(m)
-            except Exception:
-                pass
+            except Exception as _e:
+                print(f"      [warn] fetch_event_markets({event_ticker}): {_e}")
         print(f"      Fetched {len(all_markets)} markets from {len(events)} events")
     except Exception as e:
         print(f"      Events fetch failed ({e}), falling back to /markets...")
@@ -222,8 +222,8 @@ def main():
                     change = (end - start) * 100
                     trend  = "rising" if change > 1 else ("declining" if change < -1 else "stable")
                     history_by_ticker[ticker] = f"{change:+.1f}% ({start*100:.1f}% → {end*100:.1f}%) — {trend} ({label})"
-            except Exception:
-                pass
+            except Exception as _e:
+                print(f"      [warn] price history({ticker}): {_e}")
 
         whale_results = {
             w["ticker"]: w

@@ -133,17 +133,18 @@ def fetch_market(config: dict, ticker: str) -> dict:
     return resp.json().get("market", {})
 
 
-def fetch_trades(config: dict, ticker: str, limit: int = 100) -> list[dict]:
+def fetch_trades(config: dict, ticker: str, limit: int = 0) -> list[dict]:
     """
     Returns recent trades for a market.
     Each trade: {price, count, size, created_time, taker_side}
     """
     base_url = _get_base_url(config)
     path = f"/markets/{ticker}/trades"
+    lookback = limit or config.get("whales", {}).get("lookback_trades", 100)
     resp = requests.get(
         f"{base_url}{path}",
         headers=_auth_headers("GET", _vpath(path)),
-        params={"limit": limit},
+        params={"limit": lookback},
         timeout=10,
     )
     resp.raise_for_status()

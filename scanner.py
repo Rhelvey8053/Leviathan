@@ -36,6 +36,8 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
     max_vol         = cfg.get("max_volume_filter", 150000)
     min_days        = cfg.get("min_days_to_close", 0)
     max_days        = cfg.get("max_days_to_close", 180)
+    min_price       = cfg.get("min_market_price", 0.05)
+    max_price       = cfg.get("max_market_price", 0.95)
     bucket_vol      = cfg.get("bucket_min_volume", {})
     keywords        = [k.lower() for k in cfg.get("efficient_market_keywords", [])]
 
@@ -50,8 +52,11 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
         if volume > max_vol:
             continue
 
-        # Skip MVE multivariate event (sports parlay) markets
-        if m.get("mve_collection_ticker"):
+        # Price bounds — exclude near-certain and tail-probability contracts
+        yes_bid = float(m.get("yes_bid_dollars") or m.get("yes_bid") or 0)
+        yes_ask = float(m.get("yes_ask_dollars") or m.get("yes_ask") or 0)
+        mid = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
+        if mid is not None and not (min_price <= mid <= max_price):
             continue
 
         # Efficient market keyword check
