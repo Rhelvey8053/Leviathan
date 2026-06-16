@@ -30,7 +30,9 @@
   "whales": {
     "size_multiplier": 5,
     "volume_spike_hours": 1,
-    "lookback_trades": 100
+    "lookback_trades": 100,
+    "min_whale_size": 100,
+    "scan_trade_limit": 500
   },
 
   "scoring": {
