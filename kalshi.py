@@ -236,5 +236,7 @@ def fetch_market_history(config: dict, ticker: str, period_seconds: int = 86400)
         params={"period_seconds": period_seconds},
         timeout=10,
     )
+    if resp.status_code == 404:
+        return []  # market exists but has no history yet (new/niche market types)
     resp.raise_for_status()
     return resp.json().get("history", [])
