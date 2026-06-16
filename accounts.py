@@ -85,12 +85,17 @@ def _score_wallet(positions: list[dict]) -> dict | None:
         try:
             pct  = float(p.get("percentPnl") or 0)
             cash = float(p.get("cashPnl") or 0)
+            title = (p.get("title") or "").strip()
+
+            # Exclude coin-flip / tick-resolution markets from all scoring
+            if _is_coinflip(title):
+                continue
+
             pct_pnls.append(pct)
             cash_pnls.append(cash)
 
             # Track active (unresolved) markets by title
-            title = (p.get("title") or "").strip()
-            slug  = (p.get("eventSlug") or p.get("slug") or "").strip()
+            slug    = (p.get("eventSlug") or p.get("slug") or "").strip()
             outcome = (p.get("outcome") or "").strip()
             if title and not p.get("redeemable"):
                 active_mkts.append({
@@ -127,12 +132,32 @@ def _score_wallet(positions: list[dict]) -> dict | None:
     }
 
 
+_COINFLIP_PATTERNS = [
+    "up or down", "up/down", "bitcoin up", "btc up", "eth up",
+    "5m", "1m", "10m", "15m", "price up", "price down",
+    "higher or lower", "above or below",
+]
+
+def _is_coinflip(title: str) -> bool:
+    t = title.lower()
+    return any(p in t for p in _COINFLIP_PATTERNS)
+
+
 def _is_winner(stats: dict, config: dict) -> bool:
     cfg = config.get("accounts", {})
+    min_resolved = cfg.get("min_resolved_count", 10)
+    min_win_rate = cfg.get("min_win_rate", 55.0)
+
+    # Must have a verified track record on resolved markets
+    if stats["resolved_count"] < min_resolved:
+        return False
+    if stats["win_rate"] is None or stats["win_rate"] < min_win_rate:
+        return False
+
     return (
-        stats["position_count"]  >= cfg.get("min_positions", 3)
+        stats["position_count"]  >= cfg.get("min_positions", 5)
         and stats["avg_pct_pnl"] >= cfg.get("min_pct_pnl", 10.0)
-        and stats["total_cash_pnl"] >= cfg.get("min_cash_pnl", 25.0)
+        and stats["total_cash_pnl"] >= cfg.get("min_cash_pnl", 100.0)
     )
 
 
