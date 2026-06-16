@@ -226,6 +226,61 @@ def fetch_orderbook(config: dict, ticker: str) -> dict:
     return data.get("orderbook", data)
 
 
+def fetch_fills(config: dict) -> list[dict]:
+    """
+    GET /portfolio/fills — returns all real trade fills, paginated via cursor.
+    Note: Kalshi only exposes recent fills; older history may not be available.
+    """
+    base_url = _get_base_url(config)
+    path = "/portfolio/fills"
+    fills = []
+    cursor = None
+
+    while True:
+        params = {"limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+        resp = requests.get(
+            f"{base_url}{path}",
+            headers=_auth_headers("GET", _vpath(path)),
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        page = data.get("fills", [])
+        if not page:
+            break
+        fills.extend(page)
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+
+    if not fills:
+        print("  [kalshi] fetch_fills: no fills returned (empty portfolio or historical cutoff)")
+    return fills
+
+
+def fetch_positions(config: dict) -> list[dict]:
+    """
+    GET /portfolio/positions — returns current open positions.
+    """
+    base_url = _get_base_url(config)
+    path = "/portfolio/positions"
+    resp = requests.get(
+        f"{base_url}{path}",
+        headers=_auth_headers("GET", _vpath(path)),
+        params={"limit": 100},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    positions = data.get("market_positions", data.get("positions", []))
+    if not positions:
+        print("  [kalshi] fetch_positions: no positions returned")
+    return positions
+
+
 def fetch_market_history(config: dict, ticker: str, period_seconds: int = 86400) -> list[dict]:
     """Returns price history for the last N seconds."""
     base_url = _get_base_url(config)
