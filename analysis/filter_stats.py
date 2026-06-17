@@ -6,9 +6,11 @@ Fetches the current Kalshi snapshot and runs the pipeline dry up to step 3
 Does NOT call Claude or send any email.
 
 Usage:
-    python analysis/filter_stats.py
+    python analysis/filter_stats.py              # live Kalshi API fetch
+    python analysis/filter_stats.py --snapshot   # use latest saved snapshot (fast)
 """
 
+import glob
 import json
 import os
 import sys
@@ -29,7 +31,21 @@ def _rule(c="-"):
     return c * W
 
 
-def main():
+def _load_snapshot() -> list[dict]:
+    """Load latest saved snapshot from data/snapshots/."""
+    snap_dir = os.path.join(ROOT, "data", "snapshots")
+    files = sorted(glob.glob(os.path.join(snap_dir, "markets_*.json")))
+    if not files:
+        raise FileNotFoundError(f"No snapshot files found in {snap_dir}")
+    latest = files[-1]
+    print(f"  Using snapshot: {os.path.basename(latest)}")
+    data = json.load(open(latest, encoding="utf-8"))
+    if isinstance(data, dict) and "markets" in data:
+        return data["markets"]
+    return data
+
+
+def main(use_snapshot: bool = False):
     cfg_path = os.path.join(ROOT, "config.json")
     with open(cfg_path, encoding="utf-8") as f:
         config = json.load(f)
@@ -40,34 +56,43 @@ def main():
     print(_rule("="))
     print()
 
-    # Auth
-    try:
-        kalshi.authenticate(config)
-    except Exception as e:
-        print(f"Auth failed: {e}")
-        return
+    if use_snapshot:
+        # Fast path — read from saved snapshot file
+        print("Loading snapshot...")
+        try:
+            all_markets = _load_snapshot()
+        except Exception as e:
+            print(f"  Snapshot load failed: {e}")
+            return
+    else:
+        # Auth
+        try:
+            kalshi.authenticate(config)
+        except Exception as e:
+            print(f"Auth failed: {e}")
+            return
 
-    # Fetch events + markets
-    print("Fetching markets from Kalshi...")
-    all_markets = []
-    try:
-        events = kalshi.fetch_events(config)
-        seen   = set()
-        for event in events:
-            ev_ticker = event.get("event_ticker") or event.get("ticker", "")
-            if not ev_ticker or "KXMVE" in ev_ticker:
-                continue
-            try:
-                for m in kalshi.fetch_event_markets(config, ev_ticker):
-                    t = m.get("ticker")
-                    if t and t not in seen:
-                        seen.add(t)
-                        all_markets.append(m)
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"  Events fetch failed: {e}")
-        return
+        # Fetch events + markets
+        print("Fetching markets from Kalshi...")
+        all_markets = []
+        try:
+            events = kalshi.fetch_events(config)
+            seen   = set()
+            for event in events:
+                ev_ticker = event.get("event_ticker") or event.get("ticker", "")
+                if not ev_ticker or "KXMVE" in ev_ticker:
+                    continue
+                try:
+                    for m in kalshi.fetch_event_markets(config, ev_ticker):
+                        t = m.get("ticker")
+                        if t and t not in seen:
+                            seen.add(t)
+                            all_markets.append(m)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"  Events fetch failed: {e}")
+            return
 
     print(f"  Raw markets fetched: {len(all_markets)}")
     print()
@@ -109,7 +134,11 @@ def main():
             continue
         yes_bid = float(m.get("yes_bid_dollars") or m.get("yes_bid") or 0)
         yes_ask = float(m.get("yes_ask_dollars") or m.get("yes_ask") or 0)
-        mid = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) else None
+        if yes_bid > 0 and yes_ask > 0:
+            mid = (yes_bid + yes_ask) / 2
+        else:
+            last_p = float(m.get("last_price_dollars") or 0)
+            mid = last_p if last_p > 0 else None
         if mid is not None and not (min_price <= mid <= max_price):
             dropped_price += 1
             continue
@@ -181,6 +210,23 @@ def main():
     print(f"    sig_br_none:  {n_sig_br_none:>4}  ({n_sig_br_none/len(scored)*100:.0f}%)" if scored else "    sig_br_none: 0")
     print(f"    both edge+drift: {n_sig_both:>3}")
 
+    # Prompt-time signals: volume spike and price jump (computed same way as scorer.py)
+    n_vol_spike  = 0
+    n_price_jump = 0
+    for m in scored:
+        vol_total = float(m.get("volume_fp") or m.get("volume") or 0)
+        vol_24h   = float(m.get("volume_24h_fp") or 0)
+        if vol_total > 0 and vol_24h > 0 and (vol_24h / vol_total) >= 0.20:
+            n_vol_spike += 1
+        prev_p = float(m.get("previous_price_dollars") or 0)
+        last_p = float(m.get("last_price_dollars") or 0)
+        if prev_p > 0 and last_p > 0 and abs((last_p - prev_p) / prev_p) >= 0.20:
+            n_price_jump += 1
+    print()
+    print("  Prompt-time signals (all scored markets, >=20% threshold):")
+    print(f"    vol_spike:    {n_vol_spike:>4}  (24h vol >=20% of total)")
+    print(f"    price_jump:   {n_price_jump:>4}  (last vs previous >=20% move)")
+
     # Watchlist overlap
     sig_cache = os.path.join(ROOT, "data", "smart_money", "latest_signals.json")
     if os.path.exists(sig_cache):
@@ -231,4 +277,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    use_snap = "--snapshot" in sys.argv
+    main(use_snapshot=use_snap)
