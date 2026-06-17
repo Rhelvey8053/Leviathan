@@ -1157,6 +1157,50 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Political withdrawal via "not seek" phrasing (~30%)
     ("Will Biden announce he will not seek a second term?", 0.30),
     ("Will the incumbent senator choose not to run for reelection?", 0.30),
+    # Minimum wage legislation (~25%)
+    ("Will Congress raise the minimum wage in 2026?", 0.25),
+    ("Will the federal minimum wage increase to $15?", 0.25),
+    # National emergency declaration (~25%)
+    ("Will the president declare a national emergency at the border?", 0.25),
+    ("Will Biden invoke emergency powers over housing costs?", 0.25),
+    # Nuclear power plant accident (~5%)
+    ("Will a nuclear power plant accident occur in Europe?", 0.05),
+    ("Will there be a nuclear reactor meltdown in 2026?", 0.05),
+    # Nuclear weapons development (~5%)
+    ("Will Iran develop a nuclear weapon by 2027?", 0.05),
+    ("Will North Korea acquire nuclear warhead miniaturization capability?", 0.05),
+    # NATO Article 5 invocation (~5%)
+    ("Will NATO invoke Article 5 in response to Russian aggression?", 0.05),
+    ("Will Article 5 of the NATO treaty be invoked in 2026?", 0.05),
+    # Military troop withdrawal (~30%)
+    ("Will the US complete a troop withdrawal from Syria by Q3?", 0.30),
+    ("Will US forces leave Afghanistan permanently?", 0.30),
+    # Commodity/energy price thresholds (~40%)
+    ("Will gold prices exceed $3000 per ounce by June 2026?", 0.40),
+    ("Will crude oil prices fall below $60 per barrel?", 0.40),
+    ("Will brent crude rise above $90?", 0.40),
+    ("Will natural gas prices exceed $4 per MMBtu?", 0.40),
+    # Interest rate threshold questions (~50%)
+    ("Will interest rates rise above 6% in 2026?", 0.50),
+    ("Will interest rates fall below 4% by year end?", 0.50),
+    # Inflation threshold questions (~50%)
+    ("Will inflation exceed 4% in 2026?", 0.50),
+    ("Will inflation fall below the Fed's 2% inflation target?", 0.50),
+    # Retail / consumer data (~45%)
+    ("Will retail sales decline in Q2 2026?", 0.45),
+    ("Will consumer confidence fall below 90 in March?", 0.45),
+    # Wildfire / natural disaster (~35%)
+    ("Will a wildfire destroy more than 1 million acres in California?", 0.35),
+    ("Will the 2026 wildfire season be worse than 2020?", 0.35),
+    # Tech product announcements (~55%)
+    ("Will Apple announce a new iPhone by September 2026?", 0.55),
+    ("Will Samsung launch a new Galaxy flagship in Q1?", 0.55),
+    # Concert / tour announcements (~45%)
+    ("Will Taylor Swift announce a new concert tour in 2026?", 0.45),
+    ("Will Beyonce go on a world tour in 2026?", 0.45),
+    # Immigration legislation (~35%)
+    ("Will Congress pass a new immigration bill?", 0.35),
+    ("Will Congress pass comprehensive immigration reform in 2026?", 0.35),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

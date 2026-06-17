@@ -200,6 +200,12 @@ def estimate_base_rate(market: dict) -> float | None:
           "kicked off the ballot", "barred from the ballot",
           "disqualified from the", "removed from the ballot",
           "disqualified from running", "disqualified from appearing"], 0.20),
+        # Minimum wage legislation — requires Congressional action; historically slow → ~25%
+        # Placed BEFORE generic legislative block ("pass the senate" etc.) because title
+        # typically says "raise the minimum wage" rather than "pass the bill"
+        (["minimum wage", "raise the minimum wage", "increase the minimum wage",
+          "minimum wage increase", "minimum wage hike", "minimum wage legislation",
+          "federal minimum wage", "minimum wage to $", "minimum wage bill"], 0.25),
         # Congressional spending — continuing resolutions / omnibus bills (must come before
         # generic "signed into law" because "omnibus bill" is a more specific match)
         (["continuing resolution", "omnibus bill", "appropriations bill",
@@ -217,6 +223,13 @@ def estimate_base_rate(market: dict) -> float | None:
           "senate vote on", "house vote on"], 0.35),
         (["veto", "presidential veto", "veto the bill",
           "pocket veto"], 0.20),
+        # National emergency declaration — executive action used for crises; any single
+        # trigger is uncertain (~25%); placed before executive_order (0.45)
+        (["national emergency", "declare a national emergency",
+          "declare an emergency", "emergency declaration",
+          "invoke emergency powers", "state of emergency",
+          "invoke the national emergencies act",
+          "invokes emergency powers", "emergency powers act"], 0.25),
         # Executive / political appointments
         (["executive order", "sign an executive order",
           "issue an executive order"], 0.45),
@@ -243,6 +256,18 @@ def estimate_base_rate(market: dict) -> float | None:
           "ease sanctions", "waive sanctions"], 0.20),
         (["impose sanctions", "new sanctions",
           "sanctions on", "sanctions against"], 0.45),
+        # Nuclear power plant accident — extremely rare; distinct from weapons programs → 5%
+        # Placed BEFORE nuclear weapons + nuclear deal blocks to catch "nuclear plant" specifically
+        (["nuclear power plant", "nuclear plant accident", "nuclear reactor",
+          "nuclear meltdown", "nuclear accident", "nuclear incident",
+          "chernobyl", "fukushima", "reactor failure", "reactor meltdown"], 0.05),
+        # Nuclear weapons development / acquisition — extremely rare in any given window → 5%
+        # Placed BEFORE "nuclear deal" (0.20) to prevent misclassifying weapons-capability titles
+        (["develop a nuclear weapon", "develop nuclear weapons",
+          "acquire nuclear weapons", "acquire nuclear capability",
+          "become a nuclear power", "nuclear weapons program",
+          "achieve nuclear capability", "nuclear armed",
+          "nuclear warhead", "nuclear device"], 0.05),
         (["nuclear deal", "nuclear agreement", "nuclear accord",
           "nuclear treaty", "npt", "iaea agreement"], 0.20),
         (["peace deal", "ceasefire", "peace agreement", "armistice"], 0.25),
@@ -365,17 +390,24 @@ def estimate_base_rate(market: dict) -> float | None:
           "north korea launch", "north korea conduct",
           "dprk missile", "dprk nuclear", "dprk test", "dprk launch",
           "dprk conduct", "dprk provoc", " dprk "], 0.40),
-        # Weather
+        # Weather / natural disasters
         (["will it rain", "chance of rain", "precipitation"], 0.40),
         (["hurricane", "tropical storm", "tropical cyclone",
           "category 4", "category 5"], 0.45),
         (["earthquake", "magnitude"], 0.30),
+        # Wildfires — specific acreage or destruction thresholds are uncertain → ~35%
+        (["wildfire", "wildfires", "wildfire burns", "wildfire destroys",
+          "acres burned", "acres scorched", "million acres burned",
+          "wildfire season", "fire weather", "fire danger"], 0.35),
         # Macroeconomic — cuts/hikes/pauses depend on market pricing already
         (["rate cut", "rate hike", "interest rate cut", "interest rate hike",
           "raise rates", "raise interest rates", "lower rates", "lower interest rates",
           "cut rates", "hike rates", "fomc", "fed funds rate",
           "pause rates", "hold rates", "maintain rates", "rates unchanged",
-          "rate pause", "rate hold", "rates on hold"], 0.50),
+          "rate pause", "rate hold", "rates on hold",
+          "interest rates rise", "interest rates fall", "interest rates exceed",
+          "interest rates drop", "interest rates above", "interest rates below",
+          "rates rise above", "rates fall below", "rates exceed"], 0.50),
         (["recession", "in recession", "enters recession"], 0.25),
         # Housing market crash / real estate bust — tail event; ~15% in any given year
         # Placed BEFORE generic "fall below" / price-level patterns
@@ -397,6 +429,16 @@ def estimate_base_rate(market: dict) -> float | None:
         # Economic indicators — near 50/50 for specific threshold questions
         (["unemployment rate", "unemployment", "jobless rate", "nonfarm payroll",
           "jobs report", "labor market", "labor force"], 0.50),
+        # Retail / consumer activity data — near 50/50 for monthly read threshold questions
+        (["retail sales", "consumer spending", "consumer confidence",
+          "consumer sentiment", "personal spending", "personal consumption",
+          "durable goods", "factory orders", "industrial production"], 0.45),
+        # Inflation threshold questions ("will inflation exceed 4%?") — bare "inflation" not
+        # caught by "inflation rate" / "cpi" block below; treat as 50/50 threshold question
+        (["inflation exceed", "inflation above", "inflation stay above",
+          "inflation remain above", "inflation reach", "inflation drops below",
+          "inflation falls below", "inflation returns to", "inflation target",
+          "inflation stays below", "above the inflation", "below the inflation"], 0.50),
         (["inflation rate", "cpi", "pce", "consumer price index",
           "core inflation"], 0.50),
         (["gdp growth", "gdp contraction", "gdp shrinks",
@@ -430,6 +472,16 @@ def estimate_base_rate(market: dict) -> float | None:
           "crypto", "cryptocurrency"], 0.50),
         (["bitcoin etf", "crypto etf", "ethereum etf",
           "spot etf", "etf approval"], 0.50),
+        # Commodity / energy price threshold questions — gold, oil, metals, energy
+        # Placed BEFORE generic "reach $"/"above $" (0.35) which requires a dollar sign
+        # These are slightly above 0.35 because commodity trends are stickier than equities
+        (["gold price", "gold prices", "gold above", "gold below",
+          "gold exceed", "gold surpass", "price of gold", "gold reaches",
+          "crude oil", "oil price", "oil prices", "oil above", "oil below",
+          "brent crude", "wti crude", "price of oil", "barrel of oil",
+          "natural gas price", "natural gas above", "natural gas below",
+          "silver price", "copper price", "energy price", "energy prices",
+          "commodity price", "commodity prices"], 0.40),
         # Price / market levels — mean-reversion roughly 50/50 near current levels
         (["reach $", "hits $", "hit $", "exceed $", "above $",
           "surpass $", "cross $", "break $", "top $"], 0.35),
@@ -459,6 +511,19 @@ def estimate_base_rate(market: dict) -> float | None:
         (["tiktok ban", "ban tiktok", "tiktok be banned", "ban on tiktok",
           "social media ban", "tech ban", "platform ban",
           "block tiktok", "ban chinese apps"], 0.20),
+        # NATO Article 5 collective defense invocation — historically never used in combat → ~5%
+        # Placed BEFORE generic "declare war"/"military strike" (0.15)
+        (["invoke article 5", "article 5 of nato", "article 5 of the nato",
+          "article 5 be invoked", "invoke nato's article 5",
+          "nato's collective defense", "collective defense clause",
+          "mutual defense clause", "article v of the nato"], 0.05),
+        # Military troop withdrawal / drawdown — planned withdrawals often delayed → ~30%
+        # Placed BEFORE "declare war"/"invade" to avoid geopolitical catch-all
+        (["troop withdrawal", "withdraw troops", "pull out troops",
+          "military withdrawal", "military drawdown", "drawdown of troops",
+          "troops leave", "forces leave", "exit afghanistan",
+          "end the mission", "end combat operations",
+          "remove troops from", "troops return home"], 0.30),
         # Geopolitical — low base rate for dramatic events
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
         (["coup", "overthrow", "regime change"], 0.10),
@@ -474,6 +539,20 @@ def estimate_base_rate(market: dict) -> float | None:
         (["grammy", "oscar", "academy award", "palme d'or",
           "emmy award", "golden globe award", "tony award", "bafta award",
           "sag award", "screen actors guild", "sundance award"], 0.20),
+        # Concert / live music — artists tour regularly; if market is open, tour is likely → ~45%
+        # Placed BEFORE generic entertainment (0.25) because tours materialize more reliably
+        (["concert tour", "world tour", "go on tour", "announce a tour",
+          "headlining tour", "headline tour", "headline a tour",
+          "north american tour", "european tour", "stadium tour",
+          "arena tour", "announce tour dates", "tour dates announced"], 0.45),
+        # Tech product announcements — established companies (Apple, Samsung) are reliable (~55%)
+        # specific-quarter timing is uncertain; placed BEFORE generic "launch" (0.35)
+        (["new iphone", "iphone 17", "iphone 18", "iphone 19", "iphone 20",
+          "new ipad", "new mac", "new macbook", "new apple",
+          "apple announces", "apple reveal",
+          "samsung galaxy", "new galaxy", "galaxy s", "galaxy flagship",
+          "pixel phone", "new pixel",
+          "product announcement", "product reveal", "announce a new"], 0.55),
         # Media / entertainment — very low: release dates often slip
         # "release" and "show" excluded — too broad (hits Fed minutes, data reports, etc.)
         # "season" kept but specific entertainment-flavored phrases handle most cases
@@ -527,7 +606,9 @@ def estimate_base_rate(market: dict) -> float | None:
           "trade deal", "trade agreement"], 0.40),
         # Immigration / deportation — executive action, moderate base rate
         (["deport", "deportation", "mass deportation",
-          "immigration ban", "border wall", "sanctuary city"], 0.35),
+          "immigration ban", "border wall", "sanctuary city",
+          "immigration bill", "immigration legislation", "immigration reform",
+          "immigration law", "immigration policy"], 0.35),
         # Approval ratings — market already prices current polling; near 50/50
         (["approval rating", "job approval", "favorability rating",
           "approve of the", "disapprove of the", "net approval"], 0.50),
