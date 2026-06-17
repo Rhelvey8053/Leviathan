@@ -986,7 +986,8 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # IPO — "go public" form
     ("Will OpenAI go public before end of 2026?", 0.25),
     # Legislative — senate/house pass reversed ordering
-    ("Will the Senate pass the budget before October?", 0.35),
+    ("Will the Senate pass the tax reform bill before October?", 0.35),   # "senate pass" → 0.35
+    ("Will the Senate pass the budget before October?", 0.40),            # "pass the budget" → appropriations 0.40
     ("Will the House approve the tax bill in Q3 2026?", 0.35),
     ("Will the Senate vote on the tax bill before December?", 0.35),
     # Tech / social media ban
@@ -1054,6 +1055,16 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # False positive guard — "Nobel" in unrelated context
     # "Nobel conference" → no match (our patterns require "nobel prize"/"win the nobel"/"nobel laureate")
     ("Will the Nobel conference attract more attendees in 2026?", None),  # no heuristic
+    # Fed pause / hold rates
+    ("Will the Fed pause rate hikes at the June 2026 meeting?", 0.50),
+    ("Will the FOMC hold rates unchanged in Q3 2026?", 0.50),
+    ("Will the Fed maintain rates at current levels through year end?", 0.50),
+    # Federal budget / budget deal
+    ("Will Congress pass a federal budget deal by October 2026?", 0.40),
+    ("Will Congress reach a budget agreement before the deadline?", 0.40),
+    # 25th Amendment — historically never successfully invoked non-voluntarily
+    ("Will the 25th Amendment be invoked against the President?", 0.05),
+    ("Will Congress invoke the 25th to remove the President?", 0.05),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

@@ -162,7 +162,9 @@ def estimate_base_rate(market: dict) -> float | None:
         # Congressional spending — continuing resolutions / omnibus bills (must come before
         # generic "signed into law" because "omnibus bill" is a more specific match)
         (["continuing resolution", "omnibus bill", "appropriations bill",
-          "government funding bill"], 0.40),
+          "government funding bill",
+          "federal budget", "budget resolution", "budget deal", "budget agreement",
+          "pass the budget", "budget bill", "budget deadline"], 0.40),
         # Legislative — most Kalshi bills have some momentum; passage ~35%
         # Includes both "pass the senate" AND "senate pass" word orderings
         (["pass the senate", "pass the house", "pass congress",
@@ -229,6 +231,9 @@ def estimate_base_rate(market: dict) -> float | None:
         # Criminal / legal — conviction base rates are moderate
         (["convicted", "found guilty", "indicted", "charged with"], 0.40),
         (["impeach", "impeachment", "removed from office"], 0.15),
+        # 25th Amendment invocation — historically zero successful non-voluntary uses
+        (["25th amendment", "invoke the 25th", "invoked the 25th",
+          "section 4 of the 25th", "25th amendment invocation"], 0.05),
         (["lawsuit", "settlement", "settle the lawsuit",
           "class action", "reaches settlement"], 0.40),
         # Arrested / in custody — before convicted/indicted; arrest ≠ conviction
@@ -282,10 +287,12 @@ def estimate_base_rate(market: dict) -> float | None:
         (["hurricane", "tropical storm", "tropical cyclone",
           "category 4", "category 5"], 0.45),
         (["earthquake", "magnitude"], 0.30),
-        # Macroeconomic — cuts/hikes depend on market pricing already
+        # Macroeconomic — cuts/hikes/pauses depend on market pricing already
         (["rate cut", "rate hike", "interest rate cut", "interest rate hike",
           "raise rates", "raise interest rates", "lower rates", "lower interest rates",
-          "cut rates", "hike rates", "fomc", "fed funds rate"], 0.50),
+          "cut rates", "hike rates", "fomc", "fed funds rate",
+          "pause rates", "hold rates", "maintain rates", "rates unchanged",
+          "rate pause", "rate hold", "rates on hold"], 0.50),
         (["recession", "in recession", "enters recession"], 0.25),
         (["default", "debt default", "sovereign default"], 0.10),
         # Economic indicators — near 50/50 for specific threshold questions
