@@ -684,3 +684,54 @@ def test_rule_28_short_horizon_decay_in_system_prompt():
     assert "INTRADAY" in sp or "intraday" in sp.lower()
     assert "72 hours" in sp or "72h" in sp
     assert "15pp" in sp or "15 pp" in sp
+
+
+# ─── SIGNAL SUMMARY alignment block ─────────────────────────────────────────
+
+def test_signal_summary_shown_when_two_sources_agree_yes():
+    """SIGNAL SUMMARY appears when ≥2 independent sources lean YES."""
+    m = _base_market(
+        heuristic_direction="YES",
+        drift_flag=True,
+        price_drift=-0.10,  # mid < last → mean revert up → YES
+        mid_price=0.30,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL SUMMARY" in prompt
+    assert "lean YES" in prompt
+
+
+def test_signal_summary_shown_when_two_sources_agree_no():
+    """SIGNAL SUMMARY appears when ≥2 independent sources lean NO."""
+    m = _base_market(
+        heuristic_direction="NO",
+        poly={"price_gap": -0.12, "poly_price": 0.18, "poly_question": "q", "match_score": 0.8},
+        mid_price=0.30,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL SUMMARY" in prompt
+    assert "lean NO" in prompt
+
+
+def test_signal_summary_shows_all_when_sources_unanimous():
+    """SIGNAL SUMMARY says 'ALL lean' when every source points the same direction."""
+    m = _base_market(
+        heuristic_direction="NO",
+        drift_flag=True,
+        price_drift=0.15,   # mid > last → mean revert down → NO
+        mid_price=0.60,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL SUMMARY" in prompt
+    assert "ALL lean NO" in prompt
+
+
+def test_signal_summary_absent_when_only_one_source():
+    """SIGNAL SUMMARY omitted when only one signal source is active."""
+    m = _base_market(
+        heuristic_direction="YES",
+        mid_price=0.30,
+        # no poly, no drift, no whale, no ob
+    )
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL SUMMARY" not in prompt
