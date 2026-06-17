@@ -240,14 +240,33 @@ def estimate_base_rate(market: dict) -> float | None:
     return None
 
 
-def tag_watchlist_overlap(markets: list[dict], watchlist_tickers: set[str]) -> list[dict]:
+def tag_watchlist_overlap(
+    markets: list[dict],
+    watchlist_tickers: set[str],
+    ticker_details: dict | None = None,
+) -> list[dict]:
     """
     Mark markets that overlap with smart money watchlist positions.
     Sets m['watchlist_signal'] = True on any market whose Kalshi ticker appears
     in the pre-built set of cross-referenced tickers.
+    If ticker_details is provided (from latest_signals.json), also annotates:
+      - m['watchlist_direction']: consensus YES/NO/MIXED/UNKNOWN
+      - m['watchlist_position_val']: total $ smart money behind this ticker
+      - m['watchlist_trader_count']: number of traders
     """
     for m in markets:
-        m["watchlist_signal"] = m.get("ticker", "") in watchlist_tickers
+        ticker = m.get("ticker", "")
+        hit = ticker in watchlist_tickers
+        m["watchlist_signal"] = hit
+        if hit and ticker_details:
+            detail = ticker_details.get(ticker, {})
+            m["watchlist_direction"]     = detail.get("consensus_direction", "UNKNOWN")
+            m["watchlist_position_val"]  = detail.get("total_position_val", 0.0)
+            m["watchlist_trader_count"]  = detail.get("trader_count", 0)
+        elif not hit:
+            m.setdefault("watchlist_direction", None)
+            m.setdefault("watchlist_position_val", None)
+            m.setdefault("watchlist_trader_count", None)
     return markets
 
 

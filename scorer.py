@@ -176,10 +176,16 @@ def build_prompt(markets: list[dict]) -> str:
             )
 
         if m.get("watchlist_signal"):
+            wl_dir    = m.get("watchlist_direction") or "UNKNOWN"
+            wl_val    = m.get("watchlist_position_val")
+            wl_ntrade = m.get("watchlist_trader_count", 0)
+            val_str   = f" (${wl_val:,.0f} combined)" if wl_val else ""
+            dir_str   = f" — pointing {wl_dir}" if wl_dir not in ("UNKNOWN", None) else ""
+            trade_str = f"{wl_ntrade} trader(s)" if wl_ntrade else "top Polymarket traders"
             lines.append(
-                "   WATCHLIST SIGNAL: A top-20 Polymarket trader (by monthly PnL) holds "
-                "a significant open position on a related market. Weight this signal — "
-                "these traders have demonstrated edge over thousands of trades."
+                f"   WATCHLIST SIGNAL: {trade_str}{val_str} on Polymarket hold significant "
+                f"open positions on a related market{dir_str}. These are top-20 traders by "
+                f"monthly PnL — weight this signal; they have demonstrated edge over thousands of trades."
             )
 
         if m.get("price_trend"):

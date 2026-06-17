@@ -646,6 +646,92 @@ def test_watchlist_tag_priority_sorts_first():
     assert results[0]["ticker"] == "KXTAGGED"
 
 
+def test_watchlist_ticker_details_annotates_matching_market():
+    m = _market()
+    m["ticker"] = "KXABRAHAMSA-29-JAN20"
+    details = {
+        "KXABRAHAMSA-29-JAN20": {
+            "consensus_direction": "NO",
+            "trader_count": 3,
+            "total_position_val": 15000.0,
+            "kalshi_title": "Will Saudi Arabia join BRICS by Jan 2029?",
+        }
+    }
+    scanner.tag_watchlist_overlap([m], {"KXABRAHAMSA-29-JAN20"}, ticker_details=details)
+    assert m["watchlist_signal"] is True
+    assert m["watchlist_direction"] == "NO"
+    assert m["watchlist_trader_count"] == 3
+    assert m["watchlist_position_val"] == 15000.0
+
+
+def test_watchlist_ticker_details_non_matching_gets_none():
+    m = _market()
+    m["ticker"] = "KXOTHER-TICKER"
+    details = {
+        "KXABRAHAMSA-29-JAN20": {
+            "consensus_direction": "YES",
+            "trader_count": 2,
+            "total_position_val": 5000.0,
+            "kalshi_title": "Saudi Arabia BRICS",
+        }
+    }
+    scanner.tag_watchlist_overlap([m], {"KXABRAHAMSA-29-JAN20"}, ticker_details=details)
+    assert m["watchlist_signal"] is False
+    assert m.get("watchlist_direction") is None
+    assert m.get("watchlist_position_val") is None
+    assert m.get("watchlist_trader_count") is None
+
+
+def test_watchlist_ticker_details_unknown_direction_fallback():
+    m = _market()
+    m["ticker"] = "KXTEST-TICKER"
+    details = {
+        "KXTEST-TICKER": {
+            "consensus_direction": "MIXED",
+            "trader_count": 5,
+            "total_position_val": 25000.0,
+            "kalshi_title": "Test market",
+        }
+    }
+    scanner.tag_watchlist_overlap([m], {"KXTEST-TICKER"}, ticker_details=details)
+    assert m["watchlist_direction"] == "MIXED"
+    assert m["watchlist_trader_count"] == 5
+    assert m["watchlist_position_val"] == 25000.0
+
+
+def test_watchlist_ticker_details_none_still_works():
+    """Passing ticker_details=None should behave the same as omitting it."""
+    m = _market()
+    m["ticker"] = "KXABRAHAMSA-29-JAN20"
+    scanner.tag_watchlist_overlap([m], {"KXABRAHAMSA-29-JAN20"}, ticker_details=None)
+    assert m["watchlist_signal"] is True
+    # Direction fields should not be set when no details provided
+    assert m.get("watchlist_direction") is None
+    assert m.get("watchlist_position_val") is None
+    assert m.get("watchlist_trader_count") is None
+
+
+def test_watchlist_ticker_details_multiple_markets():
+    """ticker_details annotations apply only to tickers in the watchlist set."""
+    m1 = _market()
+    m1["ticker"] = "KXFOO"
+    m2 = _market()
+    m2["ticker"] = "KXBAR"
+    m3 = _market()
+    m3["ticker"] = "KXBAZ"
+    details = {
+        "KXFOO": {"consensus_direction": "YES", "trader_count": 1, "total_position_val": 1000.0, "kalshi_title": ""},
+        "KXBAR": {"consensus_direction": "NO",  "trader_count": 2, "total_position_val": 2000.0, "kalshi_title": ""},
+    }
+    scanner.tag_watchlist_overlap([m1, m2, m3], {"KXFOO", "KXBAR"}, ticker_details=details)
+    assert m1["watchlist_signal"] is True
+    assert m1["watchlist_direction"] == "YES"
+    assert m2["watchlist_signal"] is True
+    assert m2["watchlist_direction"] == "NO"
+    assert m3["watchlist_signal"] is False
+    assert m3.get("watchlist_direction") is None
+
+
 def test_watchlist_flag_path_override():
     """Unflagged watchlist market gets flag_path=WATCHLIST when force-flagged."""
     # Build an inert market: mid=0.50, no drift, no keyword match in heuristics

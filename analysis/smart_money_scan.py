@@ -435,15 +435,41 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
 def save_signals_cache(result: dict) -> None:
     """
     Write a lightweight signals cache to data/smart_money/latest_signals.json.
-    Contains only the Kalshi cross-reference tickers so main.py can boost them
-    in the scoring queue without parsing markdown.
+    Contains Kalshi cross-reference tickers with consensus direction and total
+    position size so main.py can boost these markets and pass direction context
+    to the scoring prompt.
     """
     cache_path = os.path.join(REPORT_DIR, "latest_signals.json")
     os.makedirs(REPORT_DIR, exist_ok=True)
+
+    # Build per-ticker summary from grouped signals (richer) or flat signals (fallback)
+    ticker_data: dict[str, dict] = {}
+    for g in result.get("grouped_signals", []):
+        ticker_data[g["kalshi_ticker"]] = {
+            "consensus_direction": g.get("consensus_direction", "UNKNOWN"),
+            "trader_count":        g.get("trader_count", 0),
+            "total_position_val":  g.get("total_position_val", 0.0),
+            "kalshi_title":        g.get("kalshi_title", ""),
+        }
+    # Fallback: flat signals without grouping
+    if not ticker_data:
+        for s in result.get("kalshi_signals", []):
+            t = s["kalshi_ticker"]
+            if t not in ticker_data:
+                ticker_data[t] = {
+                    "consensus_direction": s.get("kalshi_direction", "UNKNOWN"),
+                    "trader_count":        1,
+                    "total_position_val":  s.get("position_val", 0.0),
+                    "kalshi_title":        s.get("kalshi_title", ""),
+                }
+            else:
+                ticker_data[t]["total_position_val"] += s.get("position_val", 0.0)
+
     payload = {
         "run_at":         result.get("run_at", ""),
-        "kalshi_tickers": list({s["kalshi_ticker"] for s in result.get("kalshi_signals", [])}),
+        "kalshi_tickers": list(ticker_data.keys()),
         "signal_count":   len(result.get("kalshi_signals", [])),
+        "ticker_details": ticker_data,
     }
     with open(cache_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
