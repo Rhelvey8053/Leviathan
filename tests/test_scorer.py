@@ -176,6 +176,35 @@ def test_flag_reason_watchlist_shown():
     assert "FLAG REASON: WATCHLIST" in prompt
 
 
+def test_flag_reason_edge_shown():
+    m = _base_market(flag_path="EDGE")
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON: EDGE" in prompt
+
+
+def test_flag_reason_cross_market_shown():
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": 0.18, "poly_price": 0.68, "poly_question": "Will X happen?", "match_score": 0.72},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON: CROSS_MARKET" in prompt
+    assert "18%" in prompt
+    assert "higher" in prompt
+
+
+def test_flag_reason_cross_market_lower():
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": -0.20, "poly_price": 0.30, "poly_question": "Will X happen?", "match_score": 0.65},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON: CROSS_MARKET" in prompt
+    assert "lower" in prompt
+
+
 def test_flag_reason_absent_when_no_path():
     m = _base_market(flag_path=None)
     prompt = scorer.build_prompt([m])

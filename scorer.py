@@ -156,6 +156,15 @@ def build_prompt(markets: list[dict]) -> str:
             lines.append(f"   FLAG REASON: WATCHLIST — top Polymarket traders have open positions on this market")
         elif fp == "EDGE":
             lines.append(f"   FLAG REASON: EDGE — significant gap between heuristic estimate and market price")
+        elif fp == "CROSS_MARKET":
+            poly = m.get("poly") or {}
+            gap_pct = abs((poly.get("price_gap") or 0) * 100)
+            direction = "higher" if (poly.get("price_gap") or 0) > 0 else "lower"
+            lines.append(
+                f"   FLAG REASON: CROSS_MARKET — no heuristic or drift signal, but the equivalent "
+                f"Polymarket question is priced {gap_pct:.0f}% {direction} than Kalshi. "
+                f"Determine whether Kalshi or Polymarket is better calibrated for this event."
+            )
 
         if whale and whale.get("whale_detected"):
             lines.append(
