@@ -207,6 +207,10 @@ def estimate_base_rate(market: dict) -> float | None:
           "nato accession"], 0.35),
         (["join the eu", "eu membership", "eu accession",
           "european union membership"], 0.25),
+        # UN Security Council resolution — China/Russia veto risk keeps rate low
+        (["un security council", "united nations security council",
+          "security council resolution", "security council vote",
+          "pass at the un", "un resolution"], 0.15),
         (["recognize", "diplomatic recognition",
           "normalize relations", "establish relations"], 0.30),
         # Diplomatic meetings / summits — whether the meeting HAPPENS (~40%)
@@ -305,6 +309,13 @@ def estimate_base_rate(market: dict) -> float | None:
           "miss earnings", "misses earnings", "earnings beat", "earnings miss",
           "beat on earnings", "earnings per share above", "eps above",
           "eps beat", "earnings surprise", "earnings estimate"], 0.50),
+        # Regulatory approvals — must come BEFORE crypto ETF block ("spot etf" → 0.50)
+        # and BEFORE merger/acquisition block ("merger" → 0.35)
+        (["fda approval", "fda approves", "fda cleared"], 0.40),
+        (["sec approve", "sec approves", "sec approval",
+          "fcc approve", "fcc approves", "fcc approval",
+          "ferc approve", "ferc approves", "ferc approval",
+          "regulatory approval", "regulatory clearance"], 0.40),
         # Crypto — price-level markets are 50/50 by definition
         (["bitcoin", "btc price", "btc above", "btc below",
           "ethereum", "eth price", "eth above", "eth below",
@@ -335,6 +346,10 @@ def estimate_base_rate(market: dict) -> float | None:
         # Geopolitical — low base rate for dramatic events
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
         (["coup", "overthrow", "regime change"], 0.10),
+        # Nobel Prize — single winner from hundreds of candidates worldwide → ~5-10%
+        # Must come BEFORE generic " win " catch-all and entertainment awards
+        (["nobel prize", "nobel peace prize", "nobel laureate",
+          "win the nobel", "receive the nobel"], 0.10),
         # Entertainment awards — single winner from ~5 nominees → ~20%
         # Must come BEFORE generic entertainment (streaming/movie/film at 0.25) and " win " catch-all
         (["grammy", "oscar", "academy award", "palme d'or",
@@ -405,8 +420,12 @@ def estimate_base_rate(market: dict) -> float | None:
         # Sports trades / signings — rumors often don't materialize
         (["get traded", "be traded", "trade deadline", "sign with",
           "free agent signing", "sign a contract", "extension"], 0.30),
-        # Technology
-        (["fda approval", "fda approves", "fda cleared"], 0.40),
+        # Corporate appointment / leadership change
+        # "become ceo" / "be named ceo" — moderate base rate; board decisions hard to predict
+        (["become ceo", "be named ceo", "be appointed ceo", "new ceo",
+          "become the ceo", "named as ceo", "appoint a new ceo",
+          "become cfo", "be named cfo", "new cfo",
+          "become chair", "be named chair", "become chairman"], 0.35),
         (["launch", "launches", "launched by", "launches by"], 0.35),
         # Generic sports/competition catch-all — must come LAST
         # " win " (with spaces) catches "Will X win [any competition]?"
