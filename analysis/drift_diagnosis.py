@@ -59,8 +59,12 @@ def get_filtered_with_drift_data(markets, config):
     for m in filtered:
         bid  = float(m.get("yes_bid_dollars") or m.get("yes_bid") or 0)
         ask  = float(m.get("yes_ask_dollars") or m.get("yes_ask") or 0)
-        mid  = (bid + ask) / 2 if (bid + ask) > 0 else None
         last = float(m.get("last_price_dollars") or 0)
+        # Two-sided check: only use (bid+ask)/2 when both sides are posted
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2
+        else:
+            mid = last if last > 0 else None
         if mid is None or not last:
             abs_drift = pct_drift = None
         else:
@@ -87,8 +91,8 @@ def drift_fire_rate(rows, drift_min_abs, drift_min_pct):
     return fired, len(rows)
 
 
-def print_bucket_diagnosis(rows):
-    print("\n=== Part B: Drift magnitude by price bucket ===\n")
+def print_bucket_diagnosis(rows, drift_min_abs=0.03, drift_min_pct=0.07):
+    print(f"\n=== Part B: Drift magnitude by price bucket (config: abs>{drift_min_abs}, pct>{drift_min_pct*100:.0f}%) ===\n")
     print(f"{'Bucket':<26} {'N':>3}  {'Drift%':>6}  {'Avg abs':>8}  {'Avg pct':>8}  {'Max abs':>8}  {'Max pct':>8}")
     print("-" * 78)
     for label, lo, hi in PRICE_BUCKETS:
@@ -98,7 +102,7 @@ def print_bucket_diagnosis(rows):
         has_last = [r for r in bucket if r["abs_drift"] is not None]
         drift_flag_count = sum(
             1 for r in has_last
-            if r["abs_drift"] > 0.0 and r["pct_drift"] > 0.05
+            if r["abs_drift"] > drift_min_abs and r["pct_drift"] > drift_min_pct
         )
         avg_abs = sum(r["abs_drift"] for r in has_last) / len(has_last) if has_last else 0
         avg_pct = sum(r["pct_drift"] for r in has_last) / len(has_last) if has_last else 0
@@ -120,7 +124,7 @@ def print_bucket_diagnosis(rows):
             abs_str  = "   N/A"
             pct_str  = "   N/A"
         else:
-            fires = r["abs_drift"] > 0.0 and r["pct_drift"] > 0.05
+            fires = r["abs_drift"] > drift_min_abs and r["pct_drift"] > drift_min_pct
             flag_str = "YES" if fires else "no"
             abs_str  = f"{r['abs_drift']:>7.4f}"
             pct_str  = f"{r['pct_drift']:>7.4f}"
@@ -143,9 +147,12 @@ def print_sweep_grid(rows):
             row_str += f" {pct:>5.0f}%"
         print(row_str)
     print()
-    # Baseline (current behavior: abs=0.0, pct=0.05)
-    fired_base, total = drift_fire_rate(rows, 0.0, 0.05)
-    print(f"Current behavior (abs>0.0, pct>5%): {fired_base}/{total} = {fired_base/total*100:.0f}% of filtered markets flag as drift")
+    # Report current config thresholds as baseline
+    mkt_cfg = load_config().get("markets", {})
+    cfg_abs = mkt_cfg.get("drift_min_abs", 0.03)
+    cfg_pct = mkt_cfg.get("drift_min_pct", 0.07)
+    fired_base, total = drift_fire_rate(rows, cfg_abs, cfg_pct)
+    print(f"Config baseline (abs>{cfg_abs}, pct>{cfg_pct*100:.0f}%): {fired_base}/{total} = {fired_base/total*100:.0f}% of filtered markets flag as drift")
 
 
 def build_results(rows):
@@ -173,7 +180,10 @@ def build_results(rows):
             "avg_pct": avg_pct,
         })
 
-    baseline_fired, total = drift_fire_rate(rows, 0.0, 0.05)
+    mkt_cfg = load_config().get("markets", {})
+    cfg_abs = mkt_cfg.get("drift_min_abs", 0.03)
+    cfg_pct = mkt_cfg.get("drift_min_pct", 0.07)
+    baseline_fired, total = drift_fire_rate(rows, cfg_abs, cfg_pct)
     return grid, buckets, baseline_fired, total
 
 
@@ -181,11 +191,15 @@ def main():
     markets, header = load_snapshot()
     config = load_config()
 
+    mkt_cfg = config.get("markets", {})
+    cfg_abs = mkt_cfg.get("drift_min_abs", 0.03)
+    cfg_pct = mkt_cfg.get("drift_min_pct", 0.07)
+
     print(f"Snapshot: {header.get('fetched_at')} ({header.get('market_count')} markets)")
     rows = get_filtered_with_drift_data(markets, config)
     print(f"Filtered markets: {len(rows)}")
 
-    print_bucket_diagnosis(rows)
+    print_bucket_diagnosis(rows, drift_min_abs=cfg_abs, drift_min_pct=cfg_pct)
     print_sweep_grid(rows)
 
     return build_results(rows)
