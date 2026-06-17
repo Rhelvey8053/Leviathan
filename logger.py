@@ -792,6 +792,76 @@ def get_brier_score() -> dict:
     return {"brier_score": round(brier, 4), "n": len(rows), "label": label}
 
 
+def get_stats_by_heuristic_alignment() -> dict:
+    """
+    Compare win rate for paper signals where Claude agreed vs overrode the heuristic.
+
+    'aligned'  — heuristic_direction == direction (Claude and heuristic agree)
+    'override' — heuristic_direction set, not NEUTRAL, and != direction (CLAUDE OVERRIDE fired)
+    'no_heuristic' — heuristic_direction is NULL or NEUTRAL (no comparison possible)
+
+    Only includes paper signals with a resolved outcome.
+    Returns a dict with those three keys; each value has:
+      total, wins, losses, win_rate (float|None), total_pnl (float|None), avg_edge (float|None)
+    """
+    result = {grp: {"total": 0, "wins": 0, "losses": 0,
+                    "win_rate": None, "total_pnl": None, "avg_edge": None}
+              for grp in ("aligned", "override", "no_heuristic")}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT direction, heuristic_direction, result, pnl_if_traded, edge
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                  AND direction IN ('YES','NO')
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    totals  = {k: 0   for k in result}
+    wins_d  = {k: 0   for k in result}
+    losses_d= {k: 0   for k in result}
+    pnl_sum = {k: 0.0 for k in result}
+    edge_sum= {k: 0.0 for k in result}
+    edge_n  = {k: 0   for k in result}
+
+    for r in rows:
+        direction = (r["direction"] or "").upper()
+        hd        = (r["heuristic_direction"] or "").upper()
+
+        if not hd or hd == "NEUTRAL":
+            grp = "no_heuristic"
+        elif hd == direction:
+            grp = "aligned"
+        else:
+            grp = "override"
+
+        totals[grp]   += 1
+        if r["result"] == "WIN":
+            wins_d[grp]  += 1
+        elif r["result"] == "LOSS":
+            losses_d[grp] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[grp] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[grp] += float(r["edge"])
+            edge_n[grp]   += 1
+
+    for grp in result:
+        n = totals[grp]
+        result[grp]["total"]    = n
+        result[grp]["wins"]     = wins_d[grp]
+        result[grp]["losses"]   = losses_d[grp]
+        result[grp]["win_rate"] = wins_d[grp] / n * 100 if n else None
+        result[grp]["total_pnl"]= pnl_sum[grp] if n else None
+        result[grp]["avg_edge"] = edge_sum[grp] / edge_n[grp] if edge_n[grp] else None
+
+    return result
+
+
 def get_stats_by_confidence() -> dict:
     """
     Win rate and P&L grouped by confidence level for resolved paper signals.

@@ -233,6 +233,40 @@ def main(resolve: bool = True):
                     pnl_s = _fmt_pnl(r["total_pnl"]) if r["total_pnl"] is not None else "—"
                     print(f"  {label:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
+    # ── Heuristic alignment breakdown ────────────────────────────────────────
+    align_stats = logger.get_stats_by_heuristic_alignment()
+    any_align = any(align_stats[k]["total"] > 0 for k in ("aligned", "override"))
+    if any_align:
+        print()
+        print(_rule("="))
+        print("HEURISTIC ALIGNMENT  (paper signals, resolved only)")
+        print(_rule("-"))
+        print()
+        print("  Does Claude's direction agree with the heuristic base-rate lean?")
+        print()
+        print(f"  {'Group':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
+        labels = {
+            "aligned":      "Aligned",
+            "override":     "Override",
+            "no_heuristic": "No heuristic",
+        }
+        for key, label in labels.items():
+            d = align_stats[key]
+            if not d["total"]:
+                continue
+            wr_s   = f"{d['win_rate']:.0f}%"   if d["win_rate"]  is not None else "—"
+            pnl_s  = _fmt_pnl(d["total_pnl"])  if d["total_pnl"] is not None else "—"
+            edge_s = f"{d['avg_edge']*100:.1f}pp" if d["avg_edge"] is not None else "—"
+            print(f"  {label:<16}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
+        if align_stats["override"]["total"] > 0 and align_stats["aligned"]["total"] > 0:
+            ov_wr = align_stats["override"]["win_rate"] or 0
+            al_wr = align_stats["aligned"]["win_rate"]  or 0
+            delta = ov_wr - al_wr
+            verdict = "overrides outperform" if delta > 5 else (
+                "overrides underperform" if delta < -5 else "no meaningful difference")
+            print(f"\n  Override vs Aligned: {delta:+.0f}pp  → {verdict}")
+
     # ── Combined summary ──────────────────────────────────────────────────────
     all_resolved = [r for r in all_rows if r.get("outcome")]
     all_pnl      = sum(float(r["pnl_if_traded"] or 0) for r in all_resolved
