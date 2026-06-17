@@ -155,6 +155,10 @@ def estimate_base_rate(market: dict) -> float | None:
         (["win the presidency", "win the white house"], 0.50),
         (["win the senate race", "win the house race", "win the gubernatorial",
           "win the mayoral", "mayor race", "win the governor"], 0.52),
+        # Reelection — slight incumbent advantage over a challenger
+        (["be reelected", "win reelection", "win re-election",
+          "reelected", "re-elected", "secure a second term",
+          "win a second term", "second presidential term"], 0.52),
         # Congressional spending — continuing resolutions / omnibus bills (must come before
         # generic "signed into law" because "omnibus bill" is a more specific match)
         (["continuing resolution", "omnibus bill", "appropriations bill",
@@ -205,6 +209,14 @@ def estimate_base_rate(market: dict) -> float | None:
           "european union membership"], 0.25),
         (["recognize", "diplomatic recognition",
           "normalize relations", "establish relations"], 0.30),
+        # Diplomatic meetings / summits — whether the meeting HAPPENS (~40%)
+        # Distinct from peace deals (0.25): a summit is scheduled more often than a deal is signed
+        (["bilateral summit", "diplomatic summit", "peace summit",
+          "summit between", "summit with", "diplomatic meeting",
+          "state visit by", "bilateral meeting",
+          "meet with xi", "meet with putin", "meet with kim",
+          "diplomatic talks between", "diplomatic negotiations",
+          "diplomatic engagement"], 0.40),
         # Supreme Court / legal rulings
         (["supreme court", "scotus", "high court ruling",
           "appeals court", "circuit court"], 0.50),
@@ -279,6 +291,20 @@ def estimate_base_rate(market: dict) -> float | None:
           "core inflation"], 0.50),
         (["gdp growth", "gdp contraction", "gdp shrinks",
           "economic growth", "economic contraction"], 0.50),
+        # Stock index / financial index price levels — 50/50 by construction (like crypto)
+        # Placed BEFORE generic "above $" / "below $" to avoid the 0.35 price-level pattern
+        (["s&p 500 above", "s&p 500 below", "s&p 500 exceed", "s&p 500 reach",
+          "s&p above", "s&p below",
+          "dow jones above", "dow jones below",
+          "nasdaq above", "nasdaq below", "nasdaq exceed",
+          "vix above", "vix below",
+          "sp500 above", "s&p500 above", "s&p500 below",
+          "russell 2000 above", "russell 2000 below"], 0.50),
+        # Earnings beat/miss — coin flip by definition (~50%); analysts recalibrate
+        (["beat earnings", "beats earnings", "beat analyst", "beat analysts",
+          "miss earnings", "misses earnings", "earnings beat", "earnings miss",
+          "beat on earnings", "earnings per share above", "eps above",
+          "eps beat", "earnings surprise", "earnings estimate"], 0.50),
         # Crypto — price-level markets are 50/50 by definition
         (["bitcoin", "btc price", "btc above", "btc below",
           "ethereum", "eth price", "eth above", "eth below",
@@ -338,6 +364,11 @@ def estimate_base_rate(market: dict) -> float | None:
           "drug trial", "clinical study"], 0.35),      # Phase 3 trials ~35-50% success
         (["pandemic", "epidemic", "outbreak",
           "public health emergency"], 0.25),           # Low base rate for declared emergencies
+        # Health / mortality markets — "will X die/survive before Y?"
+        # Very specific phrases to avoid false positives from medical policy markets
+        (["die before", "die by", "pass away before", "pass away by",
+          "survive until", "still alive by", "alive by",
+          "death before", "death by date"], 0.15),
         # Climate / renewable energy policy
         (["carbon tax", "carbon credit", "net zero",
           "emissions target", "paris agreement",

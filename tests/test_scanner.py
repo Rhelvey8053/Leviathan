@@ -1014,6 +1014,31 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # "senator" contains "senate" — but "senate hearing" is the pattern, not a substring issue
     # "movie arrest scene" → "arrest" alone not in list; only specific phrases
     ("Will a movie arrest scene win an Oscar?", 0.20),   # hits "oscar" → 0.20, not arrested
+    # Reelection — slight incumbent advantage
+    ("Will Trump win reelection in 2028?", 0.52),
+    ("Will the incumbent be reelected in the 2026 midterms?", 0.52),
+    ("Will the governor win re-election in November?", 0.52),
+    # Diplomatic summits / meetings
+    ("Will there be a bilateral summit between the US and China in 2026?", 0.40),
+    ("Will Biden meet with Xi at a diplomatic summit before year end?", 0.40),
+    ("Will a peace summit between Israel and Palestine take place in 2026?", 0.40),
+    # Earnings beat/miss
+    ("Will Apple beat earnings in Q3 2026?", 0.50),
+    ("Will Tesla miss earnings estimates in Q2 2026?", 0.50),
+    ("Will Nvidia's EPS beat analyst expectations in Q1?", 0.50),
+    # Stock index price levels — must NOT hit generic "above $" (0.35)
+    ("Will the S&P 500 above 6000 by end of 2026?", 0.50),
+    ("Will the Nasdaq exceed 20000 in Q3 2026?", 0.50),
+    ("Will the VIX above 30 at any point in 2026?", 0.50),
+    ("Will the Dow Jones above 45000 before year end?", 0.50),
+    # Health / mortality
+    ("Will the suspect die before trial in 2026?", 0.15),
+    ("Will the 95-year-old still alive by December 2026?", 0.15),
+    # False positive guard — "stock above $150" must NOT hit stock index block
+    ("Will Apple stock above $150?", 0.35),            # generic "above $" → 0.35, not 0.50
+    # False positive guard — "summit" alone in unrelated context → no match from diplomatic block
+    # (summit could be a mountain/location; diplomatic block requires "summit between/with" etc.)
+    ("Will the tech summit produce a new AI governance framework?", None),  # no heuristic
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
