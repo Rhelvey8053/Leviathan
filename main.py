@@ -359,12 +359,18 @@ def main():
             whale_only.append({**whale, "title": m.get("title", "")})
 
     # Second pass: if nothing cleared the threshold, include LOW confidence rather than returning empty
+    # Guard: require minimum market price to avoid acting on tail-probability markets
+    _min_price_2nd = config.get("markets", {}).get("min_market_price", 0.05)
     if not final_signals and claude_scores:
         print("      No MED/HIGH signals — widening to LOW confidence for second pass...")
         for m in flagged_markets:
             ticker = m.get("ticker", "")
             cs     = scored_by_ticker.get(ticker)
             if not cs or cs.get("direction", "PASS") == "PASS":
+                continue
+            # Skip sub-threshold market prices in second pass — crowd is almost always right
+            mkt_p = float(cs.get("market_price") or m.get("mid_price") or 0)
+            if mkt_p > 0 and not (_min_price_2nd <= mkt_p <= (1 - _min_price_2nd)):
                 continue
             if cs.get("confidence") == "LOW":
                 whale  = whale_results.get(ticker, {})

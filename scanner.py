@@ -68,6 +68,11 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
         yes_bid = float(m.get("yes_bid_dollars") or m.get("yes_bid") or 0)
         yes_ask = float(m.get("yes_ask_dollars") or m.get("yes_ask") or 0)
         mid = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
+        if mid is None:
+            # Empty order book — fall back to last traded price for price check
+            last_p = float(m.get("last_price_dollars") or 0)
+            if last_p > 0:
+                mid = last_p
         if mid is not None and not (min_price <= mid <= max_price):
             continue
 
@@ -430,6 +435,11 @@ def score_market(market: dict, config: dict) -> dict:
     yes_ask = float(market.get("yes_ask_dollars") or market.get("yes_ask") or 0)
 
     mid_price = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
+    if mid_price is None:
+        # Empty order book — use last traded price as best available mid estimate
+        last_p = float(market.get("last_price_dollars") or 0)
+        if last_p > 0:
+            mid_price = last_p
 
     base_rate = estimate_base_rate(market)
 
