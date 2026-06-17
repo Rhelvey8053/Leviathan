@@ -159,6 +159,81 @@ _STOP = frozenset({
     "2027", "2028", "2029", "2030",
 })
 
+# US state names that appear in prediction market titles — used for entity contradiction check.
+# Compound state names handled as single words where the distinguishing word is unique
+# (e.g. "texas", "utah", "florida"); "carolina"/"dakota" are omitted to avoid treating
+# North Carolina vs South Carolina as contradictory.
+_US_STATE_WORDS = frozenset({
+    "alabama", "alaska", "arizona", "arkansas", "california",
+    "colorado", "connecticut", "delaware", "florida", "georgia",
+    "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas",
+    "kentucky", "louisiana", "maine", "maryland", "massachusetts",
+    "michigan", "minnesota", "mississippi", "missouri", "montana",
+    "nebraska", "nevada", "hampshire", "jersey", "ohio", "oklahoma",
+    "oregon", "pennsylvania", "rhode", "tennessee", "texas", "utah",
+    "vermont", "virginia", "wisconsin", "wyoming",
+})
+
+# Major world cities used in prediction markets — checked pairwise to reject city mismatches.
+_CITY_MARKERS = frozenset({
+    "london", "angeles", "chicago", "houston", "philadelphia",
+    "phoenix", "seattle", "denver", "boston", "miami", "atlanta",
+    "dallas", "detroit", "toronto", "paris", "berlin", "tokyo",
+    "beijing", "moscow", "tehran", "jerusalem", "kabul",
+    "istanbul", "cairo", "dubai", "riyadh", "taipei",
+})
+
+# International organization groups — titles belonging to different groups are incompatible.
+# Each tuple is one group; if one title draws from group 0 and the other from group 1, reject.
+_ORG_EXCLUSION_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"opec"}),
+    frozenset({" eu ", "european union", "brexit"}),
+    frozenset({"nato"}),
+    frozenset({"imf", "international monetary fund"}),
+    frozenset({"wto", "world trade organization"}),
+    frozenset({"asean"}),
+)
+
+
+def _entity_contradiction(poly_title: str, kalshi_title: str) -> bool:
+    """
+    Returns True if the two titles clearly refer to incompatible named entities.
+
+    Handles three categories of false-positive:
+      - US state mismatch: "Texas Senate" vs "Utah Senate"
+      - City mismatch: "Los Angeles mayor" vs "London mayor"
+      - Organization mismatch: "leave OPEC" vs "leave the EU"
+
+    Does NOT reject titles that share a country (e.g. both mention Israel)
+    even if they differ on the second party (Syria vs Lebanon) — that overlap
+    is semantically close enough to be a useful cross-reference.
+    """
+    p = f" {poly_title.lower()} "
+    k = f" {kalshi_title.lower()} "
+
+    # US state mismatch: both titles name a US state but different ones
+    p_states = {s for s in _US_STATE_WORDS if f" {s} " in p or f" {s}," in p or f" {s}." in p}
+    k_states = {s for s in _US_STATE_WORDS if f" {s} " in k or f" {s}," in k or f" {s}." in k}
+    if p_states and k_states and not (p_states & k_states):
+        return True
+
+    # City mismatch: both titles name a major city but different ones
+    p_cities = {c for c in _CITY_MARKERS if c in poly_title.lower()}
+    k_cities = {c for c in _CITY_MARKERS if c in kalshi_title.lower()}
+    if p_cities and k_cities and not (p_cities & k_cities):
+        return True
+
+    # Organization mismatch: titles reference organizations from different exclusive groups
+    def _org_groups(text: str) -> set[int]:
+        return {i for i, grp in enumerate(_ORG_EXCLUSION_GROUPS) if any(t in text for t in grp)}
+
+    p_orgs = _org_groups(p)
+    k_orgs = _org_groups(k)
+    if p_orgs and k_orgs and not (p_orgs & k_orgs):
+        return True
+
+    return False
+
 
 def _normalize(title: str) -> set[str]:
     import re
@@ -171,6 +246,7 @@ def _match_to_kalshi(pos_title: str, kalshi_titles: dict[str, str],
     """
     Combined Jaccard word-overlap + SequenceMatcher score.
     Matches Polymarket position title against all Kalshi market titles.
+    Applies entity-contradiction check to reject geographic/org mismatches.
     Returns up to 3 matches above min_score, sorted by score desc.
     """
     from difflib import SequenceMatcher
@@ -188,6 +264,9 @@ def _match_to_kalshi(pos_title: str, kalshi_titles: dict[str, str],
         # Require at least 2 shared keywords — prevents single-word or character-similarity false positives
         if len(common) < 2:
             continue
+        # Reject geographic/organizational entity contradictions before scoring
+        if _entity_contradiction(pos_title, title):
+            continue
         union   = poly_words | kalshi_words
         jaccard = len(common) / len(union) if union else 0.0
         seq     = SequenceMatcher(None, pos_title.lower(), title.lower()).ratio()
@@ -197,6 +276,56 @@ def _match_to_kalshi(pos_title: str, kalshi_titles: dict[str, str],
 
     matches.sort(key=lambda x: -x[1])
     return matches[:3]
+
+
+def _group_signals_by_ticker(signals: list[dict]) -> list[dict]:
+    """
+    Aggregate individual per-trader signals by Kalshi ticker.
+    Multiple traders on the same Kalshi market produce one grouped entry with
+    combined position value, trader count, and direction vote tallies.
+    """
+    groups: dict[str, dict] = {}
+    for s in signals:
+        ticker = s["kalshi_ticker"]
+        if ticker not in groups:
+            groups[ticker] = {
+                "kalshi_ticker":      ticker,
+                "kalshi_title":       s.get("kalshi_title", ""),
+                "total_position_val": 0.0,
+                "traders":            set(),
+                "directions":         {},
+                "signals":            [],
+            }
+        g = groups[ticker]
+        g["total_position_val"] += s["position_val"]
+        g["traders"].add(s["trader"])
+        direction = s.get("kalshi_direction", "UNKNOWN")
+        g["directions"][direction] = g["directions"].get(direction, 0) + 1
+        g["signals"].append(s)
+
+    result = []
+    for g in groups.values():
+        directions = g["directions"]
+        yes_count  = directions.get("YES", 0)
+        no_count   = directions.get("NO", 0)
+        if yes_count > 0 and no_count > 0:
+            consensus = "MIXED"
+        elif yes_count > 0:
+            consensus = "YES"
+        elif no_count > 0:
+            consensus = "NO"
+        else:
+            consensus = "UNKNOWN"
+        result.append({
+            "kalshi_ticker":       g["kalshi_ticker"],
+            "kalshi_title":        g["kalshi_title"],
+            "total_position_val":  g["total_position_val"],
+            "trader_count":        len(g["traders"]),
+            "directions":          directions,
+            "consensus_direction": consensus,
+            "signals":             g["signals"],
+        })
+    return result
 
 
 def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False) -> dict:
@@ -247,42 +376,58 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
 
             if kalshi_matches:
                 best_ticker = kalshi_matches[0][0]
+                # Derive implied Kalshi direction: Poly YES/NO on a semantically
+                # matching question maps directly to Kalshi YES/NO.
+                kalshi_dir = outcome.upper() if outcome.upper() in ("YES", "NO") else "UNKNOWN"
                 all_signals.append({
-                    "trader":        name,
-                    "monthly_pnl":   monthly,
-                    "poly_title":    title,
-                    "poly_outcome":  outcome,
-                    "poly_price":    price,
-                    "position_val":  val,
-                    "pct_pnl":       pct_pnl,
-                    "poly_url":      f"https://polymarket.com/event/{slug}",
-                    "kalshi_ticker": best_ticker,
-                    "kalshi_title":  kalshi_titles.get(best_ticker, ""),
-                    "match_score":   kalshi_matches[0][1],
+                    "trader":           name,
+                    "monthly_pnl":      monthly,
+                    "poly_title":       title,
+                    "poly_outcome":     outcome,
+                    "poly_price":       price,
+                    "position_val":     val,
+                    "pct_pnl":          pct_pnl,
+                    "poly_url":         f"https://polymarket.com/event/{slug}",
+                    "kalshi_ticker":    best_ticker,
+                    "kalshi_title":     kalshi_titles.get(best_ticker, ""),
+                    "match_score":      kalshi_matches[0][1],
+                    "kalshi_direction": kalshi_dir,
                 })
+
+    grouped = _group_signals_by_ticker(all_signals)
 
     print(f"\n{'='*100}")
     print(f"\n  Traders with open positions: {total_traders}")
     print(f"  Total significant positions: {total_pos}")
 
     if all_signals:
-        print(f"\n  Kalshi cross-references found ({len(all_signals)}):\n")
+        print(f"\n  Kalshi cross-references found ({len(all_signals)} raw, {len(grouped)} unique tickers):\n")
         all_signals.sort(key=lambda s: -s["position_val"])
         for s in all_signals:
             print(f"    [{s['trader']}]  {s['poly_outcome']} on {s['poly_title'][:45]}")
             print(f"      -> Kalshi: {s['kalshi_ticker']}  (match {s['match_score']:.0%})  "
-                  f"Poly price: {s['poly_price']:.2f}  Position: ${s['position_val']:,.0f}")
+                  f"Poly price: {s['poly_price']:.2f}  Position: ${s['position_val']:,.0f}  "
+                  f"=> Kalshi {s['kalshi_direction']}")
+
+        print(f"\n  Grouped by Kalshi ticker ({len(grouped)} markets):\n")
+        for g in sorted(grouped, key=lambda x: -x["total_position_val"]):
+            dirs = g["directions"]
+            dir_str = f"YES×{dirs.get('YES',0)} NO×{dirs.get('NO',0)}" if (dirs.get('YES',0) + dirs.get('NO',0)) > 1 else g["consensus_direction"]
+            print(f"    {g['kalshi_ticker']:<36}  ${g['total_position_val']:>10,.0f}  "
+                  f"{g['trader_count']} trader(s)  => {dir_str}")
+            print(f"      {g['kalshi_title'][:70]}")
     else:
         print("\n  No Kalshi cross-references found in this snapshot.")
 
     print()
 
     result = {
-        "traders_active":  total_traders,
-        "positions_total": total_pos,
-        "kalshi_signals":  all_signals,
-        "trader_data":     trader_data,
-        "run_at":          datetime.now(timezone.utc).isoformat(),
+        "traders_active":    total_traders,
+        "positions_total":   total_pos,
+        "kalshi_signals":    all_signals,
+        "grouped_signals":   grouped,
+        "trader_data":       trader_data,
+        "run_at":            datetime.now(timezone.utc).isoformat(),
     }
     return result
 

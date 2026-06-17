@@ -10,7 +10,7 @@ From the repo root. All tests are **offline-only** — no Kalshi, Polymarket,
 Manifold, PredictIt, OddsAPI, Metaculus, Claude CLI, or email calls are made.
 Network and subprocess boundaries are mocked with `unittest.mock.patch`.
 
-**Current count: 231 tests, 0 failures.**
+**Current count: 255 tests, 0 failures.**
 
 ---
 
@@ -22,7 +22,7 @@ Network and subprocess boundaries are mocked with `unittest.mock.patch`.
 | `scanner` | `tests/test_scanner.py` | `filter_markets` price-bounds, volume floors per bucket, close-time window, `expiration_time` fallback, keyword gate; `classify_time_horizon` boundary cases; `score_market` flag logic (all three modes), drift thresholds, spread signal, `sig_*` independence; `score_markets` sort order; `tag_watchlist_overlap` tagging and priority sort; watchlist force-flag (`flag_path=WATCHLIST`) |
 | `whales` | `tests/test_whales.py` | `detect_whale_activity` size threshold, direction detection, `scan_all_markets` aggregation |
 | `research_probe` | `tests/test_research_probe.py` | Stratified sampling (volume tiers, filter_pass annotation, target_n cap); `log_probe` insertion; probe rows excluded from paper/real_fill stats; forward scoring (WIN/LOSS/pending); `get_stats_probe` PENDING verdict and high-divergence subset; `run_probe` max-cap enforcement |
-| `smart_money` | `tests/test_smart_money.py` | `_is_binary_position` (YES/NO pass, sports outcomes reject, team names reject); `_is_sports_title` (game lines and competition bets detected, political/macro excluded); `_normalize` (stop words, case, punctuation, min length); `_match_to_kalshi` (2-keyword gate, threshold filtering, sort order, sports at 0.40, exact-title top-rank, single-keyword rejection) |
+| `smart_money` | `tests/test_smart_money.py` | `_is_binary_position` (YES/NO pass, sports outcomes reject, team names reject); `_is_sports_title` (game lines and competition bets detected, political/macro excluded); `_normalize` (stop words, case, punctuation, min length); `_match_to_kalshi` (2-keyword gate, threshold filtering, sort order, sports at 0.40, exact-title top-rank, single-keyword rejection); `_entity_contradiction` (US state mismatch, city mismatch, org-group mismatch, legitimate matches preserved); `_group_signals_by_ticker` (aggregation, direction voting, MIXED consensus, trader dedup) |
 
 ---
 
