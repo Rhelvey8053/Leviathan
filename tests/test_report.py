@@ -141,3 +141,134 @@ def test_no_conflict_when_no_base_rate():
     lines = report._signal_block(s, index=1)
     full = "\n".join(lines)
     assert "SIGNAL CONFLICT" not in full
+
+
+# ─── _qualifying: confidence filter and sorting ───────────────────────────────
+
+def _qs(direction="YES", confidence="MED", edge=0.10, second_pass=False):
+    """Minimal signal for _qualifying tests."""
+    return {
+        "direction":  direction,
+        "confidence": confidence,
+        "edge":       edge,
+        "second_pass": second_pass,
+    }
+
+
+def test_qualifying_excludes_pass_direction():
+    """Signals with direction=PASS must be excluded regardless of confidence."""
+    signals = [_qs(direction="PASS", confidence="HIGH")]
+    result  = report._qualifying(signals, threshold_rank=0)
+    assert result == []
+
+
+def test_qualifying_excludes_below_threshold():
+    """LOW confidence (rank 2) must be excluded when threshold_rank=1 (MED)."""
+    signals = [_qs(confidence="LOW")]
+    result  = report._qualifying(signals, threshold_rank=1)
+    assert result == []
+
+
+def test_qualifying_includes_at_threshold():
+    """MED confidence is included when threshold_rank=1."""
+    signals = [_qs(confidence="MED")]
+    result  = report._qualifying(signals, threshold_rank=1)
+    assert len(result) == 1
+
+
+def test_qualifying_second_pass_always_included():
+    """second_pass=True bypasses confidence threshold — included even at threshold_rank=0."""
+    signals = [_qs(confidence="LOW", second_pass=True)]
+    result  = report._qualifying(signals, threshold_rank=0)   # only HIGH (rank=0) passes normally
+    assert len(result) == 1
+
+
+def test_qualifying_sorts_by_confidence_then_edge():
+    """HIGH confidence signals come first; within same confidence, higher edge first."""
+    signals = [
+        _qs(confidence="MED",  edge=0.20),
+        _qs(confidence="HIGH", edge=0.10),
+        _qs(confidence="HIGH", edge=0.25),
+    ]
+    result = report._qualifying(signals, threshold_rank=1)
+    assert result[0]["confidence"] == "HIGH"
+    assert result[0]["edge"]       == 0.25   # highest edge in HIGH tier first
+    assert result[1]["confidence"] == "HIGH"
+    assert result[2]["confidence"] == "MED"
+
+
+def test_qualifying_empty_input():
+    """Empty signals list returns empty list without error."""
+    assert report._qualifying([], threshold_rank=1) == []
+
+
+# ─── _signal_block: additional signal types ───────────────────────────────────
+
+def test_spread_wide_shown_in_fired():
+    s = _signal(spread_wide=True, spread_pct=0.15)
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "Wide Spread" in full
+
+
+def test_whale_reversal_shown_in_fired():
+    s = _signal(whale_reversal=True)
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "Whale Reversal" in full
+
+
+def test_ob_flag_shown_in_fired():
+    s = _signal(ob_flag=True, ob_direction="YES", ob_imbalance=0.65)
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "Order Book" in full
+
+
+def test_watchlist_signal_shown_in_fired():
+    s = _signal(watchlist_signal=True)
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "Watchlist" in full
+
+
+def test_cross_market_poly_shown_when_gap_large():
+    """Polymarket price with gap >= 0.04 should appear in fired signals and cross-market section."""
+    s = _signal(
+        poly={"poly_price": 0.55, "price_gap": 0.40},
+    )
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "Cross-Market" in full
+    assert "Polymarket" in full
+
+
+def test_cross_market_poly_omitted_when_gap_small():
+    """Polymarket price with gap < 0.04 must NOT add to Cross-Market fired count."""
+    s = _signal(
+        poly={"poly_price": 0.16, "price_gap": 0.01},
+    )
+    full = "\n".join(report._signal_block(s, index=1))
+    # The cross-market section renders (any non-None poly shows prices), but
+    # the fired-signal counter must not increment for a tiny gap.
+    assert "Cross-Market x1" not in full
+
+
+def test_cross_market_ext_markets_rendered():
+    """ext_markets entries appear in the Cross-Market Prices section."""
+    s = _signal(ext_markets=[
+        {"source": "Manifold", "probability": 0.60, "price_gap": 0.45},
+    ])
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "Manifold" in full
+    assert "Cross-Market Prices" in full
+
+
+def test_smart_money_section_rendered():
+    """smart_money list entries appear in the Smart Money Activity section."""
+    s = _signal(smart_money=[{
+        "display_name": "TraderA",
+        "direction": "YES",
+        "avg_pct_pnl": 42.0,
+        "win_rate": 68.0,
+        "trade_count": 3,
+    }])
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "Smart Money Activity" in full
+    assert "TraderA" in full
+    assert "BUY YES" in full
