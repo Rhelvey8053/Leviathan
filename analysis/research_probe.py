@@ -97,7 +97,16 @@ PROBE_SYSTEM = (
     "announcement by the relevant authority) that directly speaks to the specific "
     "deadline in the market.\n"
     "11. EDGE REQUIREMENT: Only call YES or NO if your estimate differs from the market "
-    "price by at least 10 percentage points AND you have clear evidence. Otherwise PASS."
+    "price by at least 10 percentage points AND you have clear evidence. Otherwise PASS.\n"
+    "12. LEGISLATIVE MARKETS ('Will X bill pass the Senate/House by Y?'): Base rate for "
+    "any specific bill reaching a floor vote and passing is ~35%. A market priced above "
+    "55% requires specific primary-source evidence of unusual momentum: cloture already "
+    "cleared, the other chamber already passed it, or a confirmed floor vote with whip "
+    "count showing the votes are there. 'Has momentum' or 'could pass' do NOT qualify.\n"
+    "13. PRICE/LEVEL MARKETS ('Will X reach $Y?' or 'Will X be above/below Y%?'): Near "
+    "50/50 by construction — the crowd has already priced in the current trajectory. "
+    "Only deviate meaningfully from 50% if you find a specific, dated catalyst the "
+    "crowd has clearly not priced. Default to PASS unless current price is >20pp from 50%."
 )
 
 PROBE_SCHEMA = """

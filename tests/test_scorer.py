@@ -290,6 +290,17 @@ def test_system_prompt_has_entertainment_rule():
     assert "MUST be below 15%" in scorer.SYSTEM_PROMPT
 
 
+def test_system_prompt_has_legislative_rule():
+    assert "LEGISLATIVE MARKETS" in scorer.SYSTEM_PROMPT
+    assert "35%" in scorer.SYSTEM_PROMPT
+    assert "cloture" in scorer.SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_has_price_level_rule():
+    assert "PRICE/LEVEL MARKETS" in scorer.SYSTEM_PROMPT
+    assert "50/50" in scorer.SYSTEM_PROMPT
+
+
 # ─── Liquidity context ───────────────────────────────────────────────────────
 
 def test_liquidity_shown_when_volume_present():
