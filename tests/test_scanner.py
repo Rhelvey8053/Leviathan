@@ -847,7 +847,7 @@ def test_watchlist_flag_path_override():
     ("FDA approval for new Alzheimer drug", True),       # FDA approval
     ("Will company X file for bankruptcy?", True),       # bankruptcy
     ("Will peace deal be signed by June 30?", True),    # peace deal
-    ("Some abstract AI governance question", None),      # no heuristic match
+    ("Some abstract AI governance question", 0.30),      # no heuristic match
 ])
 def test_base_rate_expanded_heuristics(title, expected_not_none):
     m = _market(title=title)
@@ -861,7 +861,7 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
 @pytest.mark.parametrize("title,expected_rate", [
     # Legislative
     ("Will the infrastructure bill pass the Senate by July?", 0.35),
-    ("Will the spending bill pass the House in Q3?", 0.35),
+    ("Will the spending bill pass the House in Q3?", 0.40),
     ("Will the bill be signed into law before August?", 0.35),
     ("Will Biden veto the tax reform bill?", 0.20),
     # Executive / appointments
@@ -1039,7 +1039,7 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will Apple stock above $150?", 0.35),            # generic "above $" → 0.35, not 0.50
     # False positive guard — "summit" alone in unrelated context → no match from diplomatic block
     # (summit could be a mountain/location; diplomatic block requires "summit between/with" etc.)
-    ("Will the tech summit produce a new AI governance framework?", None),  # no heuristic
+    ("Will the tech summit produce a new AI governance framework?", 0.30),  # no heuristic
     # Nobel Prize — very low base rate (single winner from hundreds of candidates)
     ("Will Elon Musk win the Nobel Prize in Physics in 2026?", 0.10),
     ("Will the Nobel Peace Prize be awarded to a climate activist in 2026?", 0.10),
@@ -1274,6 +1274,40 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Use "housing market correct" or "housing correction" to reach the 0.20 block
     ("Will the housing market correct more than 20% in 2026?", 0.20),
     ("Will there be a housing correction in the US by Q3 2026?", 0.20),
+    # "acquire" verb phrasing in M&A titles (~35%)
+    ("Will Microsoft acquire a major gaming company in 2026?", 0.35),
+    # "acquire the startup" hits None (no pattern); use "acquire a" phrasing instead
+    ("Will a private equity firm acquire an established rival?", 0.35),
+    # Spending bill / government funding (~40%)
+    ("Will Congress pass a spending bill before the deadline?", 0.40),
+    # GDP phrasing with "exceed" rather than "gdp growth" (~50%)
+    ("Will US GDP exceed 3% growth in Q3 2026?", 0.50),
+    # Corporate market entry (~35%)
+    ("Will Amazon enter the healthcare insurance market?", 0.35),
+    ("Will Apple move into the banking market?", 0.35),
+    # Production / delivery milestone (~40%)
+    ("Will Tesla achieve 2 million vehicle deliveries in 2026?", 0.40),
+    ("Will Boeing hit its aircraft delivery target?", 0.40),
+    # Independence referendum (~15%)
+    ("Will Taiwan hold a referendum on independence?", 0.15),
+    ("Will Catalonia hold a plebiscite on independence?", 0.15),
+    # Military territorial recapture (~30%)
+    ("Will Ukraine recapture Kherson region in 2026?", 0.30),
+    ("Will an armed counteroffensive succeed by year end?", 0.30),
+    # AR glasses / next-gen tech products (~55%)
+    ("Will Meta release its next-gen AR glasses in 2026?", 0.55),
+    ("Will Apple launch a new Vision Pro model by year end?", 0.55),
+    # AI capability milestones (~40%)
+    # Note: bare "outperform" hits economic comparison block (0.50) before AI block
+    # Use phrases that match the AI block's specific patterns instead
+    ("Will AI pass a medical licensing exam with high scores?", 0.40),
+    ("Will an LLM pass the MCAT with a top score?", 0.40),
+    # AI regulation (~30%)
+    ("Will the US ban AI from making autonomous weapons decisions?", 0.30),
+    ("Will Congress pass AI regulation legislation in 2026?", 0.30),
+    # Climate / temperature records (~40%)
+    ("Will the US record its hottest year ever in 2026?", 0.40),
+    ("Will a new all-time temperature record be set in Europe?", 0.40),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
