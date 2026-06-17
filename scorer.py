@@ -319,6 +319,46 @@ def build_prompt(markets: list[dict]) -> str:
                 f"Determine whether Kalshi or Polymarket is better calibrated for this event."
             )
 
+        # Signal alignment summary — show how many independent sources agree on direction.
+        # Only appears when ≥2 sources have a directional opinion (≥5pp from neutral).
+        _s_yes = 0
+        _s_no  = 0
+        _hd    = m.get("heuristic_direction")
+        if _hd == "YES":                                    _s_yes += 1
+        elif _hd == "NO":                                   _s_no  += 1
+        _poly = m.get("poly") or {}
+        _pg = _poly.get("price_gap", 0) or 0
+        if abs(_pg) >= 0.05:
+            if _pg > 0:                                     _s_yes += 1
+            else:                                           _s_no  += 1
+        _cons = (m.get("ext_consensus") or {})
+        if abs(_cons.get("consensus_gap", 0) or 0) >= 0.05:
+            if _cons.get("consensus_dir") == "YES":         _s_yes += 1
+            elif _cons.get("consensus_dir") == "NO":        _s_no  += 1
+        _drift_pct = m.get("price_drift") or 0
+        if m.get("drift_flag"):
+            if _drift_pct < 0:                              _s_yes += 1
+            else:                                           _s_no  += 1
+        _wh = whale or {}
+        _wdir = _wh.get("whale_direction")
+        if _wh.get("whale_detected") and _wdir in ("YES", "NO"):
+            if _wdir == "YES":                              _s_yes += 1
+            else:                                           _s_no  += 1
+        if m.get("ob_flag"):
+            if m.get("ob_direction") == "YES":              _s_yes += 1
+            elif m.get("ob_direction") == "NO":             _s_no  += 1
+        _sm_n = len([s for s in (m.get("smart_money") or []) if s.get("direction") in ("YES","NO")])
+        if _sm_n >= 2:
+            _sm_yes = sum(1 for s in (m.get("smart_money") or []) if s.get("direction") == "YES")
+            if _sm_yes > _sm_n / 2:                        _s_yes += 1
+            elif _sm_yes < _sm_n / 2:                      _s_no  += 1
+
+        _total_s = _s_yes + _s_no
+        if _total_s >= 2:
+            _lean = "YES" if _s_yes > _s_no else ("NO" if _s_no > _s_yes else "MIXED")
+            _align = "ALL" if (_s_yes == 0 or _s_no == 0) else f"{max(_s_yes, _s_no)}/{_total_s}"
+            lines.append(f"   SIGNAL SUMMARY: {_total_s} independent source(s) → {_align} lean {_lean}")
+
         if whale and whale.get("whale_detected"):
             lines.append(
                 f"   WHALE ALERT: Large trades detected buying {whale.get('whale_direction', 'unknown')}. "
