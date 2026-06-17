@@ -250,3 +250,16 @@ def test_cross_market_promote_small_gap_excluded():
     m = {"ticker": "KXTEST", "title": "Will X happen?", "mid_price": 0.50}
     matches = polymarket.match_markets([m], idx, _CFG, min_gap=0.15)
     assert "KXTEST" not in matches
+
+
+def test_cross_market_promote_combined_gap_and_score():
+    """Simulate main.py: both min_gap=0.15 AND min_match_score=0.65 must be satisfied."""
+    idx = polymarket.build_index([_raw("Will X happen?", prices='["0.80","0.20"]')])
+    # Large gap (0.30) but title similarity enforced via min_match_score
+    m = {"ticker": "KXTEST", "title": "Will X happen?", "mid_price": 0.50}
+    # Should match — identical title, big gap
+    good = polymarket.match_markets([m], idx, _CFG, min_gap=0.15, min_match_score=0.65)
+    assert "KXTEST" in good
+    # With a high score threshold this exact title should still match (it's identical)
+    also_good = polymarket.match_markets([m], idx, _CFG, min_gap=0.15, min_match_score=0.90)
+    assert "KXTEST" in also_good  # identical title scores 1.0, beats any threshold

@@ -119,6 +119,7 @@
     "min_price_gap": 0.0,
     "cross_market_promote": true,
     "cross_market_min_gap": 0.15,
+    "cross_market_min_match_score": 0.65,
     "cross_market_max_candidates": 50
   },
 
