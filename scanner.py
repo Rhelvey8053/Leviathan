@@ -223,7 +223,14 @@ def estimate_base_rate(market: dict) -> float | None:
         (["below $", "under $", "fall below", "drop below",
           "dip below", "dip to $"], 0.35),
         # Corporate events — low base rate, most announcements don't complete
+        # IPO announcement timing markets: "when will X announce an IPO?"
+        (["announce an ipo", "officially announce an ipo",
+          "ipo announcement", "going public"], 0.25),
         (["ipo by", "ipo before", "initial public offering"], 0.30),
+        # Sports debut/call-up markets: "will X make his MLB debut by Y?"
+        (["make his mlb debut", "make her mlb debut",
+          "play in a game for", "called up", "nhl debut",
+          "nba debut", "make his debut", "make her debut"], 0.35),
         (["merger", "acquisition", "acquired by", "take private",
           "buyout", "takeover"], 0.35),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt"], 0.15),
