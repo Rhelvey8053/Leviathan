@@ -221,6 +221,9 @@ def main(resolve: bool = True):
     all_wins     = sum(1 for r in all_resolved if r.get("result") == "WIN")
     all_wr       = (all_wins / len(all_resolved) * 100) if all_resolved else None
 
+    # Brier score — calibration metric
+    brier = logger.get_brier_score()
+
     print()
     print(_rule("="))
     print("COMBINED SUMMARY")
@@ -229,6 +232,14 @@ def main(resolve: bool = True):
     print(f"  Resolved:     {len(all_resolved)}")
     print(f"  Win rate:     {f'{all_wr:.1f}%' if all_wr is not None else '— (none resolved)'}")
     print(f"  Net PnL:      {_fmt_pnl(all_pnl)} (at $10/contract)")
+    bs = brier.get("brier_score")
+    bs_n = brier.get("n", 0)
+    bs_label = brier.get("label", "")
+    if bs is not None:
+        print(f"  Brier Score:  {bs:.4f}  ({bs_label}, n={bs_n})")
+        print(f"                [0=perfect, 0.25=random, >0.25=poor]")
+    else:
+        print(f"  Brier Score:  PENDING — no resolved paper signals yet")
     print()
     print(_rule())
     print()

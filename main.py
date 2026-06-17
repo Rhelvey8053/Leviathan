@@ -499,7 +499,8 @@ def main():
             week_sigs = logger.get_week_signals(days=7)
             if week_sigs:
                 weekly_body = report.compile_weekly_digest(week_sigs, logger.get_stats(), config,
-                                                          flag_path_stats=logger.get_stats_by_flag_path())
+                                                          flag_path_stats=logger.get_stats_by_flag_path(),
+                                                          brier=logger.get_brier_score())
                 report.send_report(weekly_body, [], 0, config,
                                    subject_override=f"Leviathan Weekly — {now_local.strftime('%b %d, %Y')}")
                 print("      Weekly digest sent")

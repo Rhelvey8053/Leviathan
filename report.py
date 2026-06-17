@@ -668,7 +668,8 @@ def compile_report(
 # ── Weekly digest ─────────────────────────────────────────────────────────────
 
 def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
-                          flag_path_stats: list | None = None) -> str:
+                          flag_path_stats: list | None = None,
+                          brier: dict | None = None) -> str:
     now_utc  = datetime.now(timezone.utc)
     week_ago = now_utc - timedelta(days=7)
     date_str = now_utc.strftime("%B %d, %Y")
@@ -740,6 +741,14 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
     out.append(f"  Win Rate:       {f'{wr:.1f}%' if wr is not None else '— (none resolved yet)'}")
     out.append(f"  Avg Edge:       {_pct(ae) if ae is not None else '—'}")
     out.append(f"  Hypo P&L:       {f'${pnl:.2f}' if pnl is not None else '—'}")
+    if brier:
+        bs = brier.get("brier_score")
+        bs_n = brier.get("n", 0)
+        bs_label = brier.get("label", "")
+        if bs is not None:
+            out.append(f"  Brier Score:    {bs:.4f}  ({bs_label}, n={bs_n})  [0=perfect, 0.25=random]")
+        else:
+            out.append("  Brier Score:    PENDING — no resolved signals yet")
     out.append("")
 
     if flag_path_stats:

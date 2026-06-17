@@ -853,3 +853,56 @@ def test_log_run_idempotent_replace(tmp_db):
         rows = conn.execute("SELECT * FROM runs WHERE run_id='run-idem'").fetchall()
     assert len(rows) == 1
     assert rows[0]["markets_scanned"] == 200  # second write wins
+
+
+# ─── get_brier_score ──────────────────────────────────────────────────────────
+
+def test_brier_score_pending_when_no_resolved(tmp_db):
+    """Returns PENDING label and None score when no resolved signals exist."""
+    result = logger.get_brier_score()
+    assert result["brier_score"] is None
+    assert result["n"] == 0
+    assert "PENDING" in result["label"]
+
+
+def test_brier_score_perfect_for_all_wins(tmp_db):
+    """Brier score = 0 when every YES signal wins with estimate=1.0."""
+    for i in range(3):
+        with logger._db() as conn:
+            conn.execute(
+                "INSERT INTO signals "
+                "(call_id,timestamp,ticker,direction,our_estimate,result,outcome,source) "
+                "VALUES (?,datetime('now'),?,?,?,?,?,?)",
+                (f"b{i}", f"KX{i}", "YES", 1.0, "WIN", "YES", "paper")
+            )
+    result = logger.get_brier_score()
+    assert result["brier_score"] == pytest.approx(0.0)
+    assert result["n"] == 3
+
+
+def test_brier_score_25_for_random(tmp_db):
+    """Brier score = 0.25 when estimate=0.5 and outcomes are 50/50."""
+    for i, (win, est) in enumerate([(True, 0.5), (False, 0.5)]):
+        outcome = "YES" if win else "NO"
+        result_val = "WIN" if win else "LOSS"
+        with logger._db() as conn:
+            conn.execute(
+                "INSERT INTO signals "
+                "(call_id,timestamp,ticker,direction,our_estimate,result,outcome,source) "
+                "VALUES (?,datetime('now'),?,?,?,?,?,?)",
+                (f"c{i}", f"KXR{i}", "YES", est, result_val, outcome, "paper")
+            )
+    result = logger.get_brier_score()
+    assert result["brier_score"] == pytest.approx(0.25)
+
+
+def test_brier_score_excludes_probe_rows(tmp_db):
+    """Probe rows (source=research_probe) are excluded from paper Brier score."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,our_estimate,result,outcome,source) "
+            "VALUES ('probe1',datetime('now'),'KXP','YES',0.9,'WIN','YES','research_probe')"
+        )
+    result = logger.get_brier_score()
+    assert result["n"] == 0  # probe not counted
