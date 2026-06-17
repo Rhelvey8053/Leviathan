@@ -165,6 +165,29 @@ def estimate_base_rate(market: dict) -> float | None:
           "challenge in the primary", "defeated in the primary",
           "lose the primary", "lost the primary",
           "primary opponent"], 0.30),
+        # Political withdrawal — candidate dropping out of a race → ~30%
+        # "withdraw from the" shorter fragment handles year-insertion ("from the 2024 race")
+        (["suspend his campaign", "suspend her campaign",
+          "end his campaign", "end her campaign",
+          "withdraw his candidacy", "withdraw her candidacy",
+          "exit the race", "quit the race",
+          "drop out of the", "withdraw from the"], 0.30),
+        # Special election — usually called when a seat becomes vacant → ~45%
+        # Congress almost always eventually fills vacancies, but timing is uncertain
+        (["special election", "special senate election", "special house election",
+          "special congressional election", "fill the vacancy",
+          "senate vacancy", "house vacancy"], 0.45),
+        # Constitutional amendment — requires supermajority in both chambers + 3/4 states → ~5%
+        (["constitutional amendment", "amend the constitution",
+          "constitutional convention", "repeal the 2nd amendment",
+          "repeal the amendment", "electoral college amendment",
+          "equal rights amendment", "balanced budget amendment"], 0.05),
+        # Ballot disqualification — courts rarely disqualify candidates → ~20%
+        # "disqualified from the" handles year insertion ("from the 2024 ballot")
+        (["ballot disqualification", "ineligible for the ballot",
+          "kicked off the ballot", "barred from the ballot",
+          "disqualified from the", "removed from the ballot",
+          "disqualified from running", "disqualified from appearing"], 0.20),
         # Congressional spending — continuing resolutions / omnibus bills (must come before
         # generic "signed into law" because "omnibus bill" is a more specific match)
         (["continuing resolution", "omnibus bill", "appropriations bill",
@@ -328,11 +351,13 @@ def estimate_base_rate(market: dict) -> float | None:
           "eps beat", "earnings surprise", "earnings estimate"], 0.50),
         # Regulatory approvals — must come BEFORE crypto ETF block ("spot etf" → 0.50)
         # and BEFORE merger/acquisition block ("merger" → 0.35)
-        (["fda approval", "fda approves", "fda cleared"], 0.40),
+        (["fda approve", "fda approval", "fda approves", "fda cleared",
+          "fda authorization", "fda authorize", "fda clears"], 0.40),
         (["sec approve", "sec approves", "sec approval",
           "fcc approve", "fcc approves", "fcc approval",
           "ferc approve", "ferc approves", "ferc approval",
-          "regulatory approval", "regulatory clearance"], 0.40),
+          "regulatory approval", "regulatory clearance",
+          "cfpb approve", "ftc approve", "epa approve"], 0.40),
         # Crypto — price-level markets are 50/50 by definition
         (["bitcoin", "btc price", "btc above", "btc below",
           "ethereum", "eth price", "eth above", "eth below",
@@ -355,6 +380,14 @@ def estimate_base_rate(market: dict) -> float | None:
           "nba debut", "make his debut", "make her debut"], 0.35),
         (["merger", "acquisition", "acquired by", "take private",
           "buyout", "takeover"], 0.35),
+        # Divestiture / forced sale — regulatory or activist-driven → ~35%
+        # Placed separately from "merger" to catch "sold by" / "forced to sell" framing
+        (["be sold by", "forced to sell", "forced sale", "divest",
+          "divestiture", "forced divestiture", "sell off",
+          "spin off its", "spin out"], 0.35),
+        # Stock split — corporate event, relatively rare in any given 3-6 month window → ~20%
+        (["stock split", "share split", "reverse stock split",
+          "forward stock split", "split its stock", "announce a split"], 0.20),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt"], 0.15),
         # Tech / social media regulation — low base rate (regulation takes years)
         (["tiktok ban", "ban tiktok", "tiktok be banned", "ban on tiktok",
@@ -393,12 +426,18 @@ def estimate_base_rate(market: dict) -> float | None:
         (["starship", "falcon heavy", "falcon 9",
           "spacex launch", "rocket launch"], 0.40),    # SpaceX has high cadence
         (["nasa", "moon landing", "lunar gateway", "artemis",
-          "space station", " iss ", "james webb"], 0.30),  # NASA missions often delayed
+          "space station", " iss ", "james webb",
+          "land on the moon", "land astronauts on the moon",
+          "crewed lunar", "lunar lander", "lunar module"], 0.30),  # space missions often delayed
         # Health / pandemic / drug trials
         (["phase 3", "clinical trial", "phase 2",
           "drug trial", "clinical study"], 0.35),      # Phase 3 trials ~35-50% success
         (["pandemic", "epidemic", "outbreak",
           "public health emergency"], 0.25),           # Low base rate for declared emergencies
+        # COVID / virus variant classification — "variant of concern" declared occasionally → ~30%
+        (["variant of concern", "covid variant", "new variant",
+          "sars-cov", "covid strain", "virus variant",
+          "declare a public health emergency", "mpox", "monkeypox"], 0.30),
         # Health / mortality markets — "will X die/survive before Y?"
         # Very specific phrases to avoid false positives from medical policy markets
         (["die before", "die by", "pass away before", "pass away by",
