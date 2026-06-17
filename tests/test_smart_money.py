@@ -19,6 +19,8 @@ from analysis.smart_money_scan import (
     _is_sports_title,
     _normalize,
     _match_to_kalshi,
+    _entity_contradiction,
+    _group_signals_by_ticker,
 )
 
 
@@ -248,3 +250,204 @@ def test_match_threshold_0_40_raises_bar():
     tickers = [t for t, _ in matches]
     assert "KXCAPCONTROL-29" in tickers
     assert "KXCOLONIZEMARS-50" not in tickers
+
+
+# ─── _entity_contradiction ───────────────────────────────────────────────────
+
+class TestEntityContradiction:
+    # US state mismatches
+
+    def test_state_mismatch_texas_vs_utah(self):
+        assert _entity_contradiction(
+            "Will Republicans win the Texas Senate race?",
+            "Will Republicans win the Utah Senate race?",
+        ) is True
+
+    def test_state_mismatch_florida_vs_georgia(self):
+        assert _entity_contradiction(
+            "Will Florida pass the ballot initiative?",
+            "Will Georgia pass the ballot initiative?",
+        ) is True
+
+    def test_state_mismatch_california_vs_nevada(self):
+        assert _entity_contradiction(
+            "California governor race 2026",
+            "Nevada governor race 2026",
+        ) is True
+
+    def test_same_state_no_contradiction(self):
+        assert _entity_contradiction(
+            "Will Republicans win the Texas Senate race?",
+            "Will the Texas Senate pass HB 1234?",
+        ) is False
+
+    def test_no_states_no_contradiction(self):
+        assert _entity_contradiction(
+            "Will the Fed cut rates in 2026?",
+            "Will the Fed pause rate hikes?",
+        ) is False
+
+    # City mismatches
+
+    def test_city_mismatch_london_vs_la(self):
+        assert _entity_contradiction(
+            "Will Khan win the London mayoral race?",
+            "Will Bass win the Los Angeles mayor race?",
+        ) is True
+
+    def test_city_mismatch_paris_vs_berlin(self):
+        assert _entity_contradiction(
+            "Will the Paris climate accords be upheld?",
+            "Will the Berlin talks succeed?",
+        ) is True
+
+    def test_same_city_no_contradiction(self):
+        assert _entity_contradiction(
+            "Will the London mayoral election go to a runoff?",
+            "Will the London mayor approve the new housing plan?",
+        ) is False
+
+    def test_no_cities_no_contradiction(self):
+        assert _entity_contradiction(
+            "Will NATO expand by 2027?",
+            "Will NATO invoke Article 5?",
+        ) is False
+
+    # Organization mismatches
+
+    def test_org_mismatch_opec_vs_eu(self):
+        assert _entity_contradiction(
+            "Will Venezuela leave OPEC before 2027?",
+            "Will Hungary leave the European Union before 2027?",
+        ) is True
+
+    def test_org_mismatch_nato_vs_asean(self):
+        assert _entity_contradiction(
+            "Will Turkey leave NATO?",
+            "Will Myanmar leave ASEAN?",
+        ) is True
+
+    def test_org_mismatch_imf_vs_wto(self):
+        assert _entity_contradiction(
+            "Will Argentina reach an IMF deal?",
+            "Will China join the WTO dispute panel?",
+        ) is True
+
+    def test_same_org_no_contradiction(self):
+        assert _entity_contradiction(
+            "Will the EU impose new sanctions?",
+            "Will the European Union expand by 2030?",
+        ) is False
+
+    # Legitimate cross-references — must NOT be rejected
+
+    def test_no_contradiction_political_macro(self):
+        assert _entity_contradiction(
+            "Will Republicans win the 2028 presidential election?",
+            "Will Republicans control the White House after 2028?",
+        ) is False
+
+    def test_no_contradiction_fed_rates(self):
+        assert _entity_contradiction(
+            "Will the Fed cut rates before June 2026?",
+            "Will the Fed cut rates at the June 2026 meeting?",
+        ) is False
+
+    def test_no_contradiction_israel_titles(self):
+        assert _entity_contradiction(
+            "Will Israel and Lebanon reach a ceasefire?",
+            "Will Israel attack Iran before 2027?",
+        ) is False
+
+    def test_no_contradiction_empty_titles(self):
+        assert _entity_contradiction("", "") is False
+
+
+# ─── _group_signals_by_ticker ────────────────────────────────────────────────
+
+def _make_signal(ticker: str, trader: str, direction: str, val: float) -> dict:
+    return {
+        "kalshi_ticker":    ticker,
+        "kalshi_title":     f"Title for {ticker}",
+        "trader":           trader,
+        "kalshi_direction": direction,
+        "position_val":     val,
+        "poly_title":       "Some poly title",
+        "poly_outcome":     direction,
+        "poly_price":       0.60,
+        "match_score":      0.75,
+        "monthly_pnl":      1_000_000,
+        "pct_pnl":          10.0,
+        "poly_url":         "https://polymarket.com/event/test",
+    }
+
+
+def test_group_single_signal():
+    signals = [_make_signal("KXTICKER-28", "Alice", "YES", 5000)]
+    groups = _group_signals_by_ticker(signals)
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["kalshi_ticker"] == "KXTICKER-28"
+    assert g["total_position_val"] == 5000
+    assert g["trader_count"] == 1
+    assert g["consensus_direction"] == "YES"
+    assert g["directions"]["YES"] == 1
+
+
+def test_group_two_traders_same_ticker():
+    signals = [
+        _make_signal("KXTICKER-28", "Alice", "YES", 3000),
+        _make_signal("KXTICKER-28", "Bob",   "YES", 2000),
+    ]
+    groups = _group_signals_by_ticker(signals)
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["total_position_val"] == 5000
+    assert g["trader_count"] == 2
+    assert g["consensus_direction"] == "YES"
+
+
+def test_group_mixed_directions():
+    signals = [
+        _make_signal("KXTICKER-28", "Alice", "YES", 3000),
+        _make_signal("KXTICKER-28", "Bob",   "NO",  2000),
+    ]
+    groups = _group_signals_by_ticker(signals)
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["consensus_direction"] == "MIXED"
+    assert g["directions"]["YES"] == 1
+    assert g["directions"]["NO"] == 1
+
+
+def test_group_two_tickers():
+    signals = [
+        _make_signal("KXTICKER-28",  "Alice", "YES", 3000),
+        _make_signal("KXTICKER2-29", "Alice", "NO",  2000),
+    ]
+    groups = _group_signals_by_ticker(signals)
+    tickers = {g["kalshi_ticker"] for g in groups}
+    assert tickers == {"KXTICKER-28", "KXTICKER2-29"}
+    assert len(groups) == 2
+
+
+def test_group_same_trader_deduped_in_count():
+    signals = [
+        _make_signal("KXTICKER-28", "Alice", "YES", 1000),
+        _make_signal("KXTICKER-28", "Alice", "YES", 1000),
+    ]
+    groups = _group_signals_by_ticker(signals)
+    g = groups[0]
+    assert g["trader_count"] == 1  # Alice counted once
+    assert g["total_position_val"] == 2000  # but both position values summed
+
+
+def test_group_empty_signals():
+    groups = _group_signals_by_ticker([])
+    assert groups == []
+
+
+def test_group_unknown_direction():
+    signals = [_make_signal("KXTICKER-28", "Alice", "UNKNOWN", 1000)]
+    groups = _group_signals_by_ticker(signals)
+    assert groups[0]["consensus_direction"] == "UNKNOWN"
