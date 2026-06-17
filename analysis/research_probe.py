@@ -166,7 +166,15 @@ PROBE_SYSTEM = (
     "strictly. BTC 50% above current in 3 months ~25%; 2x in 6 months ~20%; near "
     "current price near 50/50. 'Institutional adoption', 'ETF flows', 'halving "
     "cycle', 'on-chain data' are widely cited and already priced in. Default to "
-    "PASS unless price is more than 25pp from 50%."
+    "PASS unless price is more than 25pp from 50%.\n"
+    "28. SHORT-HORIZON EDGE DECAY (INTRADAY/WEEKLY — closing within 7 days): "
+    "Current market price is more informative than long-run heuristic base rates "
+    "for near-term markets. Apply a HIGHER bar: require 15pp edge (not standard "
+    "10pp) AND primary-source evidence dated within 72 hours. Heuristic base rates "
+    "reflect long-run averages, not this specific situation. Avoid HIGH confidence "
+    "unless event has already occurred or book is clearly lagged. Default to PASS "
+    "on short-horizon heuristic-flagged markets unless evidence is exceptionally "
+    "clear and recent."
 )
 
 PROBE_SCHEMA = """

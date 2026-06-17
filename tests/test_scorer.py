@@ -672,3 +672,15 @@ def test_heuristic_flag_reason_omits_lean_when_neutral():
     prompt = scorer.build_prompt([m])
     assert "leans YES" not in prompt
     assert "leans NO" not in prompt
+
+
+# ─── Calibration rule 28 ─────────────────────────────────────────────────────
+
+def test_rule_28_short_horizon_decay_in_system_prompt():
+    """Rule 28 covers short-horizon edge decay for INTRADAY/WEEKLY markets."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "28." in sp
+    assert "SHORT-HORIZON" in sp or "short-horizon" in sp.lower()
+    assert "INTRADAY" in sp or "intraday" in sp.lower()
+    assert "72 hours" in sp or "72h" in sp
+    assert "15pp" in sp or "15 pp" in sp
