@@ -198,6 +198,27 @@ def build_prompt(markets: list[dict]) -> str:
         if m.get("base_rate") is not None:
             lines.append(f"   Base rate estimate: {m['base_rate'] * 100:.1f}%")
 
+        vol_total = float(m.get("volume_fp") or m.get("volume") or 0)
+        vol_24h   = float(m.get("volume_24h_fp") or 0)
+        if vol_total > 0 and vol_24h > 0:
+            vol_pct = vol_24h / vol_total * 100
+            if vol_pct >= 20:
+                lines.append(
+                    f"   VOLUME SPIKE: {vol_24h:.0f} contracts traded in past 24h "
+                    f"({vol_pct:.0f}% of total {vol_total:.0f}) — recent market activity is elevated."
+                )
+
+        prev_p = float(m.get("previous_price_dollars") or 0)
+        last_p = float(m.get("last_price_dollars") or 0)
+        if prev_p > 0 and last_p > 0:
+            jump_pct = (last_p - prev_p) / prev_p * 100
+            if abs(jump_pct) >= 20:
+                dir_word = "UP" if jump_pct > 0 else "DOWN"
+                lines.append(
+                    f"   PRICE JUMP: Last traded price moved {dir_word} {abs(jump_pct):.0f}% "
+                    f"vs previous snapshot ({prev_p*100:.1f}% → {last_p*100:.1f}%)."
+                )
+
         lines.append("")
 
     return "\n".join(lines)
