@@ -118,6 +118,19 @@ def build_prompt(markets: list[dict]) -> str:
         lines.append(f"   Current market price (YES): {f'{mid_price * 100:.1f}%' if mid_price is not None else 'unknown'}")
         lines.append(f"   Closes: {m.get('close_time') or m.get('expiration_time', '')}")
 
+        # Tell Claude WHY this market was flagged
+        fp = m.get("flag_path")
+        if fp == "HEURISTIC":
+            br = m.get("base_rate")
+            br_str = f" — heuristic base rate {br*100:.0f}%" if br is not None else ""
+            lines.append(f"   FLAG REASON: HEURISTIC base rate mismatch{br_str} vs market price")
+        elif fp == "DRIFT":
+            lines.append(f"   FLAG REASON: DRIFT — market price has moved significantly from last traded price")
+        elif fp == "WATCHLIST":
+            lines.append(f"   FLAG REASON: WATCHLIST — top Polymarket traders have open positions on this market")
+        elif fp == "EDGE":
+            lines.append(f"   FLAG REASON: EDGE — significant gap between heuristic estimate and market price")
+
         if whale and whale.get("whale_detected"):
             lines.append(
                 f"   WHALE ALERT: Large trades detected buying {whale.get('whale_direction', 'unknown')}. "
