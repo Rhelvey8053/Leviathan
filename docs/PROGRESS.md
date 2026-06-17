@@ -107,6 +107,13 @@ TRACK RECORD section of the weekly email with label and n.
     social media age restrictions (30%), corporate leadership retention (65%),
     volcanic eruption (5%), common currency (10%), economic performance comparisons (50%)
 29. `65d81d6` — Third BR_NONE gap-fill pass: 13 new categories + 22 tests (765)
+30. `8b6a540` — Fourth BR_NONE gap-fill pass: 12 new categories + 20 tests (785)
+    "acquire" verb forms, spending bill, GDP phrasing, corporate market entry,
+    production/delivery milestones, independence referendum, military recapture,
+    AR glasses, AI capability milestones, AI regulation, climate records, calibration
+    rule alignment fixes
+31. `d34aace` — Final BR_NONE gap-fill: athlete retirement, trailer release, AGI (791)
+    VALIDATED on real Kalshi snapshot (28 filtered markets): BR_NONE = 0/28 = 0.0%
     Student loan forgiveness (30%), healthcare reform (20%), rejoin international agreement (25%),
     data leak / gov't hack, civil war (25%), political scandal (45%),
     autonomous vehicle (25%), quantum computing (10%), Mars mission (15%),
