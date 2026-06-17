@@ -1308,6 +1308,15 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Climate / temperature records (~40%)
     ("Will the US record its hottest year ever in 2026?", 0.40),
     ("Will a new all-time temperature record be set in Europe?", 0.40),
+    # Athlete / player retirement (~30%)
+    ("Will Draymond Green announce his retirement before the 2026-27 season?", 0.30),
+    ("Will LeBron James officially retire from professional basketball?", 0.30),
+    # Trailer / media preview release (~25%)
+    ("Will the official trailer for Spider-Man: Beyond the Spider-Verse be released?", 0.25),
+    ("Will the teaser trailer for Avatar 3 be released by Q2?", 0.25),
+    # AGI announcement (~25%)
+    ("Will any company announce that it has achieved Artificial General Intelligence?", 0.25),
+    ("Will a lab claim to have achieved AGI by 2027?", 0.25),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
