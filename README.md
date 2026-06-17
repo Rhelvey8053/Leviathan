@@ -188,15 +188,15 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-380 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+457 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|
-| `tests/test_logger.py` | Payoff math, schema migration, fill matching, stats separation |
-| `tests/test_scanner.py` | Filter gates, flag modes, drift thresholds, watchlist tagging |
+| `tests/test_logger.py` | Payoff math, schema migration, fill matching, stats separation, get_stats_by_sig, log_run |
+| `tests/test_scanner.py` | Filter gates, flag modes, drift thresholds, watchlist tagging, heuristic base rates |
 | `tests/test_whales.py` | Whale detection logic, scan_all_markets |
-| `tests/test_scorer.py` | build_prompt() signals, flag reason lines, calibration rules |
-| `tests/test_report.py` | Signal block formatting, flag path labels, heuristic base rate display |
+| `tests/test_scorer.py` | build_prompt() signals, flag reasons, calibration rules, cross-market/poly/whale/OB/spread |
+| `tests/test_report.py` | Signal block, _qualifying, compile_report, compile_weekly_digest, flag path labels |
 | `tests/test_research_probe.py` | Stratified sampling, probe logging, forward scoring |
 | `tests/test_smart_money.py` | Binary position filter, sports title filter, keyword gate, match scoring |
 
