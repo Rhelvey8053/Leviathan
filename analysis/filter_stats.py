@@ -96,6 +96,7 @@ def main():
     dropped_keyword    = 0
     dropped_time       = 0
     dropped_oi         = 0
+    keyword_hits: dict[str, int] = {}
 
     for m in all_markets:
         vol = float(m.get("volume_fp") or m.get("volume") or 0)
@@ -113,8 +114,10 @@ def main():
             dropped_price += 1
             continue
         title = (m.get("title") or "").lower()
-        if any(kw in title for kw in keywords):
+        hit_kw = next((kw for kw in keywords if kw in title), None)
+        if hit_kw:
             dropped_keyword += 1
+            keyword_hits[hit_kw] = keyword_hits.get(hit_kw, 0) + 1
             continue
         close_str = m.get("close_time") or m.get("expiration_time")
         if not close_str:
@@ -132,6 +135,13 @@ def main():
     print(f"    Dropped (price OOB):      {dropped_price:>5}")
     print(f"    Dropped (keyword match):  {dropped_keyword:>5}")
     print(f"    Dropped (time window):    {dropped_time:>5}")
+
+    if keyword_hits:
+        top_kws = sorted(keyword_hits.items(), key=lambda x: -x[1])[:10]
+        print()
+        print("    Top efficient-market keywords (markets dropped):")
+        for kw, cnt in top_kws:
+            print(f"      {cnt:>4}  {kw}")
     print()
 
     # Stage 2: dedup
@@ -158,6 +168,18 @@ def main():
     print("  Flag path breakdown:")
     for path, count in sorted(path_counts.items(), key=lambda x: -x[1]):
         print(f"    {path:<20}  {count:>4}")
+
+    # Sig_ field counts across all scored markets (mode-independent signals)
+    n_sig_edge    = sum(1 for m in scored if m.get("sig_edge"))
+    n_sig_drift   = sum(1 for m in scored if m.get("sig_drift"))
+    n_sig_br_none = sum(1 for m in scored if m.get("sig_br_none"))
+    n_sig_both    = sum(1 for m in scored if m.get("sig_edge") and m.get("sig_drift"))
+    print()
+    print("  Mode-independent signal presence (all scored markets):")
+    print(f"    sig_edge:     {n_sig_edge:>4}  ({n_sig_edge/len(scored)*100:.0f}%)" if scored else "    sig_edge: 0")
+    print(f"    sig_drift:    {n_sig_drift:>4}  ({n_sig_drift/len(scored)*100:.0f}%)" if scored else "    sig_drift: 0")
+    print(f"    sig_br_none:  {n_sig_br_none:>4}  ({n_sig_br_none/len(scored)*100:.0f}%)" if scored else "    sig_br_none: 0")
+    print(f"    both edge+drift: {n_sig_both:>3}")
 
     # Watchlist overlap
     sig_cache = os.path.join(ROOT, "data", "smart_money", "latest_signals.json")
