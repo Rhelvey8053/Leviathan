@@ -11,6 +11,10 @@ BUCKETS = [
 
 BUCKET_PRIORITY = {b[0]: i for i, b in enumerate(BUCKETS)}
 
+# Watchlist trader set — injected by main.py at startup for priority scoring.
+# Markets where a top Polymarket trader holds a position get a boost.
+_WATCHLIST_TICKERS: set[str] = set()
+
 
 def classify_time_horizon(close_time: datetime, now: datetime) -> str:
     """Returns the time bucket label for a market based on days until close."""
@@ -25,19 +29,21 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
     """
     Removes markets likely already efficiently priced before any scoring.
     Filters out markets that match ANY of the following:
-      1. Volume > max_volume_filter
-      2. Volume < min_volume
-      3. Title contains efficient market keywords
-      4. Closing in < min_days_to_close
-      5. Closing in > max_days_to_close
+      1. Volume > max_volume_filter (efficiently priced by crowd)
+      2. Volume < bucket min_volume
+      3. Open interest < min_open_interest (ghost markets, no real participants)
+      4. Title contains efficient market keyword
+      5. Closing outside [min_days_to_close, max_days_to_close]
+      6. Mid price outside [min_market_price, max_market_price]
     """
     cfg          = config.get("markets", {})
     global_min_vol  = cfg.get("min_volume", 500)
-    max_vol         = cfg.get("max_volume_filter", 150000)
+    max_vol         = cfg.get("max_volume_filter", 75000)
     min_days        = cfg.get("min_days_to_close", 0)
     max_days        = cfg.get("max_days_to_close", 180)
     min_price       = cfg.get("min_market_price", 0.05)
     max_price       = cfg.get("max_market_price", 0.95)
+    min_oi          = cfg.get("min_open_interest", 0)
     bucket_vol      = cfg.get("bucket_min_volume", {})
     keywords        = [k.lower() for k in cfg.get("efficient_market_keywords", [])]
 
@@ -51,6 +57,12 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
 
         if volume > max_vol:
             continue
+
+        # Open interest floor — exclude ghost markets with no active participants
+        if min_oi > 0:
+            oi = float(m.get("open_interest_fp") or m.get("open_interest") or 0)
+            if oi < min_oi:
+                continue
 
         # Price bounds — exclude near-certain and tail-probability contracts
         yes_bid = float(m.get("yes_bid_dollars") or m.get("yes_bid") or 0)
@@ -87,6 +99,30 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
     return filtered
 
 
+def dedup_by_event(markets: list[dict]) -> list[dict]:
+    """
+    When multiple markets share the same event_ticker, keep only the one with
+    the highest volume. Prevents the same underlying event (e.g. 10 Prison Break
+    expiry tickers) from consuming the entire Claude scoring budget.
+    """
+    by_event: dict[str, dict] = {}
+    no_event: list[dict]      = []
+
+    for m in markets:
+        ev = m.get("event_ticker", "").strip()
+        if not ev:
+            no_event.append(m)
+            continue
+        vol = float(m.get("volume_fp") or m.get("volume") or 0)
+        existing_vol = float(
+            by_event[ev].get("volume_fp") or by_event[ev].get("volume") or 0
+        ) if ev in by_event else -1
+        if vol > existing_vol:
+            by_event[ev] = m
+
+    return list(by_event.values()) + no_event
+
+
 def estimate_base_rate(market: dict) -> float | None:
     """
     Simple heuristic pass before calling Claude (saves tokens).
@@ -95,22 +131,70 @@ def estimate_base_rate(market: dict) -> float | None:
     """
     title = (market.get("title") or "").lower()
 
-    # Binary yes/no events with known rough base rates
+    # Binary yes/no events with known rough base rates.
+    # Order matters — more specific patterns should come first.
     heuristics = [
+        # Sports — outcomes for individual games lean slight favourite
+        (["win the world series", "win world series"], 0.50),
+        (["win the championship", "win the nba", "win the nfl", "win the cup",
+          "win the world cup", "win the fifa", "world cup winner",
+          "world series winner", "champions league", "stanley cup"], 0.50),
+        (["win the super bowl", "super bowl winner"], 0.50),
+        (["win the game", "win on", "win their next"], 0.52),
+        # Elections — incumbents have modest advantage
+        (["win the election", "win election", "wins the election",
+          "win the primary", "win the runoff"], 0.52),
+        (["win the presidency", "win the white house"], 0.50),
+        (["win the senate race", "win the house race", "win the gubernatorial"], 0.52),
+        # Weather
         (["will it rain", "chance of rain", "precipitation"], 0.40),
-        (["win the election", "win election", "wins the election"], 0.50),
-        (["reach $", "hits $", "exceed $", "above $"], 0.30),
-        (["below $", "under $", "fall below", "drop below"], 0.30),
-        (["ipo", "initial public offering"], 0.35),
-        (["merger", "acquisition", "acquired by"], 0.40),
-        (["recession", "in recession"], 0.25),
-        (["default", "debt default"], 0.10),
+        # Price / market levels — mean-reversion roughly 50/50 near current levels
+        (["reach $", "hits $", "exceed $", "above $",
+          "surpass $", "cross $", "break $"], 0.35),
+        (["below $", "under $", "fall below", "drop below",
+          "dip below", "dip to $"], 0.35),
+        # Corporate events — low base rate, most announcements don't complete
+        (["ipo by", "ipo before", "initial public offering"], 0.30),
+        (["merger", "acquisition", "acquired by", "take private",
+          "buyout", "takeover"], 0.35),
+        (["bankruptcy", "file for bankruptcy", "goes bankrupt"], 0.15),
+        # Macroeconomic — cuts/hikes depend on market pricing already
+        (["rate cut", "rate hike", "interest rate cut", "interest rate hike"], 0.50),
+        (["recession", "in recession", "enters recession"], 0.25),
+        (["default", "debt default", "sovereign default"], 0.10),
+        # Geopolitical — low base rate for dramatic events
+        (["declare war", "invade", "military strike", "launch attack"], 0.15),
+        (["peace deal", "ceasefire", "peace agreement", "armistice"], 0.25),
+        (["coup", "overthrow", "regime change"], 0.10),
+        # Media / entertainment — very low: release dates often slip
+        (["release", "released", "premieres", "premiere by",
+          "season", "movie", "film", "show"], 0.25),
+        # Technology
+        (["fda approval", "fda approves", "fda cleared"], 0.40),
+        (["launch", "launches", "launched by", "launches by"], 0.35),
+        # Criminal / legal — conviction base rates are moderate
+        (["convicted", "found guilty", "indicted", "charged with"], 0.40),
+        (["impeach", "impeachment", "removed from office"], 0.15),
+        # Generic sports/competition catch-all — must come LAST
+        # " win " (with spaces) catches "Will X win [any competition]?"
+        ([" win "], 0.52),
     ]
     for signals, rate in heuristics:
         if any(s in title for s in signals):
             return rate
 
     return None
+
+
+def tag_watchlist_overlap(markets: list[dict], watchlist_tickers: set[str]) -> list[dict]:
+    """
+    Mark markets that overlap with smart money watchlist positions.
+    Sets m['watchlist_signal'] = True on any market whose Kalshi ticker appears
+    in the pre-built set of cross-referenced tickers.
+    """
+    for m in markets:
+        m["watchlist_signal"] = m.get("ticker", "") in watchlist_tickers
+    return markets
 
 
 def compute_spread_signal(yes_bid: float, yes_ask: float, mid: float) -> dict:
@@ -335,8 +419,12 @@ def score_market(market: dict, config: dict) -> dict:
 
 
 def score_markets(markets: list[dict], config: dict) -> list[dict]:
-    """Scores all filtered markets and returns them sorted by raw_edge descending."""
+    """Scores all filtered markets and returns them sorted by priority."""
     scored = [score_market(m, config) for m in markets]
-    # Put flagged markets first, then sort by edge desc
-    scored.sort(key=lambda m: (not m.get("flag", False), -(m.get("raw_edge") or 0)))
+    # Sort: watchlist-overlap first, then flagged, then by edge desc
+    scored.sort(key=lambda m: (
+        not m.get("watchlist_signal", False),
+        not m.get("flag", False),
+        -(m.get("raw_edge") or 0),
+    ))
     return scored

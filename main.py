@@ -23,6 +23,7 @@ import whales
 import scorer
 import logger
 import report
+from analysis.smart_money_scan import run_smart_money_scan, save_report as save_sm_report
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
@@ -123,7 +124,45 @@ def main():
     # Step 3 — Filter and score for mispricing
     print("[3/8] Scanning for mispriced markets...")
     try:
-        filtered        = scanner.filter_markets(all_markets, config)
+        filtered = scanner.filter_markets(all_markets, config)
+
+        # Optional event-level deduplication (keeps highest-volume per event_ticker)
+        if config.get("markets", {}).get("dedup_by_event", False):
+            before_dedup = len(filtered)
+            filtered = scanner.dedup_by_event(filtered)
+            print(f"      Dedup: {before_dedup} -> {len(filtered)} markets (removed {before_dedup - len(filtered)} lower-liquidity duplicates)")
+
+        # Load smart money watchlist cache to boost priority for matched markets
+        try:
+            _sm_cache_path = os.path.join(os.path.dirname(__file__), "data", "watchlist_cache.json")
+            if os.path.exists(_sm_cache_path):
+                import json as _json
+                _sm_data = _json.load(open(_sm_cache_path, encoding="utf-8"))
+                _sm_tickers = {
+                    sig["kalshi_ticker"]
+                    for trader in _sm_data.get("data", {}).values()
+                    for p in trader.get("positions", [])
+                    for sig in []  # populated below via kalshi_signals in last run
+                }
+                # Also load Kalshi tickers from latest smart money report if available
+                import glob as _glob
+                _sm_reports = sorted(_glob.glob(os.path.join(
+                    os.path.dirname(__file__), "data", "smart_money", "*.md")))
+                if _sm_reports:
+                    import re as _re
+                    _latest_report = open(_sm_reports[-1], encoding="utf-8").read()
+                    # Extract Kalshi tickers from markdown table rows
+                    _sm_tickers = set(_re.findall(
+                        r'\|\s*(KXMAKE\S+|KXABR\S+|SENATE\S+|KXRTICKET\S+)[^|]*\|',
+                        _latest_report
+                    ))
+                scanner.tag_watchlist_overlap(filtered, _sm_tickers)
+                if _sm_tickers:
+                    n_boost = sum(1 for m in filtered if m.get("watchlist_signal"))
+                    print(f"      Smart money boost: {n_boost} markets matched watchlist tickers")
+        except Exception as _e:
+            print(f"      [warn] Smart money tag failed: {_e}")
+
         scored_markets  = scanner.score_markets(filtered, config)
         flagged_markets = [m for m in scored_markets if m.get("flag")]
         print(f"      {len(filtered)} markets passed filter (from {len(all_markets)})")
@@ -380,6 +419,18 @@ def main():
         except Exception as e:
             print(f"      Weekly digest failed: {e}")
 
+    # Step 7b — Smart money watchlist scan
+    smart_money_result = None
+    try:
+        print("[7b] Running smart money watchlist scan...")
+        smart_money_result = run_smart_money_scan(config, force_refresh=False)
+        sm_path = save_sm_report(smart_money_result)
+        print(f"      {smart_money_result['traders_active']} traders  |  "
+              f"{smart_money_result['positions_total']} positions  |  "
+              f"{len(smart_money_result['kalshi_signals'])} Kalshi X-refs  |  saved {sm_path}")
+    except Exception as e:
+        print(f"      Smart money scan failed: {e}")
+
     # Step 8 — Compile and email report
     print("[8/8] Sending report...")
     try:
@@ -387,14 +438,16 @@ def main():
         body  = report.compile_report(final_signals, whale_only, stats, run_meta, config,
                                       all_filtered=filtered,
                                       new_signals=new_signals,
-                                      repeat_signals=repeat_signals)
+                                      repeat_signals=repeat_signals,
+                                      smart_money_result=smart_money_result)
         report.send_report(body, final_signals, run_meta["whale_flags"], config)
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
         print("\n--- REPORT (unsent) ---")
         try:
-            body = report.compile_report(final_signals, whale_only, logger.get_stats(), run_meta, config)
+            body = report.compile_report(final_signals, whale_only, logger.get_stats(), run_meta, config,
+                                         smart_money_result=smart_money_result)
             print(body)
         except Exception:
             pass

@@ -509,3 +509,158 @@ def test_drift_price_drift_abs_always_returned():
     r = scanner.score_market(m, BASE_CFG)
     assert "price_drift_abs" in r
     assert r["price_drift_abs"] == pytest.approx(0.10)
+
+
+# ─── filter_markets: open interest floor ─────────────────────────────────────
+
+def _oi_cfg(min_oi: int) -> dict:
+    import copy
+    c = copy.deepcopy(BASE_CFG)
+    c["markets"]["min_open_interest"] = min_oi
+    return c
+
+def test_open_interest_zero_allows_any():
+    """min_open_interest=0 disables the filter — all markets pass."""
+    m = _market()
+    m["open_interest_fp"] = 0
+    assert len(scanner.filter_markets([m], _oi_cfg(0))) == 1
+
+def test_open_interest_below_floor_dropped():
+    """Market with OI=10 should be dropped when floor=25."""
+    m = _market()
+    m["open_interest_fp"] = 10
+    assert scanner.filter_markets([m], _oi_cfg(25)) == []
+
+def test_open_interest_at_floor_kept():
+    m = _market()
+    m["open_interest_fp"] = 25
+    assert len(scanner.filter_markets([m], _oi_cfg(25))) == 1
+
+def test_open_interest_above_floor_kept():
+    m = _market()
+    m["open_interest_fp"] = 500
+    assert len(scanner.filter_markets([m], _oi_cfg(25))) == 1
+
+def test_open_interest_missing_treated_as_zero():
+    """Market with no OI field should be dropped when floor > 0."""
+    m = _market()
+    assert scanner.filter_markets([m], _oi_cfg(25)) == []
+
+
+# ─── dedup_by_event ───────────────────────────────────────────────────────────
+
+def _mkt_ev(ticker: str, event_ticker: str, volume: float) -> dict:
+    return {
+        "ticker": ticker,
+        "event_ticker": event_ticker,
+        "volume_fp": volume,
+        "yes_bid": 0.49, "yes_ask": 0.51,
+        "close_time": _close(30),
+        "title": f"Market {ticker}",
+        "time_horizon": "MONTHLY",
+    }
+
+def test_dedup_keeps_highest_volume_per_event():
+    markets = [
+        _mkt_ev("T1", "EVT-A", 1000),
+        _mkt_ev("T2", "EVT-A", 5000),
+        _mkt_ev("T3", "EVT-A", 200),
+    ]
+    result = scanner.dedup_by_event(markets)
+    assert len(result) == 1
+    assert result[0]["ticker"] == "T2"
+
+def test_dedup_keeps_separate_events():
+    markets = [
+        _mkt_ev("T1", "EVT-A", 1000),
+        _mkt_ev("T2", "EVT-B", 500),
+    ]
+    result = scanner.dedup_by_event(markets)
+    assert len(result) == 2
+    tickers = {m["ticker"] for m in result}
+    assert tickers == {"T1", "T2"}
+
+def test_dedup_passthrough_no_event_ticker():
+    """Markets with no event_ticker are not deduplicated — pass through as-is."""
+    markets = [
+        {"ticker": "T1", "volume_fp": 100},
+        {"ticker": "T2", "volume_fp": 200},
+    ]
+    result = scanner.dedup_by_event(markets)
+    assert len(result) == 2
+
+def test_dedup_single_market_unchanged():
+    m = _mkt_ev("T1", "EVT-A", 1000)
+    result = scanner.dedup_by_event([m])
+    assert len(result) == 1
+    assert result[0]["ticker"] == "T1"
+
+def test_dedup_mixed_event_and_no_event():
+    """Some markets have event_ticker, some don't — both preserved correctly."""
+    markets = [
+        _mkt_ev("T1", "EVT-A", 1000),
+        _mkt_ev("T2", "EVT-A", 500),
+        {"ticker": "T3", "volume_fp": 200},  # no event_ticker
+    ]
+    result = scanner.dedup_by_event(markets)
+    assert len(result) == 2  # T1 (wins EVT-A) + T3 (no event)
+    tickers = {m["ticker"] for m in result}
+    assert "T1" in tickers
+    assert "T3" in tickers
+
+
+# ─── tag_watchlist_overlap ────────────────────────────────────────────────────
+
+def test_watchlist_tag_sets_true_for_matching_ticker():
+    m = _market()
+    m["ticker"] = "KXABRAHAMSA-29-JAN20"
+    scanner.tag_watchlist_overlap([m], {"KXABRAHAMSA-29-JAN20"})
+    assert m["watchlist_signal"] is True
+
+def test_watchlist_tag_false_for_non_matching():
+    m = _market()
+    m["ticker"] = "KXOTHER-TICKER"
+    scanner.tag_watchlist_overlap([m], {"KXABRAHAMSA-29-JAN20"})
+    assert m["watchlist_signal"] is False
+
+def test_watchlist_tag_empty_set_all_false():
+    markets = [_market(), _market()]
+    for m in markets:
+        m["ticker"] = "KXSOME-TICKER"
+    scanner.tag_watchlist_overlap(markets, set())
+    assert all(not m["watchlist_signal"] for m in markets)
+
+def test_watchlist_tag_priority_sorts_first():
+    """score_markets must rank watchlist-tagged markets before non-tagged."""
+    tagged   = _market(mid=0.30, title="Some random event")
+    tagged["ticker"] = "KXTAGGED"
+    tagged["watchlist_signal"] = True
+    tagged["time_horizon"] = "MONTHLY"
+    tagged["close_time"] = _close(30)
+    untagged = _market(mid=0.30, title="Some random event 2")
+    untagged["ticker"] = "KXUNTAGGED"
+    untagged["watchlist_signal"] = False
+    untagged["time_horizon"] = "MONTHLY"
+    untagged["close_time"] = _close(30)
+    results = scanner.score_markets([untagged, tagged], BASE_CFG)
+    assert results[0]["ticker"] == "KXTAGGED"
+
+
+# ─── estimate_base_rate: expanded heuristics ─────────────────────────────────
+
+@pytest.mark.parametrize("title,expected_not_none", [
+    ("Will Argentina win on 2026-06-16?", True),       # "win on" pattern
+    ("Will Vitality win IEM Cologne Major 2026?", True), # "win" + championship
+    ("Will France win the 2026 FIFA World Cup?", True), # "win the"
+    ("FDA approval for new Alzheimer drug", True),       # FDA approval
+    ("Will company X file for bankruptcy?", True),       # bankruptcy
+    ("Will peace deal be signed by June 30?", True),    # peace deal
+    ("Some abstract AI governance question", None),      # no heuristic match
+])
+def test_base_rate_expanded_heuristics(title, expected_not_none):
+    m = _market(title=title)
+    rate = scanner.estimate_base_rate(m)
+    if expected_not_none:
+        assert rate is not None, f"Expected non-None base rate for: {title}"
+    else:
+        assert rate is None, f"Expected None base rate for: {title}"

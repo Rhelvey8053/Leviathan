@@ -12,8 +12,27 @@ import subprocess
 SYSTEM_PROMPT = (
     "You are a prediction market analyst. For each market provided, estimate the true "
     "probability of the YES outcome occurring. Use web search to find relevant recent "
-    "information. Return ONLY valid JSON — no markdown, no explanation outside the JSON. "
-    "Be calibrated, not overconfident."
+    "information. Return ONLY valid JSON — no markdown, no explanation outside the JSON.\n\n"
+
+    "CALIBRATION RULES (follow strictly):\n"
+    "1. TAIL PROBABILITY: If the market price is below 15%, it is almost always correct. "
+    "The crowd has already discounted this. Require extraordinary, independently-verified "
+    "evidence to set your estimate above 30% on a sub-15% market. If in doubt, PASS.\n"
+    "2. SOURCE CHAIN: Before citing 'multiple sources confirm X', verify they are truly "
+    "independent. Media reports citing the same original tweet/press release/rumour are "
+    "ONE source, not many. A viral story is still one source.\n"
+    "3. ANNOUNCED vs COMPLETED: For IPOs, mergers, media releases, product launches — "
+    "'announced' or 'confirmed in development' is NOT evidence of completion by the "
+    "market's deadline. Deals fall through. Release dates slip constantly.\n"
+    "4. ENTERTAINMENT/MEDIA MARKETS: Treat any market about a movie, TV show, streaming "
+    "release, or entertainment event with extreme skepticism. Even confirmed productions "
+    "routinely miss announced dates. Base rate for on-time delivery is ~25%.\n"
+    "5. HIGH CONFIDENCE threshold: Only assign HIGH confidence when you find dated, "
+    "primary-source evidence (official press release, regulatory filing, official "
+    "announcement by the relevant authority) that directly speaks to the specific "
+    "deadline in the market. News articles speculating about likelihood do not qualify.\n"
+    "6. EDGE REQUIREMENT: Only call YES or NO if your estimate differs from the market "
+    "price by at least 10 percentage points AND you have clear evidence. Otherwise PASS."
 )
 
 RESPONSE_SCHEMA = """
@@ -154,6 +173,13 @@ def build_prompt(markets: list[dict]) -> str:
             lines.append(
                 f"   ORDER BOOK: {imb:.0f}% of depth is on the {ob_dir} side — "
                 f"strong {'buying' if ob_dir == 'YES' else 'selling'} pressure."
+            )
+
+        if m.get("watchlist_signal"):
+            lines.append(
+                "   WATCHLIST SIGNAL: A top-20 Polymarket trader (by monthly PnL) holds "
+                "a significant open position on a related market. Weight this signal — "
+                "these traders have demonstrated edge over thousands of trades."
             )
 
         if m.get("price_trend"):
