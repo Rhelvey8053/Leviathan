@@ -97,7 +97,7 @@ def run_mode(markets: list[dict], base_config: dict, flag_mode: str) -> dict:
     }
 
 
-def bucket_diagnosis(drift_rows: list[dict]) -> list[dict]:
+def bucket_diagnosis(drift_rows: list[dict], drift_min_abs: float = 0.03, drift_min_pct: float = 0.07) -> list[dict]:
     """Aggregate drift rows into price buckets for the report."""
     result = []
     for label, lo, hi in PRICE_BUCKETS:
@@ -105,7 +105,7 @@ def bucket_diagnosis(drift_rows: list[dict]) -> list[dict]:
         has_last = [r for r in bucket if r["abs_drift"] is not None]
         drift_ct = sum(
             1 for r in has_last
-            if r["abs_drift"] > 0.0 and r["pct_drift"] > 0.05
+            if r["abs_drift"] > drift_min_abs and r["pct_drift"] > drift_min_pct
         )
         avg_abs = sum(r["abs_drift"] for r in has_last) / len(has_last) if has_last else 0
         avg_pct = sum(r["pct_drift"] for r in has_last) / len(has_last) if has_last else 0
@@ -122,6 +122,8 @@ def write_report(
     results: list[dict],
     header: dict,
     drift_rows: list[dict],
+    drift_min_abs: float = 0.03,
+    drift_min_pct: float = 0.07,
 ) -> str:
     os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.join(REPORTS_DIR, "flag_modes.md")
@@ -138,7 +140,7 @@ def write_report(
     lines.append(f"**Environment:** {header.get('environment', '?').upper()}  ")
     lines.append(f"**Total markets in snapshot:** {header.get('market_count', '?')}  ")
     lines.append(f"**Production thresholds:** edge=0.08, price=[0.05, 0.95], vol x1.0  ")
-    lines.append(f"**Drift thresholds:** abs>{prod.get('drift_min_abs_cfg', 0.0)}, pct>{prod.get('drift_min_pct_cfg', 0.05)} (provisional — see grid below)  ")
+    lines.append(f"**Drift thresholds (config):** abs>{drift_min_abs}, pct>{drift_min_pct*100:.0f}% (see grid below)  ")
     lines.append("")
     lines.append(f"Filter stage is identical across all modes. Markets surviving filter: **{n}**")
     lines.append("")
@@ -196,8 +198,8 @@ def write_report(
         "fire rates and average moves bucketed by price level."
     )
     lines.append("")
-    buckets = bucket_diagnosis(drift_rows)
-    lines.append("| Price bucket | N | Drift% (pct>5%) | Avg abs move | Avg pct move |")
+    buckets = bucket_diagnosis(drift_rows, drift_min_abs=drift_min_abs, drift_min_pct=drift_min_pct)
+    lines.append(f"| Price bucket | N | Drift% (abs>{drift_min_abs}, pct>{drift_min_pct*100:.0f}%) | Avg abs move | Avg pct move |")
     lines.append("|-------------|---|----------------|-------------|-------------|")
     for b in buckets:
         pct_firing = b["drift_ct"] / b["n"] * 100 if b["n"] else 0
@@ -216,10 +218,12 @@ def write_report(
     # ── Part C: Threshold sweep grid ──────────────────────────────────────────
     lines.append("## Drift Threshold Sweep (% of filtered markets flagging as drift)")
     lines.append("")
+    baseline_fired, baseline_n = drift_fire_rate(drift_rows, drift_min_abs, drift_min_pct)
+    baseline_pct = baseline_fired / baseline_n * 100 if baseline_n else 0
     lines.append(
-        "Grid of `drift_min_abs` x `drift_min_pct` combinations. Values show what "
-        "percentage of the 21 filtered markets would have `drift_flag=True` under each "
-        "combination. Current behavior (abs>0.0, pct>5%) = **86%** (top-left reference)."
+        f"Grid of `drift_min_abs` x `drift_min_pct` combinations. Values show what "
+        f"percentage of the {baseline_n} filtered markets would have `drift_flag=True` under each "
+        f"combination. Config baseline (abs>{drift_min_abs}, pct>{drift_min_pct*100:.0f}%) = **{baseline_pct:.0f}%**."
     )
     lines.append("")
 
@@ -238,9 +242,9 @@ def write_report(
 
     lines.append("")
     lines.append(
-        "> **Config keys:** `markets.drift_min_abs` and `markets.drift_min_pct` — "
-        "currently at `0.0` / `0.05` (current-behavior defaults, not yet calibrated). "
-        "Reed picks the target cell from the grid above."
+        f"> **Config keys:** `markets.drift_min_abs` and `markets.drift_min_pct` — "
+        f"currently at `{drift_min_abs}` / `{drift_min_pct}`. "
+        "Adjust these to move diagonally in the grid above to reduce noise."
     )
     lines.append("")
     lines.append(
@@ -255,22 +259,19 @@ def write_report(
     lines.append("## Verdict")
     lines.append("")
 
-    # Compute what drift count would be at recommended (0.03, 0.05)
-    rec_fired, _ = drift_fire_rate(drift_rows, 0.03, 0.05)
-
     if heuristic["flagged"] > 0:
         rec_mode   = "strict_with_heuristic"
         drift_note = (
-            f"At recommended drift calibration (abs>0.03, pct>5%), drift would flag "
-            f"{rec_fired}/{n} markets instead of {prod['sig_drift']}/{n}. "
+            f"Config baseline (abs>{drift_min_abs}, pct>{drift_min_pct*100:.0f}%) flags "
+            f"{baseline_fired}/{n} markets as drift. "
             f"Combined with strict_with_heuristic (no BR_NONE noise), expected candidates: "
-            f"~{rec_fired} drift + {prod['sig_edge']} heuristic-edge (with overlap possible)."
+            f"~{baseline_fired} drift + {prod['sig_edge']} heuristic-edge (with overlap possible)."
         )
     else:
         rec_mode   = "strict_with_heuristic"
         drift_note = (
-            f"At recommended drift calibration (abs>0.03, pct>5%), drift would flag "
-            f"{rec_fired}/{n} markets instead of {prod['sig_drift']}/{n}."
+            f"Config baseline (abs>{drift_min_abs}, pct>{drift_min_pct*100:.0f}%) flags "
+            f"{baseline_fired}/{n} markets as drift."
         )
 
     lines.append(f"**Recommended mode: `{rec_mode}`**")
@@ -278,10 +279,10 @@ def write_report(
     lines.append(drift_note)
     lines.append("")
     lines.append(
-        "No flag_mode is truly selective yet because drift is still at current-behavior "
-        "defaults (abs>0.0, pct>5%), which fires on 86% of filtered markets. "
-        "Drift becomes selective only after Reed sets `drift_min_abs` from the grid above. "
-        "Until then, `strict_with_heuristic` at least removes the BR_NONE catch-all noise."
+        f"At config thresholds (abs>{drift_min_abs}, pct>{drift_min_pct*100:.0f}%), "
+        f"drift flags {baseline_fired}/{baseline_n} filtered markets ({baseline_pct:.0f}%). "
+        "`strict_with_heuristic` mode removes the BR_NONE catch-all and surfaces "
+        "only markets with genuine heuristic edge or price drift."
     )
     lines.append("")
     lines.append(
@@ -302,6 +303,10 @@ def main():
     markets, header = load_snapshot()
     config = load_prod_config()
 
+    mkt_cfg = config.get("markets", {})
+    cfg_abs = mkt_cfg.get("drift_min_abs", 0.03)
+    cfg_pct = mkt_cfg.get("drift_min_pct", 0.07)
+
     print(f"Snapshot: {header.get('fetched_at')} ({header.get('market_count')} markets)")
     print(f"Running {len(MODES)} modes offline...\n")
 
@@ -318,7 +323,8 @@ def main():
     # Drift diagnosis rows for Parts B + C
     drift_rows = get_filtered_with_drift_data(markets, config)
 
-    report_path = write_report(results, header, drift_rows)
+    report_path = write_report(results, header, drift_rows,
+                               drift_min_abs=cfg_abs, drift_min_pct=cfg_pct)
     print(f"\nReport written: {report_path}")
     return results
 
