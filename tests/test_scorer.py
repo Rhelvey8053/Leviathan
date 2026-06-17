@@ -301,6 +301,21 @@ def test_system_prompt_has_price_level_rule():
     assert "50/50" in scorer.SYSTEM_PROMPT
 
 
+def test_system_prompt_has_earnings_rule():
+    assert "EARNINGS BEAT/MISS" in scorer.SYSTEM_PROMPT
+    assert "50%" in scorer.SYSTEM_PROMPT
+
+
+def test_system_prompt_has_diplomatic_summit_rule():
+    assert "DIPLOMATIC SUMMIT" in scorer.SYSTEM_PROMPT
+    assert "40%" in scorer.SYSTEM_PROMPT
+
+
+def test_system_prompt_has_reelection_rule():
+    assert "REELECTION MARKETS" in scorer.SYSTEM_PROMPT
+    assert "52%" in scorer.SYSTEM_PROMPT
+
+
 # ─── Liquidity context ───────────────────────────────────────────────────────
 
 def test_liquidity_shown_when_volume_present():
