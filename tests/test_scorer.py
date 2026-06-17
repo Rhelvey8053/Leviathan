@@ -620,3 +620,55 @@ def test_rule_27_cryptocurrency_keywords_in_system_prompt():
     assert "CRYPTOCURRENCY" in sp or "cryptocurrency" in sp.lower()
     assert "Bitcoin" in sp or "bitcoin" in sp.lower()
     assert "25pp from 50%" in sp or "25 pp from 50" in sp.lower() or "25pp" in sp
+
+
+# ─── Flag reason direction annotation ────────────────────────────────────────
+
+def test_edge_flag_reason_shows_leans_yes_when_base_rate_above_mid():
+    """EDGE flag reason must say 'leans YES' when heuristic is above market price."""
+    m = _base_market(
+        flag_path="EDGE",
+        base_rate=0.65,
+        heuristic_direction="YES",
+        mid_price=0.35,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "leans YES" in prompt
+
+
+def test_edge_flag_reason_shows_leans_no_when_base_rate_below_mid():
+    """EDGE flag reason must say 'leans NO' when heuristic is below market price."""
+    m = _base_market(
+        flag_path="EDGE",
+        base_rate=0.10,
+        heuristic_direction="NO",
+        mid_price=0.55,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "leans NO" in prompt
+
+
+def test_heuristic_flag_reason_shows_leans_yes():
+    """HEURISTIC flag reason must include base rate % and 'leans YES'."""
+    m = _base_market(
+        flag_path="HEURISTIC",
+        base_rate=0.70,
+        heuristic_direction="YES",
+        mid_price=0.40,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "leans YES" in prompt
+    assert "70%" in prompt
+
+
+def test_heuristic_flag_reason_omits_lean_when_neutral():
+    """HEURISTIC flag reason omits 'leans' when direction is NEUTRAL (within 5pp buffer)."""
+    m = _base_market(
+        flag_path="HEURISTIC",
+        base_rate=0.40,
+        heuristic_direction="NEUTRAL",
+        mid_price=0.40,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "leans YES" not in prompt
+    assert "leans NO" not in prompt

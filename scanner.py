@@ -1017,6 +1017,18 @@ def score_market(market: dict, config: dict) -> dict:
     spread = compute_spread_signal(yes_bid, yes_ask, mid_price or 0)
     drift  = compute_drift_signal(mid_price or 0, market, drift_min_abs, drift_min_pct)
 
+    # Heuristic direction: which way the base rate leans vs current market price.
+    # 5pp buffer avoids noise at near-neutral pricing.
+    if base_rate is not None and mid_price is not None:
+        if base_rate > mid_price + 0.005:
+            heuristic_direction = "YES"
+        elif base_rate < mid_price - 0.005:
+            heuristic_direction = "NO"
+        else:
+            heuristic_direction = "NEUTRAL"
+    else:
+        heuristic_direction = None
+
     # All signals computed independently of flag_mode — truthful regardless of branch order.
     has_edge    = raw_edge is not None and raw_edge > edge_threshold
     has_drift   = drift["drift_flag"]
@@ -1051,12 +1063,13 @@ def score_market(market: dict, config: dict) -> dict:
 
     return {
         **market,
-        "mid_price":     mid_price,
-        "base_rate":     base_rate,
-        "raw_edge":      raw_edge,
-        "flag":          flag,
-        "flag_path":     flag_path,
-        "flag_mode":     flag_mode,
+        "mid_price":           mid_price,
+        "base_rate":           base_rate,
+        "raw_edge":            raw_edge,
+        "heuristic_direction": heuristic_direction,
+        "flag":                flag,
+        "flag_path":           flag_path,
+        "flag_mode":           flag_mode,
         # Per-signal presence — always set, independent of mode and branch order.
         "sig_edge":      has_edge,
         "sig_drift":     has_drift,
