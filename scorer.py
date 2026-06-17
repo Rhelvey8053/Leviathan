@@ -46,6 +46,13 @@ SYSTEM_PROMPT = (
     "called up', 'on the 40-man roster', or 'in spring training' is still 35% base rate. "
     "Only an active roster assignment with a confirmed start date qualifies as strong "
     "evidence. Injuries to regulars at the prospect's position modestly raise the rate.\n"
+    "8. AI/TECH MODEL RELEASE MARKETS ('Will OpenAI/Anthropic/Google release X by Y?'): "
+    "Apply Rules 3 and 4 strictly. Base rate is ~25% for any given 3-6 month window. "
+    "'In development', 'expected to launch', 'roadmap mentions', 'leaked benchmarks', "
+    "and 'CEO hints at release' are NOT evidence of on-time delivery — treat exactly "
+    "like Rule 3 (announced ≠ completed). Only an official public release date with a "
+    "live product should meaningfully raise your estimate above 25%. Even 'launched in "
+    "limited access' does NOT meet the deadline unless the market specifies limited access.\n"
     "9. HIGH CONFIDENCE threshold: Only assign HIGH confidence when you find dated, "
     "primary-source evidence (official press release, regulatory filing, official "
     "announcement by the relevant authority) that directly speaks to the specific "
@@ -272,6 +279,13 @@ def build_prompt(markets: list[dict]) -> str:
                     f"   PRICE JUMP: Last traded price moved {dir_word} {abs(jump_pct):.0f}% "
                     f"vs previous snapshot ({prev_p*100:.1f}% → {last_p*100:.1f}%)."
                 )
+
+        # Liquidity context — helps Claude calibrate confidence in the market price
+        oi  = float(m.get("open_interest_fp") or m.get("open_interest") or 0)
+        vol = float(m.get("volume_fp") or m.get("volume") or 0)
+        if vol > 0:
+            oi_note = f", OI {oi:.0f}" if oi > 0 else ""
+            lines.append(f"   Liquidity: {vol:.0f} total volume{oi_note} contracts")
 
         lines.append("")
 

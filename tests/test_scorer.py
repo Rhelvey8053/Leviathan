@@ -246,6 +246,11 @@ def test_system_prompt_has_sports_debut_rule():
     assert "35%" in scorer.SYSTEM_PROMPT
 
 
+def test_system_prompt_has_ai_release_rule():
+    assert "AI/TECH MODEL RELEASE" in scorer.SYSTEM_PROMPT
+    assert "announced" in scorer.SYSTEM_PROMPT.lower()
+
+
 def test_system_prompt_has_entertainment_rule():
     assert "ENTERTAINMENT" in scorer.SYSTEM_PROMPT
     assert "MUST be below 15%" in scorer.SYSTEM_PROMPT
