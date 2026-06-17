@@ -219,9 +219,30 @@ def _smart_money_section(result: dict | None) -> list[str]:
     out.append(f"  Snapshot:           {run_at} UTC")
     out.append("")
 
+    # Grouped by Kalshi ticker — most actionable view
+    grouped = result.get("grouped_signals", [])
+    if grouped:
+        out.append("  Kalshi Targets  (grouped by ticker, total smart money behind each):")
+        out.append(f"  {'Ticker':<30}  {'Traders':>7}  {'$Total':>11}  {'Direction':<10}  Kalshi Market")
+        out.append(f"  {'-'*30}  {'-'*7}  {'-'*11}  {'-'*10}  {'-'*38}")
+        for g in sorted(grouped, key=lambda x: -x["total_position_val"]):
+            ticker  = g["kalshi_ticker"][:30]
+            n_t     = g["trader_count"]
+            total_v = f"${g['total_position_val']:>10,.0f}"
+            dirs    = g.get("directions", {})
+            yes_c   = dirs.get("YES", 0)
+            no_c    = dirs.get("NO", 0)
+            if yes_c > 0 and no_c > 0:
+                dir_s = f"MIXED(Y{yes_c}/N{no_c})"
+            else:
+                dir_s = g.get("consensus_direction", "?")
+            kalshi_t = g.get("kalshi_title", "")[:38]
+            out.append(f"  {ticker:<30}  {n_t:>7}  {total_v:>11}  {dir_s:<10}  {kalshi_t}")
+        out.append("")
+
     # Kalshi cross-references — sorted by match quality × position size
     if signals:
-        out.append("  Kalshi Cross-References (smart money + Kalshi overlap):")
+        out.append("  Per-Trader Cross-References:")
         out.append(f"  {'Trader':<18}  {'Out':<4}  {'$Position':>10}  {'Price':>5}  {'Match':>5}  Kalshi Ticker")
         out.append(f"  {'-'*18}  {'-'*4}  {'-'*10}  {'-'*5}  {'-'*5}  {'-'*32}")
         ranked = sorted(signals, key=lambda x: -(x["match_score"] * x["position_val"]))
