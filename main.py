@@ -323,10 +323,30 @@ def main():
         if (m["whale_reversal"] or m.get("ob_flag")) and not m.get("flag"):
             m["flag"] = True
 
-    # Sort: time-sensitive first (INTRADAY before LONG), then by volume within each bucket
+    def _pre_sort_score(m: dict) -> int:
+        """Pre-Claude signal quality score: higher = more evidence of real edge."""
+        sc = 0
+        fp = m.get("flag_path")
+        if m.get("watchlist_signal"):                         sc += 10
+        if (m.get("whale_data") or {}).get("whale_detected"): sc += 3
+        if m.get("whale_reversal"):                           sc += 2
+        if fp in ("HEURISTIC", "EDGE"):                       sc += 2
+        if fp == "CROSS_MARKET":                              sc += 2
+        if m.get("drift_flag"):                               sc += 1
+        if m.get("ob_flag"):                                  sc += 1
+        if m.get("spread_wide"):                              sc += 1
+        poly = m.get("poly") or {}
+        if poly.get("price_gap") is not None and abs(poly["price_gap"]) >= 0.10: sc += 2
+        ext  = m.get("ext_markets") or []
+        if any(abs(e.get("price_gap", 0)) >= 0.05 for e in ext): sc += 1
+        return sc
+
+    # Sort: time-sensitive first (INTRADAY before LONG), then by pre-signal quality,
+    # then by volume within each bucket — maximises evidence in the top-N Claude slots
     flagged_markets.sort(
         key=lambda m: (
             scanner.BUCKET_PRIORITY.get(m.get("time_horizon", "MONTHLY"), 2),
+            -_pre_sort_score(m),
             -float(m.get("volume_fp") or m.get("volume") or 0),
         )
     )
