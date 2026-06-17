@@ -1010,3 +1010,82 @@ def test_conf_stats_pnl_sums_correctly(tmp_db):
     _insert_conf("a2", "HIGH", "LOSS", -0.30, tmp_db)
     stats = logger.get_stats_by_confidence()
     assert abs(stats["HIGH"]["total_pnl"] - 0.40) < 0.001
+
+
+# ─── get_stats_by_heuristic_alignment ─────────────────────────────────────────
+
+def _insert_align(call_id, direction, heuristic_direction, result_val, pnl, edge=0.12):
+    """Insert a resolved paper signal with alignment fields."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, result, outcome, pnl_if_traded, source,
+             heuristic_direction)
+            VALUES (?,datetime('now'),?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, f"KX{call_id}", direction, 0.40, 0.55,
+            edge, result_val, "YES", pnl, "paper",
+            heuristic_direction,
+        ))
+
+
+def test_heuristic_alignment_empty_db(tmp_db):
+    """Empty DB → all groups return total=0, win_rate=None."""
+    stats = logger.get_stats_by_heuristic_alignment()
+    for grp in ("aligned", "override", "no_heuristic"):
+        assert stats[grp]["total"]    == 0
+        assert stats[grp]["win_rate"] is None
+
+
+def test_heuristic_alignment_aligned_group(tmp_db):
+    """Signal where Claude direction == heuristic_direction → counted in 'aligned'."""
+    _insert_align("al1", "YES", "YES", "WIN",  0.60)
+    _insert_align("al2", "YES", "YES", "LOSS", -0.40)
+    stats = logger.get_stats_by_heuristic_alignment()
+    assert stats["aligned"]["total"]    == 2
+    assert stats["aligned"]["wins"]     == 1
+    assert stats["aligned"]["win_rate"] == pytest.approx(50.0)
+    assert stats["override"]["total"]   == 0
+    assert stats["no_heuristic"]["total"] == 0
+
+
+def test_heuristic_alignment_override_group(tmp_db):
+    """Signal where Claude direction != heuristic_direction (and not NEUTRAL) → 'override'."""
+    _insert_align("ov1", "YES", "NO",  "WIN",  0.60)
+    _insert_align("ov2", "NO",  "YES", "LOSS", -0.40)
+    stats = logger.get_stats_by_heuristic_alignment()
+    assert stats["override"]["total"] == 2
+    assert stats["override"]["wins"]  == 1
+    assert stats["aligned"]["total"]  == 0
+
+
+def test_heuristic_alignment_neutral_goes_to_no_heuristic(tmp_db):
+    """NEUTRAL heuristic_direction is not a directional lean → counted in 'no_heuristic'."""
+    _insert_align("nh1", "YES", "NEUTRAL", "WIN", 0.60)
+    stats = logger.get_stats_by_heuristic_alignment()
+    assert stats["no_heuristic"]["total"] == 1
+    assert stats["aligned"]["total"]      == 0
+    assert stats["override"]["total"]     == 0
+
+
+def test_heuristic_alignment_null_heuristic_goes_to_no_heuristic(tmp_db):
+    """NULL heuristic_direction → counted in 'no_heuristic'."""
+    _insert_align("nh2", "YES", None, "WIN", 0.60)
+    stats = logger.get_stats_by_heuristic_alignment()
+    assert stats["no_heuristic"]["total"] == 1
+
+
+def test_heuristic_alignment_excludes_real_fills(tmp_db):
+    """Real fill rows must not appear in alignment stats even if heuristic_direction is set."""
+    _insert_align("al3", "YES", "YES", "WIN", 0.60)  # paper
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price,
+             result, outcome, pnl_if_traded, source, heuristic_direction)
+            VALUES ('rf3',datetime('now'),'KXrf','YES',0.40,
+                    'WIN','YES',0.60,'real_fill','YES')
+        """)
+    stats = logger.get_stats_by_heuristic_alignment()
+    assert stats["aligned"]["total"] == 1  # only paper row
