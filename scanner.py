@@ -300,8 +300,18 @@ def estimate_base_rate(market: dict) -> float | None:
         # "fired" excluded (substring of "misfired", "backfired"); use space-bounded forms instead
         (["be fired", "get fired", "was fired", "been fired", "gets fired",
           " fired ", "dismissed", "terminated",
+          "be removed", "get removed", "was removed", "been removed",
           "removed from his position", "removed from her position",
-          "removed from the position"], 0.25),
+          "removed from the position",
+          "removed from his role", "removed from her role",
+          "removed from the role", "removed from his post",
+          "removed from her post", "removed from the post",
+          "ousted from", "pushed out of"], 0.25),
+        # Corporate layoffs / workforce reduction — major tech/corporate layoffs are common
+        (["mass layoffs", "announce layoffs", "planned layoffs",
+          "workforce reduction", "headcount reduction", "job cuts",
+          "lay off workers", "lay off employees", "cut its workforce",
+          "reduce its workforce", "reduce headcount"], 0.35),
         # Government shutdown: CONGRESS AVOIDS a shutdown → ~85% base rate
         # More specific "avoid/avert/end" must come BEFORE general "shutdown" patterns
         (["avoid a shutdown", "avert a shutdown", "prevent a shutdown",
@@ -343,6 +353,15 @@ def estimate_base_rate(market: dict) -> float | None:
           "pause rates", "hold rates", "maintain rates", "rates unchanged",
           "rate pause", "rate hold", "rates on hold"], 0.50),
         (["recession", "in recession", "enters recession"], 0.25),
+        # Housing market crash / real estate bust — tail event; ~15% in any given year
+        # Placed BEFORE generic "fall below" / price-level patterns
+        (["housing market crash", "housing crash", "real estate crash",
+          "housing market collapse", "real estate collapse",
+          "housing bubble burst", "housing bubble pop",
+          "home prices crash", "home prices collapse"], 0.15),
+        # Housing price direction — less extreme than crash; closer to 50/50
+        (["housing prices", "home prices", "home values",
+          "real estate prices", "median home price"], 0.50),
         (["default", "debt default", "sovereign default"], 0.10),
         # Economic indicators — near 50/50 for specific threshold questions
         (["unemployment rate", "unemployment", "jobless rate", "nonfarm payroll",
