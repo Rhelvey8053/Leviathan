@@ -276,7 +276,8 @@ def test_schema_new_columns_present(tmp_db):
         cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
     for col in ("source", "from_signal", "signal_call_id", "direction_aligned",
                 "entry_price", "fill_count", "fill_fee",
-                "contract_type", "segment", "resolution_date", "logged_under"):
+                "contract_type", "segment", "resolution_date", "logged_under",
+                "flag_path", "watchlist_signal"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -477,3 +478,113 @@ def test_get_stats_real_counts_only_fills(tmp_db):
     stats_r = logger.get_stats_real()
     assert stats_r["total_fills"] == 1
     assert stats_r["resolved"]    == 1
+
+
+# ─── flag_path persistence ────────────────────────────────────────────────────
+
+def test_log_signal_stores_flag_path(tmp_db):
+    """log_signal must persist flag_path into the signals table."""
+    logger.log_signal({
+        "ticker": "KXTEST-28", "title": "Test", "market_price": 0.30,
+        "our_estimate": 0.50, "edge": 0.20, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "run_id": "r1",
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT flag_path, watchlist_signal FROM signals WHERE ticker='KXTEST-28'").fetchone()
+    assert row["flag_path"]       == "HEURISTIC"
+    assert row["watchlist_signal"] == 0
+
+
+def test_log_signal_stores_watchlist_flag(tmp_db):
+    """log_signal must persist watchlist_signal=1 when True."""
+    logger.log_signal({
+        "ticker": "KXWL-28", "title": "WL Market", "market_price": 0.40,
+        "our_estimate": 0.60, "edge": 0.20, "direction": "YES",
+        "confidence": "HIGH", "whale_detected": False, "whale_direction": "",
+        "flag_path": "WATCHLIST", "watchlist_signal": True,
+        "run_id": "r2",
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT flag_path, watchlist_signal FROM signals WHERE ticker='KXWL-28'").fetchone()
+    assert row["flag_path"]       == "WATCHLIST"
+    assert row["watchlist_signal"] == 1
+
+
+def test_log_signal_flag_path_none(tmp_db):
+    """log_signal must accept flag_path=None (no flag path set)."""
+    logger.log_signal({
+        "ticker": "KXNO-28", "title": "No Path", "market_price": 0.25,
+        "our_estimate": 0.40, "edge": 0.15, "direction": "YES",
+        "confidence": "LOW", "whale_detected": False, "whale_direction": "",
+        "flag_path": None, "watchlist_signal": False,
+        "run_id": "r3",
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT flag_path FROM signals WHERE ticker='KXNO-28'").fetchone()
+    assert row["flag_path"] is None
+
+
+def _insert_with_flag_path(call_id, ticker, direction, market_price,
+                            flag_path, outcome="", result="", pnl=None):
+    """Insert a resolved signal row with flag_path for stats tests."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             edge, direction, confidence, whale_detected, whale_direction,
+             outcome, result, pnl_if_traded, run_id, source, flag_path)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id,
+            "2026-06-17T10:00:00Z",
+            ticker, "Test", market_price, 0.50, 0.10,
+            direction, "MED", 0, "",
+            outcome, result, pnl,
+            "run-test", "paper", flag_path,
+        ))
+
+
+def test_get_stats_by_flag_path_basic(tmp_db):
+    """get_stats_by_flag_path returns one row per flag_path with win counts."""
+    _insert_with_flag_path("fp1", "T1", "YES", 0.30, "EDGE",      "YES", "WIN",  0.70)
+    _insert_with_flag_path("fp2", "T2", "YES", 0.30, "EDGE",      "NO",  "LOSS", -0.30)
+    _insert_with_flag_path("fp3", "T3", "YES", 0.30, "HEURISTIC", "YES", "WIN",  0.70)
+    _insert_with_flag_path("fp4", "T4", "YES", 0.30, "WATCHLIST", "YES", "WIN",  0.70)
+
+    rows = logger.get_stats_by_flag_path()
+    paths = {r["flag_path"] for r in rows}
+    assert "EDGE"      in paths
+    assert "HEURISTIC" in paths
+    assert "WATCHLIST" in paths
+
+    edge_row = next(r for r in rows if r["flag_path"] == "EDGE")
+    assert edge_row["total"] == 2
+    assert edge_row["wins"]  == 1
+    assert edge_row["win_rate"] == pytest.approx(50.0)
+
+
+def test_get_stats_by_flag_path_only_resolved(tmp_db):
+    """get_stats_by_flag_path ignores unresolved rows."""
+    _insert_with_flag_path("fp5", "T5", "YES", 0.30, "EDGE", outcome="", result="")
+    rows = logger.get_stats_by_flag_path()
+    # No resolved rows → empty list
+    assert rows == []
+
+
+def test_get_stats_by_flag_path_excludes_real_fills(tmp_db):
+    """get_stats_by_flag_path must not include real_fill rows."""
+    _insert_with_flag_path("fp6", "T6", "YES", 0.30, "EDGE", "YES", "WIN", 0.70)
+    # Insert a real_fill with a flag_path directly
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price,
+             outcome, result, pnl_if_traded, source, flag_path)
+            VALUES ('rf1','2026-06-17T10:00:00Z','T7','YES',0.30,
+                    'YES','WIN',0.70,'real_fill','EDGE')
+        """)
+    rows = logger.get_stats_by_flag_path()
+    edge_row = next(r for r in rows if r["flag_path"] == "EDGE")
+    assert edge_row["total"] == 1  # only the paper signal, not the real_fill
