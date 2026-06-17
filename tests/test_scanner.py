@@ -1133,6 +1133,30 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will the official be removed before the election?", 0.25),
     # False positive guard: "removed from office" still hits impeachment block → 0.15
     ("Will the president be removed from office by Congress?", 0.15),
+    # Face trial — criminal proceeding (~35%)
+    ("Will Julian Assange face trial in the US by 2026?", 0.35),
+    ("Will the former official stand trial on corruption charges?", 0.35),
+    # Regulatory fines (~40%)
+    ("Will Google be fined by the EU in 2026?", 0.40),
+    ("Will the company receive a fine from the FTC?", 0.40),
+    # Cyberattack / data breach (~35%)
+    ("Will there be a major cyberattack on US infrastructure?", 0.35),
+    ("Will a ransomware attack disrupt a critical US agency?", 0.35),
+    # Trade deficit / balance (~50%)
+    ("Will the US trade deficit widen in Q2 2026?", 0.50),
+    ("Will the trade balance improve by year end?", 0.50),
+    # Treasury yield / bond level (~50%)
+    ("Will the 10-year Treasury yield exceed 5% in 2026?", 0.50),
+    ("Will the 30-year Treasury yield stay below 4.5%?", 0.50),
+    # Electoral College abolition → constitutional amendment (0.05)
+    ("Will the Electoral College be abolished by 2028?", 0.05),
+    ("Will Congress vote to eliminate the electoral college?", 0.05),
+    # Snap / early election (~25%)
+    ("Will France call a snap election in 2026?", 0.25),
+    ("Will the UK hold an early general election before 2027?", 0.25),
+    # Political withdrawal via "not seek" phrasing (~30%)
+    ("Will Biden announce he will not seek a second term?", 0.30),
+    ("Will the incumbent senator choose not to run for reelection?", 0.30),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

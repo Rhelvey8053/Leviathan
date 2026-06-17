@@ -178,10 +178,22 @@ def estimate_base_rate(market: dict) -> float | None:
           "special congressional election", "fill the vacancy",
           "senate vacancy", "house vacancy"], 0.45),
         # Constitutional amendment — requires supermajority in both chambers + 3/4 states → ~5%
+        # "abolish the electoral college" is also a de facto amendment question
         (["constitutional amendment", "amend the constitution",
           "constitutional convention", "repeal the 2nd amendment",
           "repeal the amendment", "electoral college amendment",
-          "equal rights amendment", "balanced budget amendment"], 0.05),
+          "equal rights amendment", "balanced budget amendment",
+          "abolish the electoral college", "electoral college be abolished",
+          "eliminate the electoral college"], 0.05),
+        # Snap election / early election — triggered by dissolution of parliament (~25%)
+        (["snap election", "early election", "early general election",
+          "call for early elections", "dissolve parliament",
+          "call a general election"], 0.25),
+        # Political withdrawal addendum — "not seek" phrasing (no year-injection risk)
+        (["not seek a second term", "not seek reelection", "not seek re-election",
+          "will not run for", "choose not to run", "choosing not to run",
+          "decided not to run", "decide not to run",
+          "not stand for reelection", "not stand for re-election"], 0.30),
         # Ballot disqualification — courts rarely disqualify candidates → ~20%
         # "disqualified from the" handles year insertion ("from the 2024 ballot")
         (["ballot disqualification", "ineligible for the ballot",
@@ -281,6 +293,18 @@ def estimate_base_rate(market: dict) -> float | None:
           "section 4 of the 25th", "25th amendment invocation"], 0.05),
         (["lawsuit", "settlement", "settle the lawsuit",
           "class action", "reaches settlement"], 0.40),
+        # Face trial — criminal proceeding (~35%); placed BEFORE arrest block
+        (["face trial", "stand trial", "go to trial",
+          "faces trial", "stands trial", "goes to trial",
+          "brought to trial", "criminal trial"], 0.35),
+        # Regulatory fines — EU and US regulators fine companies frequently (~40%)
+        (["be fined by", "get fined by", "receive a fine",
+          "pay a fine", "fined for", "eu fine",
+          "regulatory fine", "antitrust fine"], 0.40),
+        # Cyberattack / data breach — significant attacks are unfortunately common (~35%)
+        (["cyberattack", "cyber attack", "cyber breach",
+          "data breach", "ransomware attack", "hack the infrastructure",
+          "critical infrastructure attack", "attack on the grid"], 0.35),
         # Arrested / in custody — before convicted/indicted; arrest ≠ conviction
         # "house arrest" avoided by requiring "arrested for/by/in" or standalone phrases
         (["be arrested", "get arrested", "was arrested", "been arrested",
@@ -363,6 +387,13 @@ def estimate_base_rate(market: dict) -> float | None:
         (["housing prices", "home prices", "home values",
           "real estate prices", "median home price"], 0.50),
         (["default", "debt default", "sovereign default"], 0.10),
+        # Trade/current account — near 50/50 like other macro level markets
+        (["trade deficit", "trade surplus", "trade balance",
+          "current account deficit", "balance of trade"], 0.50),
+        # Interest rate levels (bond yields, treasury yields) — 50/50 threshold markets
+        (["treasury yield", "10-year yield", "bond yield", "yield on the",
+          "10-year treasury", "2-year treasury", "30-year treasury",
+          "yield curve", "bund yield", "gilt yield"], 0.50),
         # Economic indicators — near 50/50 for specific threshold questions
         (["unemployment rate", "unemployment", "jobless rate", "nonfarm payroll",
           "jobs report", "labor market", "labor force"], 0.50),
