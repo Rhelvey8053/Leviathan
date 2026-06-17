@@ -347,6 +347,7 @@ def main():
             "smart_money":     m.get("smart_money", []),
             "watchlist_signal": m.get("watchlist_signal", False),
             "flag_path":       m.get("flag_path"),
+            "base_rate":       m.get("base_rate"),
             "sig_edge":        m.get("sig_edge", False),
             "sig_drift":       m.get("sig_drift", False),
             "sig_br_none":     m.get("sig_br_none", False),

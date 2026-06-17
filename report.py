@@ -89,7 +89,8 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     # Header line
     num        = f"[{index}]  " if index else ""
     pass_label = "  [SECOND PASS — LOW CONVICTION]" if s.get("second_pass") else ""
-    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}")
+    fp_label   = f"  [{s.get('flag_path')}]" if s.get("flag_path") else ""
+    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{fp_label}")
     lines.append(f"{ticker}  ·  {close_fmt}" if close_fmt else ticker)
     lines.append("")
 
@@ -104,6 +105,9 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
 
     # Signals fired
     fired = []
+    if s.get("flag_path") == "HEURISTIC" and s.get("base_rate") is not None:
+        br_pct = f"{float(s['base_rate'])*100:.0f}%"
+        fired.append(f"Heuristic Base Rate {br_pct}")
     if s.get("drift_flag"):
         fired.append(f"Drift {(s.get('price_drift') or 0)*100:+.0f}%")
     if s.get("spread_wide"):
