@@ -271,7 +271,7 @@ def _smart_money_section(result: dict | None) -> list[str]:
 def compile_report(
     signals, whale_only, stats, run_meta, config,
     all_filtered=None, new_signals=None, repeat_signals=None,
-    smart_money_result=None, probe_stats=None,
+    smart_money_result=None, probe_stats=None, flag_path_stats=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
@@ -436,6 +436,18 @@ def compile_report(
             out.append(f"    Verdict:        {p_verdict}")
         out.append("")
 
+    if flag_path_stats:
+        resolved_paths = [r for r in flag_path_stats if r.get("total", 0) > 0]
+        if resolved_paths:
+            out.append("  Win Rate by Signal Path  (resolved only):")
+            out.append(f"    {'Path':<14}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L':>8}")
+            out.append(f"    {'-'*14}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}")
+            for r in resolved_paths:
+                wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+                pnl_s = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
+                out.append(f"    {r['flag_path']:<14}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
+            out.append("")
+
     # ── Run stats ─────────────────────────────────────────────────────────
     out.append(_rule("="))
     out.append("RUN STATISTICS")
@@ -457,7 +469,8 @@ def compile_report(
 
 # ── Weekly digest ─────────────────────────────────────────────────────────────
 
-def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict) -> str:
+def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
+                          flag_path_stats: list | None = None) -> str:
     now_utc  = datetime.now(timezone.utc)
     week_ago = now_utc - timedelta(days=7)
     date_str = now_utc.strftime("%B %d, %Y")
@@ -530,6 +543,19 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict) -
     out.append(f"  Avg Edge:       {_pct(ae) if ae is not None else '—'}")
     out.append(f"  Hypo P&L:       {f'${pnl:.2f}' if pnl is not None else '—'}")
     out.append("")
+
+    if flag_path_stats:
+        resolved_paths = [r for r in flag_path_stats if r.get("total", 0) > 0]
+        if resolved_paths:
+            out.append("  Win Rate by Signal Path  (resolved only):")
+            out.append(f"    {'Path':<14}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L':>8}")
+            out.append(f"    {'-'*14}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}")
+            for r in resolved_paths:
+                wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+                pnl_s = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
+                out.append(f"    {r['flag_path']:<14}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
+            out.append("")
+
     out.append(_rule("="))
     out.append("Leviathan v1  ·  Weekly Summary  ·  For informational purposes only")
     out.append(_rule("="))
