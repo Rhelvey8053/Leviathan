@@ -194,16 +194,18 @@ def main():
 
             # Cross-market promotion: unflagged markets with large Polymarket divergence
             poly_cfg    = config.get("polymarket", {})
-            cross_on    = poly_cfg.get("cross_market_promote", True)
-            cross_gap   = poly_cfg.get("cross_market_min_gap", 0.15)
-            cross_max   = poly_cfg.get("cross_market_max_candidates", 50)
+            cross_on         = poly_cfg.get("cross_market_promote", True)
+            cross_gap        = poly_cfg.get("cross_market_min_gap", 0.15)
+            cross_min_score  = poly_cfg.get("cross_market_min_match_score", 0.65)
+            cross_max        = poly_cfg.get("cross_market_max_candidates", 50)
             if cross_on and unflagged_markets and poly_index:
                 candidates = sorted(
                     unflagged_markets,
                     key=lambda m: -float(m.get("volume_fp") or m.get("volume") or 0),
                 )[:cross_max]
                 cross_matches = polymarket.match_markets(
-                    candidates, poly_index, config, min_gap=cross_gap
+                    candidates, poly_index, config,
+                    min_gap=cross_gap, min_match_score=cross_min_score,
                 )
                 n_promoted = 0
                 for m in candidates:
