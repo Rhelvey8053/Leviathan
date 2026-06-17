@@ -360,3 +360,92 @@ Can AI+websearch research find mispricings that the market hasn't priced? The an
 1. **Re-run the probe** once Claude Pro spend limit resets — target the full 10-market cap to build a larger hypothesis set, then repeat weekly as markets resolve.
 2. **Add `filter_pass` context to probe output** — the current run shows 0 filter survivors; investigate whether the snapshot timing (4am UTC) explains this or whether the filter thresholds are too strict.
 3. **Track divergence calibration** — once 20+ probe rows resolve, compute calibration error (average |claude_estimate − actual_outcome|) vs. the market's calibration error to measure research alpha.
+
+---
+
+## Session 3 — Smart money signal quality + pipeline wiring (2026-06-17)
+
+**Test count:** 230 → 231 (all passing)
+
+### Problem: cross-reference was producing ~127 noisy signals
+
+The Polymarket-to-Kalshi title matching was generating false positives because:
+1. SequenceMatcher uses character-level similarity — "Will Saudi Arabia join the Abraham Accords?" scored 52% against a Scottie Scheffler golf market purely because both titles share the phrase structure "Will ... win the ..."
+2. Sports game bets (outcome="No" on "Will Germany win on 2026-06-25?") passed through `_is_binary_position()` because the outcome itself is binary — the problem was in the title, not the outcome
+3. No minimum word-overlap gate; single-word matches (e.g., "mayoral") could score above threshold
+
+### Fixes applied
+
+**`analysis/smart_money_scan.py`:**
+
+Added `_SPORTS_TITLE_PATTERNS` and `_is_sports_title(title)` to detect soccer game lines, competition winner bets, and major sports tournaments by title keywords (`" vs. "`, `"win on 202"`, `"world cup"`, `"nba"`, `"super bowl"`, etc.).
+
+Added a **2-keyword minimum gate** in `_match_to_kalshi()`: before computing any score, `len(poly_words & kalshi_words) < 2` skips the candidate. This eliminates all character-similarity false positives where the underlying topic is completely different.
+
+Raised match threshold from `0.30` → `0.50`.
+
+Added `kalshi_title` to the signal dict so the matched Kalshi market name is available in reports (previously only the ticker was stored).
+
+Result: 127+ noisy signals → **15 clean cross-references** on the 2026-06-17 live run.
+
+**Signal quality (2026-06-17 live run):**
+
+| Kalshi ticker | Trader | Position | Match |
+|---|---|---|---|
+| KXMAKERFIELDBY-27JAN01-GRE | 0x2c3350 | $253k NO | 72% |
+| KXLONDONMAYOR-28MAY01-ZPOL | wan123 / denizz | $82k / $26k NO | 62% |
+| CONTROLS-2028-R/D | wan123 | $22k / $21k | 59% |
+| KXRTICKET-28NOV07-JVANEKIR | wan123 | $21k YES | 65% |
+| KXABRAHAMSY-29-JAN20 | denizz | $12k / $7k / $2k NO | 66–72% |
+| KXABRAHAMSA-29-JAN20 | denizz | $4k / $1k NO | 51–83% |
+| SENATEUT-28-R/D | wan123 / Erasmus | $6k / $2k | 68–70% |
+| SENATEFL-28-R | wan123 | $1k NO | 100% |
+| EUEXIT-30 | denizz | $13k NO | 60% |
+
+### Bug fix: watchlist markets were silently dropped
+
+`scanner.score_markets()` sorts watchlist-tagged markets first but does not set `flag=True`. `main.py` then filtered `flagged_markets = [m for m in scored_markets if m.get("flag")]`, which silently dropped any watchlist market that lacked drift or heuristic edge.
+
+**Fix in `main.py`:** After `score_markets()`, any market with `watchlist_signal=True` and `flag=False` is explicitly force-flagged with `flag_path="WATCHLIST"` and prepended to `flagged_markets`. These markets now reliably reach Claude scoring. `watchlist_signal` is also passed through to the final signal dict so it appears in the email report.
+
+### Probe calibration sync
+
+`research_probe.py`'s `PROBE_SYSTEM` prompt had no calibration rules — it was a single sentence. A live Prison Break market probe returned 82% YES on a 5.5% market, demonstrating the risk of uncalibrated tail overconfidence.
+
+Synced the full **6-rule CALIBRATION RULES** block from `scorer.py` into `PROBE_SYSTEM`:
+1. Tail probability — require extraordinary evidence to set estimate >30% on a sub-15% market
+2. Source chain — verify sources are truly independent before citing "multiple sources confirm X"
+3. Announced vs completed — "announced" is not "completed" by the deadline
+4. Entertainment/media — treat streaming release dates with extreme skepticism (~25% base rate)
+5. High confidence threshold — only HIGH when primary-source evidence directly addresses the deadline
+6. Edge requirement — only call YES/NO if estimate differs from market by ≥10pp
+
+Also added per-market time-horizon context to probe prompts (`closes within 7 days — near-term catalysts most relevant`, etc.) so Claude weights evidence appropriately.
+
+### Research probe: watchlist prioritisation
+
+`run_probe()` now loads `data/smart_money/latest_signals.json` and force-inserts watchlist tickers at the front of the probe queue before filling remaining slots from the stratified sample. The divergence table annotates watchlist markets with `[WL]`. This ensures confirmed smart money positions are always probed first within the `max_probe_markets` cap.
+
+### Report improvements
+
+- **`_smart_money_section()`**: cross-references now sorted by `match_score × position_val` (quality-weighted); shows `kalshi_title` below each row so both the Polymarket title and matched Kalshi market are visible; column added for `match_score`
+- **Signal block**: `watchlist_signal=True` adds "Watchlist: Top Polymarket Trader" to the Signals fired line
+- **Header**: "Smart Money" line now shows count of Kalshi cross-references (`N Kalshi x-refs from top Polymarket traders`)
+- **Track record**: probe stats block added (`probe_stats` parameter passed from `main.py`)
+
+### Other fixes
+
+- `daily_smart_money.py`: now calls `save_signals_cache()` after each scan (was missing — ticker cache was not being updated by the scheduled job); fixed Windows cp1252 crash caused by `→` character in print statement
+- `logger.py` `resolve_outcomes()`: added 3-attempt exponential backoff (1.5s, 3.0s) for Kalshi API overload errors; rate-limit sleep bumped 0.25s → 0.3s
+- `main.py`: snapshot saved after every market fetch so analysis scripts always have a fresh catalog
+- `analysis/smart_money_scan.py`: markdown report table now includes `kalshi_title` column; sorted by quality-weighted position size
+
+### Tests
+
+1 new test: `test_watchlist_flag_path_override` — verifies that an unflagged watchlist market gets `flag=True` and `flag_path="WATCHLIST"` when the main.py force-flag logic runs. (231 total, all passing)
+
+### Open items
+
+1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-27JUL01`) settles 2026-07-08 — run `resolve_outcomes({})` after that date to write the official result. Currently manually scored as LOSS.
+2. **Senate/Makerfield/Abraham Accords tickers** — these are 2027–2029 markets; they are now in the scoring queue via watchlist boost but will not resolve for months. Monitor for price drift as confirming signal.
+3. **`filter_pass` context in probe** — stratified sample showed 0 filter survivors in the 4am UTC snapshot. Consider sampling from a fresher snapshot or relaxing filter thresholds in the probe path.
