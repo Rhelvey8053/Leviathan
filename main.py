@@ -350,11 +350,12 @@ def main():
     run_meta["cost_usd"]    = cost
 
     # Merge Claude scores with full market context (including upstream signals)
-    scored_by_ticker   = {s["ticker"]: s for s in claude_scores}
+    scored_by_ticker    = {s["ticker"]: s for s in claude_scores}
     conf_threshold_rank = {"HIGH": 0, "MED": 1, "LOW": 2}
     threshold_rank      = conf_threshold_rank.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
     )
+    min_high_edge       = float(config.get("scoring", {}).get("min_high_confidence_edge", 0.10))
 
     for m in flagged_markets:
         ticker = m.get("ticker", "")
@@ -390,7 +391,13 @@ def main():
             "run_id":          run_id,
         }
 
-        if conf_threshold_rank.get(cs.get("confidence", "LOW"), 2) <= threshold_rank and cs.get("direction", "PASS") != "PASS":
+        # HIGH confidence gate: downgrade to MED if edge is below minimum threshold.
+        # Claude rule 11 already instructs ≥10pp, but this enforces it programmatically.
+        if signal.get("confidence") == "HIGH" and abs(float(signal.get("edge") or 0)) < min_high_edge:
+            signal["confidence"] = "MED"
+            signal["confidence_downgraded"] = True
+
+        if conf_threshold_rank.get(signal.get("confidence", "LOW"), 2) <= threshold_rank and signal.get("direction", "PASS") != "PASS":
             final_signals.append(signal)
         elif whale.get("whale_detected"):
             whale_only.append({**whale, "title": m.get("title", "")})

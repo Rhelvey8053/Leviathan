@@ -721,6 +721,24 @@ def test_repeat_absent_for_new_signal():
     assert "REPEAT" not in ticker_line
 
 
+# ─── HIGH confidence downgrade label ─────────────────────────────────────────
+
+def test_confidence_downgraded_label_shown_when_flagged():
+    """[conf downgraded: edge<10pp] appears in header when confidence_downgraded is set."""
+    s = _signal(confidence="MED", confidence_downgraded=True)
+    lines = report._signal_block(s, index=1)
+    header = lines[0]
+    assert "conf downgraded" in header
+
+
+def test_confidence_downgraded_label_absent_normally():
+    """No downgrade label in header for normal signals."""
+    s = _signal(confidence="HIGH")
+    lines = report._signal_block(s, index=1)
+    header = lines[0]
+    assert "conf downgraded" not in header
+
+
 # ─── _kelly_fraction ──────────────────────────────────────────────────────────
 
 def test_kelly_yes_basic():
