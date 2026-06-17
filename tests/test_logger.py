@@ -277,7 +277,8 @@ def test_schema_new_columns_present(tmp_db):
     for col in ("source", "from_signal", "signal_call_id", "direction_aligned",
                 "entry_price", "fill_count", "fill_fee",
                 "contract_type", "segment", "resolution_date", "logged_under",
-                "flag_path", "watchlist_signal"):
+                "flag_path", "watchlist_signal",
+                "sig_edge", "sig_drift", "sig_br_none"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -524,6 +525,43 @@ def test_log_signal_flag_path_none(tmp_db):
     with logger._db() as conn:
         row = conn.execute("SELECT flag_path FROM signals WHERE ticker='KXNO-28'").fetchone()
     assert row["flag_path"] is None
+
+
+def test_log_signal_stores_sig_fields(tmp_db):
+    """log_signal must persist sig_edge, sig_drift, sig_br_none."""
+    logger.log_signal({
+        "ticker": "KXSIG-28", "title": "Sig Test", "market_price": 0.30,
+        "our_estimate": 0.50, "edge": 0.20, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "EDGE", "watchlist_signal": False,
+        "sig_edge": True, "sig_drift": False, "sig_br_none": False,
+        "run_id": "r4",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT sig_edge, sig_drift, sig_br_none FROM signals WHERE ticker='KXSIG-28'"
+        ).fetchone()
+    assert row["sig_edge"]    == 1
+    assert row["sig_drift"]   == 0
+    assert row["sig_br_none"] == 0
+
+
+def test_log_signal_sig_drift_stored(tmp_db):
+    """log_signal persists sig_drift=True as 1."""
+    logger.log_signal({
+        "ticker": "KXDRIFT-28", "title": "Drift Test", "market_price": 0.45,
+        "our_estimate": 0.55, "edge": 0.10, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "DRIFT", "watchlist_signal": False,
+        "sig_edge": False, "sig_drift": True, "sig_br_none": False,
+        "run_id": "r5",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT sig_edge, sig_drift FROM signals WHERE ticker='KXDRIFT-28'"
+        ).fetchone()
+    assert row["sig_drift"] == 1
+    assert row["sig_edge"]  == 0
 
 
 def _insert_with_flag_path(call_id, ticker, direction, market_price,
