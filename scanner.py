@@ -255,6 +255,14 @@ def estimate_base_rate(market: dict) -> float | None:
           "leave the cabinet", "depart from the cabinet"], 0.65),
         (["resign", "step down", "stepping down",
           "resigns from", "resignation"], 0.20),
+        # Athlete / celebrity retirement — players often defer decision; markets are uncertain → ~30%
+        # Placed after resign (0.20) as retirement is distinct from workplace resignation
+        (["announce retirement", "announce his retirement", "announce her retirement",
+          "retire from the nba", "retire from the nfl", "retire from the mlb",
+          "retire from the nhl", "retire from pro", "retire from professional",
+          "retire from football", "retire from basketball", "retire from baseball",
+          "decide to retire", "officially retire", "retirement before",
+          "retirement announcement", "announce they will retire"], 0.30),
         (["pardon", "presidential pardon", "commute the sentence"], 0.35),
         # Congressional control — election-cycle markets near 50/50
         (["control the senate", "senate majority", "senate control",
@@ -696,6 +704,7 @@ def estimate_base_rate(market: dict) -> float | None:
           "season premiere", "sequel", "spin-off",
           "box office", "streaming", "in theaters", "in cinemas",
           "music video", "album drops", "album release",
+          "official trailer", "teaser trailer", "trailer release", "trailer for",
           "episode", "documentary"], 0.25),
         # "season" alone is too broad (matches wildfire season, flu season, etc.)
         # Explicit numbered seasons + movie/film catch-all
@@ -740,7 +749,11 @@ def estimate_base_rate(market: dict) -> float | None:
           "gemini 2", "gemini 3", "gemini ultra",
           "llama 4", "llama-4", "llm release", "ai model release",
           "release a new model", "release their next model",
-          "agi by", "artificial general intelligence by"], 0.25),
+          "agi by", "artificial general intelligence by",
+          "achieved artificial general intelligence",
+          "achieve artificial general intelligence",
+          "claims agi", "declare agi", "announce agi",
+          "claims to have achieved agi"], 0.25),
         # AI capability milestones — AI passing high-stakes tests is increasingly common → ~40%
         (["ai pass", "ai passes", "ai score", "ai scores",
           "ai outperform", "ai beat", "ai beats",
