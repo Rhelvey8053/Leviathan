@@ -272,3 +272,100 @@ def test_smart_money_section_rendered():
     assert "Smart Money Activity" in full
     assert "TraderA" in full
     assert "BUY YES" in full
+
+
+# ─── compile_weekly_digest ────────────────────────────────────────────────────
+
+def _week_row(ticker, direction="YES", confidence="MED", edge=0.12,
+              timestamp="2026-06-17T08:00:00+00:00"):
+    return {
+        "ticker":     ticker,
+        "title":      f"Will {ticker} happen?",
+        "direction":  direction,
+        "confidence": confidence,
+        "edge":       edge,
+        "timestamp":  timestamp,
+    }
+
+
+def _stats(total=5, resolved=3, wins=2, win_rate=66.7,
+           avg_edge=0.12, total_pnl=0.85):
+    return {
+        "total_calls":            total,
+        "resolved":               resolved,
+        "win_rate":               win_rate,
+        "avg_edge_captured":      avg_edge,
+        "total_hypothetical_pnl": total_pnl,
+    }
+
+
+def test_weekly_digest_header_present():
+    digest = report.compile_weekly_digest([], _stats(0, 0, 0, None, None, None), {})
+    assert "WEEKLY DIGEST" in digest
+    assert "LEVIATHAN" in digest
+
+
+def test_weekly_digest_empty_signals_no_crash():
+    digest = report.compile_weekly_digest([], _stats(0, 0, 0, None, None, None), {})
+    assert isinstance(digest, str)
+    assert len(digest) > 0
+
+
+def test_weekly_digest_direction_counts():
+    signals = [
+        _week_row("KXYES1", direction="YES"),
+        _week_row("KXYES2", direction="YES"),
+        _week_row("KXNO1",  direction="NO"),
+    ]
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "2 YES" in digest
+    assert "1 NO"  in digest
+
+
+def test_weekly_digest_deduplicates_same_ticker():
+    """Same ticker appearing twice must produce only one row in the markets table."""
+    signals = [
+        _week_row("KXDUP", timestamp="2026-06-16T08:00:00+00:00"),
+        _week_row("KXDUP", timestamp="2026-06-17T08:00:00+00:00"),
+    ]
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    # "Unique Markets Flagged: 1" should appear
+    assert "Unique Markets Flagged:  1" in digest
+
+
+def test_weekly_digest_unique_markets_count():
+    signals = [_week_row(f"KX{i}") for i in range(4)]
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "Unique Markets Flagged:  4" in digest
+
+
+def test_weekly_digest_stats_section_win_rate():
+    digest = report.compile_weekly_digest([], _stats(win_rate=75.0), {})
+    assert "75.0%" in digest
+
+
+def test_weekly_digest_stats_section_no_resolved():
+    digest = report.compile_weekly_digest([], _stats(resolved=0, win_rate=None, total_pnl=None), {})
+    assert "none resolved yet" in digest.lower()
+
+
+def test_weekly_digest_flag_path_stats_shown_when_provided():
+    flag_stats = [
+        {"flag_path": "EDGE",      "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90},
+        {"flag_path": "HEURISTIC", "total": 1, "wins": 1, "win_rate": 100.0, "total_pnl": 0.70},
+    ]
+    digest = report.compile_weekly_digest([], _stats(), {}, flag_path_stats=flag_stats)
+    assert "Win Rate by Signal Path" in digest
+    assert "EDGE"      in digest
+    assert "HEURISTIC" in digest
+
+
+def test_weekly_digest_flag_path_stats_absent_when_none():
+    digest = report.compile_weekly_digest([], _stats(), {}, flag_path_stats=None)
+    assert "Win Rate by Signal Path" not in digest
+
+
+def test_weekly_digest_ticker_appears_in_markets_table():
+    signals = [_week_row("KXUNIQUE-TEST")]
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "KXUNIQUE-TEST" in digest
