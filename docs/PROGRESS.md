@@ -64,7 +64,32 @@ Config keys added to `polymarket` section:
 22. `f03efba` — Quality-weighted pre-Claude sort: _pre_sort_score() replaces volume-only ordering in top-N selection
 23. `ec49a89` — TOP PICKS executive summary: top-3 signals by (confidence, strength, edge) in compact 3-line format at report top + 8 tests (649)
 
-## Session 9 begins here
+## Session 9 — 2026-06-17 (autonomous continuation)
+
+### Brier score calibration + digest integration
+
+Added Brier score as the primary calibration metric for tracking signal quality over time.
+
+**`logger.get_brier_score()`** — computes `mean((estimate - outcome_binary)^2)` for all
+resolved paper signals. YES WIN → binary=1; YES LOSS → 0; NO WIN → 0; NO LOSS → 1.
+Returns `{brier_score, n, label}` where label ∈ EXCELLENT (≤0.10) / GOOD (≤0.20) / FAIR (≤0.25) / POOR (>0.25).
+Research probe rows are excluded — Brier score is paper-signal calibration only.
+
+**`analysis/backtest.py`** — Brier score shown in COMBINED SUMMARY section with calibration guidance.
+
+**`report.compile_weekly_digest()`** — accepts optional `brier=` param; displays Brier score in
+TRACK RECORD section of the weekly email with label and n.
+
+**`main.py`** — passes `brier=logger.get_brier_score()` to `compile_weekly_digest()` on Sunday digest runs.
+
+**7 new tests (684 total):**
+- `test_logger.py` +4: pending (None score), perfect (≈0.0), random (≈0.25), probe exclusion
+- `test_report.py` +3: Brier shown in digest, PENDING when None, absent when param omitted
+
+### Git commits this session
+
+24. `02af675` — Add Brier score calibration metric (684 tests): logger.get_brier_score(),
+    backtest display, weekly digest integration, 7 new tests
 
 ---
 
