@@ -80,6 +80,42 @@ def _signal_strength(s: dict) -> int:
     return score
 
 
+def _kelly_fraction(direction: str, market_price: float, estimate: float) -> tuple[float, float] | None:
+    """
+    Full and quarter-Kelly bet fraction for a binary Kalshi contract.
+
+    Returns (full_kelly, quarter_kelly) as fractions of bankroll, or None if
+    no positive edge or inputs are invalid.
+
+    Formula for YES: f* = (p - q) / (1 - q)  where q = market_price
+    Formula for NO:  f* = ((1-p) - q_no) / (1 - q_no)  where q_no = 1 - market_price
+    """
+    if direction not in ("YES", "NO"):
+        return None
+    try:
+        p   = float(estimate)
+        mkt = float(market_price)
+    except (TypeError, ValueError):
+        return None
+    if not (0 < mkt < 1) or not (0 < p < 1):
+        return None
+    if direction == "YES":
+        # Buy YES at mkt: win (1-mkt) if correct, lose mkt if wrong
+        # Kelly: f* = (p - mkt) / (1 - mkt)
+        edge  = p - mkt
+        denom = 1 - mkt
+    else:
+        # Buy NO at (1-mkt): win mkt if correct (YES doesn't resolve), lose (1-mkt) if wrong
+        # Kelly: f* = ((1-p) - (1-mkt)) / mkt  =  (mkt - p) / mkt
+        edge  = mkt - p
+        denom = mkt
+    if edge <= 0 or denom <= 0:
+        return None
+    full_kelly    = edge / denom
+    quarter_kelly = full_kelly / 4
+    return round(full_kelly, 4), round(quarter_kelly, 4)
+
+
 def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
     out = [
         s for s in signals
@@ -124,10 +160,15 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
         except Exception:
             close_fmt = close_raw[:10]
 
-    mkt_p  = _pct(s.get("market_price"))
-    est_p  = _pct(s.get("our_estimate"))
-    edge_v = float(s.get("edge") or 0)
-    edge_s = f"{edge_v*100:+.1f} pp"
+    mkt_p    = _pct(s.get("market_price"))
+    est_p    = _pct(s.get("our_estimate"))
+    edge_v   = float(s.get("edge") or 0)
+    edge_s   = f"{edge_v*100:+.1f} pp"
+    kelly    = _kelly_fraction(direction, s.get("market_price"), s.get("our_estimate"))
+    kelly_s  = (
+        f"  (full: {kelly[0]*100:.1f}%  |  1/4 Kelly: {kelly[1]*100:.1f}%)"
+        if kelly else ""
+    )
 
     # Header line — includes signal strength score (corroborating evidence count)
     num        = f"[{index}]  " if index else ""
@@ -149,6 +190,8 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     lines.append(f"  Market:       {mkt_p}")
     lines.append(f"  Our Estimate: {est_p}")
     lines.append(f"  Edge:         {edge_s}")
+    if kelly_s:
+        lines.append(f"  Kelly:{kelly_s}")
 
     # Signals fired
     fired = []

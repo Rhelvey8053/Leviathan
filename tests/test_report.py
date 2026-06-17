@@ -719,3 +719,51 @@ def test_repeat_absent_for_new_signal():
     lines = report._signal_block(s)
     ticker_line = lines[1]
     assert "REPEAT" not in ticker_line
+
+
+# ─── _kelly_fraction ──────────────────────────────────────────────────────────
+
+def test_kelly_yes_basic():
+    """YES position: Kelly = (p - mkt) / (1 - mkt). With p=0.6, mkt=0.4 → 1/3."""
+    fk, qk = report._kelly_fraction("YES", 0.40, 0.60)
+    assert abs(fk - 1/3) < 0.001
+    assert abs(qk - 1/12) < 0.001
+
+
+def test_kelly_no_basic():
+    """NO position: Kelly = (mkt - p) / mkt. With p=0.3, mkt=0.6 → 0.5."""
+    fk, qk = report._kelly_fraction("NO", 0.60, 0.30)
+    assert abs(fk - 0.50) < 0.001
+    assert abs(qk - 0.125) < 0.001
+
+
+def test_kelly_returns_none_for_pass():
+    """PASS direction returns None — no sizing for non-directional calls."""
+    assert report._kelly_fraction("PASS", 0.40, 0.50) is None
+
+
+def test_kelly_returns_none_when_no_edge():
+    """Returns None when estimate <= market_price for YES (no edge)."""
+    assert report._kelly_fraction("YES", 0.60, 0.40) is None  # estimate below market
+
+
+def test_kelly_returns_none_for_bad_inputs():
+    """Returns None for None inputs without crashing."""
+    assert report._kelly_fraction("YES", None, None) is None
+    assert report._kelly_fraction("YES", 0.0, 0.60) is None  # mkt=0 is invalid
+
+
+def test_kelly_shown_in_signal_block_when_direction_yes():
+    """Kelly line appears in signal block for YES signals with valid estimate."""
+    s = _signal(direction="YES", market_price=0.40, our_estimate=0.65, edge=0.25)
+    lines = report._signal_block(s)
+    kelly_lines = [l for l in lines if "Kelly" in l]
+    assert len(kelly_lines) == 1
+    assert "1/4 Kelly" in kelly_lines[0]
+
+
+def test_kelly_absent_for_pass_direction():
+    """No Kelly line when direction is PASS."""
+    s = _signal(direction="PASS", market_price=0.50, our_estimate=0.52, edge=0.02)
+    lines = report._signal_block(s)
+    assert not any("Kelly" in l for l in lines)
