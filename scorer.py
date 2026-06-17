@@ -280,15 +280,21 @@ def build_prompt(markets: list[dict]) -> str:
         # Tell Claude WHY this market was flagged
         fp = m.get("flag_path")
         if fp == "HEURISTIC":
-            br = m.get("base_rate")
-            br_str = f" — heuristic base rate {br*100:.0f}%" if br is not None else ""
-            lines.append(f"   FLAG REASON: HEURISTIC base rate mismatch{br_str} vs market price")
+            br     = m.get("base_rate")
+            hd     = m.get("heuristic_direction")
+            br_str = f"base rate {br*100:.0f}%" if br is not None else "base rate unknown"
+            lean   = f" — leans {hd}" if hd and hd != "NEUTRAL" else ""
+            lines.append(f"   FLAG REASON: HEURISTIC — {br_str} vs market price{lean}")
         elif fp == "DRIFT":
             lines.append(f"   FLAG REASON: DRIFT — market price has moved significantly from last traded price")
         elif fp == "WATCHLIST":
             lines.append(f"   FLAG REASON: WATCHLIST — top Polymarket traders have open positions on this market")
         elif fp == "EDGE":
-            lines.append(f"   FLAG REASON: EDGE — significant gap between heuristic estimate and market price")
+            br     = m.get("base_rate")
+            hd     = m.get("heuristic_direction")
+            br_str = f"base rate {br*100:.0f}%" if br is not None else "base rate unknown"
+            lean   = f" — leans {hd}" if hd and hd != "NEUTRAL" else ""
+            lines.append(f"   FLAG REASON: EDGE — heuristic {br_str} vs market price{lean}")
         elif fp == "CROSS_MARKET":
             poly = m.get("poly") or {}
             gap_pct = abs((poly.get("price_gap") or 0) * 100)

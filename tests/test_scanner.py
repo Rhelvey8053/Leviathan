@@ -1324,3 +1324,37 @@ def test_base_rate_new_categories(title, expected_rate):
     assert rate == pytest.approx(expected_rate), (
         f"title={title!r}: expected {expected_rate}, got {rate}"
     )
+
+
+# ─── score_market: heuristic_direction ───────────────────────────────────────
+
+def test_heuristic_direction_yes_when_base_rate_above_mid():
+    """base_rate=0.65 > mid_price=0.40 → heuristic says YES (market underpriced)."""
+    m = _market(mid=0.40, title="Will the CEO remain in office by end of year?")
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["base_rate"] == pytest.approx(0.65)
+    assert result["heuristic_direction"] == "YES"
+
+
+def test_heuristic_direction_no_when_base_rate_below_mid():
+    """base_rate=0.10 < mid_price=0.55 → heuristic says NO (market overpriced)."""
+    m = _market(mid=0.55, title="Will there be a coup in the country?")
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["base_rate"] == pytest.approx(0.10)
+    assert result["heuristic_direction"] == "NO"
+
+
+def test_heuristic_direction_neutral_when_base_rate_near_mid():
+    """base_rate=0.40, mid_price=0.40 → NEUTRAL (within 5pp buffer)."""
+    m = _market(mid=0.40, title="Will it rain tomorrow")
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["base_rate"] == pytest.approx(0.40)
+    assert result["heuristic_direction"] == "NEUTRAL"
+
+
+def test_heuristic_direction_none_when_no_base_rate():
+    """No matching heuristic → heuristic_direction is None."""
+    m = _market(mid=0.50, title="Will this highly unusual unique event happen?")
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["base_rate"] is None
+    assert result["heuristic_direction"] is None
