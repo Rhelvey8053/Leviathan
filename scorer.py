@@ -101,6 +101,9 @@ def build_prompt(markets: list[dict]) -> str:
         "\n--- MARKETS ---\n",
     ]
 
+    from datetime import datetime, timezone as _tz
+    _now = datetime.now(_tz.utc)
+
     for i, m in enumerate(markets, 1):
         mid_price = m.get("mid_price")
         whale     = m.get("whale_data")
@@ -113,10 +116,20 @@ def build_prompt(markets: list[dict]) -> str:
             "LONG":      "closes 90+ days out — base rates and long-run trends dominate",
         }.get(horizon, "")
 
+        close_str = m.get("close_time") or m.get("expiration_time", "")
+        days_left = None
+        if close_str:
+            try:
+                close_dt  = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
+                days_left = max(0, (close_dt - _now).days)
+            except (ValueError, AttributeError):
+                pass
+        days_note = f" ({days_left}d remaining)" if days_left is not None else ""
+
         lines.append(f"{i}. [{m.get('ticker', '')}] {(m.get('title', ''))[:120]}")
         lines.append(f"   Horizon: {horizon} ({horizon_note})")
         lines.append(f"   Current market price (YES): {f'{mid_price * 100:.1f}%' if mid_price is not None else 'unknown'}")
-        lines.append(f"   Closes: {m.get('close_time') or m.get('expiration_time', '')}")
+        lines.append(f"   Closes: {close_str}{days_note}")
 
         # Tell Claude WHY this market was flagged
         fp = m.get("flag_path")

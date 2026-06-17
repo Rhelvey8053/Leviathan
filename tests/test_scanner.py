@@ -910,6 +910,32 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Which party will have a senate majority after November 2026?", 0.50),
     ("Will Republicans flip the House in 2026?", 0.50),
     ("Senate control 2026 election outcome", 0.50),
+    # AI model release timing markets
+    ("Will OpenAI release GPT-5 by end of Q3 2026?", 0.25),
+    ("Will GPT-6 be released before December 2026?", 0.25),
+    ("Will Claude 4 be released before July 2026?", 0.25),
+    ("Will Gemini Ultra launch before the end of 2026?", 0.25),
+    ("Will AGI by 2028 be achieved by any lab?", 0.25),
+    # Trade / tariff markets
+    ("Will the US impose a tariff on Canadian steel above 25%?", 0.40),
+    ("Will Trump raise tariffs on China imports in Q3 2026?", 0.40),
+    ("Will tariff rates on EU goods be reduced by end of 2026?", 0.40),
+    # Sports awards
+    ("Will Shohei Ohtani win the NL MVP in 2026?", 0.20),
+    ("Will Connor McDavid win the NHL MVP award?", 0.20),
+    ("Will the Heisman Trophy go to a running back?", 0.20),
+    # Sports playoff qualification
+    ("Will the New York Yankees make the playoffs in 2026?", 0.35),
+    ("Will Manchester City qualify for the Champions League?", 0.35),
+    ("Will the Dallas Cowboys reach the playoffs in 2026?", 0.35),
+    # Sports trades
+    ("Will LeBron James get traded before the deadline?", 0.30),
+    ("Will the NBA trade deadline result in a blockbuster deal?", 0.30),
+    # Immigration / deportation
+    ("Will mass deportation operations exceed 1 million in 2026?", 0.35),
+    # Note: "Will the Supreme Court block deportation flights?" hits the "supreme court"
+    # pattern (0.50) before the "deportation" pattern — SCOTUS ruling base rate is correct.
+    ("Will ICE deport more than 50,000 people in June 2026?", 0.35),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

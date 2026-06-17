@@ -145,7 +145,8 @@ def estimate_base_rate(market: dict) -> float | None:
         (["win the world series", "win world series"], 0.50),
         (["win the championship", "win the nba", "win the nfl", "win the cup",
           "win the world cup", "win the fifa", "world cup winner",
-          "world series winner", "champions league", "stanley cup"], 0.50),
+          "world series winner", "win the champions league",
+          "champions league winner", "stanley cup"], 0.50),
         (["win the super bowl", "super bowl winner"], 0.50),
         (["win the game", "win on", "win their next"], 0.52),
         # Elections — incumbents have modest advantage
@@ -252,6 +253,32 @@ def estimate_base_rate(market: dict) -> float | None:
         # Media / entertainment — very low: release dates often slip
         (["release", "released", "premieres", "premiere by",
           "season", "movie", "film", "show"], 0.25),
+        # AI / technology model release timing — similar to entertainment: announced ≠ shipped
+        # "will OpenAI release GPT-5 by Q3?" — base rate ~25% for any given 3-month window
+        (["gpt-5", "gpt-6", "gpt 5", "gpt 6",
+          "claude 4", "claude 5", "claude-4", "claude-5",
+          "gemini 2", "gemini 3", "gemini ultra",
+          "llama 4", "llama-4", "llm release", "ai model release",
+          "release a new model", "release their next model",
+          "agi by", "artificial general intelligence by"], 0.25),
+        # Trade / tariffs — politically uncertain, executive action somewhat common
+        (["tariff on", "tariffs on", "tariff rate", "impose a tariff",
+          "tariff increase", "tariff reduction", "trade war",
+          "trade deal", "trade agreement"], 0.40),
+        # Immigration / deportation — executive action, moderate base rate
+        (["deport", "deportation", "mass deportation",
+          "immigration ban", "border wall", "sanctuary city"], 0.35),
+        # Sports awards / honors — single winner from many candidates
+        (["mvp", "cy young", "rookie of the year", "heisman",
+          "hall of fame", "all-star", "golden glove", "best player"], 0.20),
+        # Sports playoffs / championships — any given team ~30-40% pre-season
+        # "qualify for champions league" must come BEFORE the general "champions league" 0.50 check
+        (["make the playoffs", "reach the playoffs", "qualify for",
+          "qualify for the champions league", "advance to", "make it to",
+          "clinch a playoff"], 0.35),
+        # Sports trades / signings — rumors often don't materialize
+        (["get traded", "be traded", "trade deadline", "sign with",
+          "free agent signing", "sign a contract", "extension"], 0.30),
         # Technology
         (["fda approval", "fda approves", "fda cleared"], 0.40),
         (["launch", "launches", "launched by", "launches by"], 0.35),

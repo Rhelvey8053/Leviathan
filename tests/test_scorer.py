@@ -6,6 +6,7 @@ Run: python -m pytest -q
 """
 
 import pytest
+from datetime import datetime, timezone, timedelta
 
 import scorer
 
@@ -113,6 +114,20 @@ def test_prompt_unknown_price_when_mid_none():
     m = _base_market(mid_price=None)
     prompt = scorer.build_prompt([m])
     assert "unknown" in prompt
+
+
+def test_days_remaining_shown_in_prompt():
+    close = (datetime.now(timezone.utc) + timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    m = _base_market(close_time=close)
+    prompt = scorer.build_prompt([m])
+    assert "45d remaining" in prompt or "44d remaining" in prompt  # allow ±1 for test timing
+
+
+def test_days_remaining_zero_for_past_date():
+    past = "2020-01-01T00:00:00Z"
+    m = _base_market(close_time=past)
+    prompt = scorer.build_prompt([m])
+    assert "0d remaining" in prompt
 
 
 def test_drift_signal_shown():
