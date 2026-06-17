@@ -46,6 +46,40 @@ def _wrap(text: str, indent: int = 2, width: int = W) -> list[str]:
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
+def _signal_strength(s: dict) -> int:
+    """
+    Counts independent corroborating signals for a flagged market.
+    Each independent data source that agrees adds 1 point.
+    Score ≥ 3 = high-conviction stack.
+    """
+    score = 0
+    # Heuristic or edge disagreement with market price
+    if s.get("flag_path") in ("HEURISTIC", "EDGE"):
+        score += 1
+    # Polymarket divergence ≥ 5 pp
+    poly = s.get("poly") or {}
+    if poly.get("price_gap") is not None and abs(poly["price_gap"]) >= 0.05:
+        score += 1
+    # External market consensus (Manifold/PredictIt/Metaculus) — any source agrees on direction
+    ext = s.get("ext_markets") or []
+    if any(abs(e.get("price_gap", 0)) >= 0.05 for e in ext):
+        score += 1
+    # Smart money watchlist signal (top Polymarket traders positioned)
+    if s.get("watchlist_signal"):
+        score += 1
+    # Whale activity in same direction as flag
+    whale = s.get("whale_data") or {}
+    if whale.get("whale_detected"):
+        score += 1
+    # Smart money wallets active (accounts.py discovery, independent of watchlist)
+    if s.get("smart_money"):
+        score += 1
+    # Cross-market promotion (was flagged purely by Polymarket divergence)
+    if s.get("flag_path") == "CROSS_MARKET":
+        score += 1
+    return score
+
+
 def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
     out = [
         s for s in signals
@@ -86,11 +120,13 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     edge_v = float(s.get("edge") or 0)
     edge_s = f"{edge_v*100:+.1f} pp"
 
-    # Header line
+    # Header line — includes signal strength score (corroborating evidence count)
     num        = f"[{index}]  " if index else ""
     pass_label = "  [SECOND PASS — LOW CONVICTION]" if s.get("second_pass") else ""
     fp_label   = f"  [{s.get('flag_path')}]" if s.get("flag_path") else ""
-    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{fp_label}")
+    strength   = _signal_strength(s)
+    str_label  = f"  ★×{strength}" if strength >= 2 else ""
+    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{fp_label}{str_label}")
     lines.append(f"{ticker}  ·  {close_fmt}" if close_fmt else ticker)
     lines.append("")
 

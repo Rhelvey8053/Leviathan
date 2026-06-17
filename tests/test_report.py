@@ -556,3 +556,71 @@ def test_compile_report_signals_grouped_by_horizon():
     assert "Weekly"  in body
     assert "KXMONTH" in body
     assert "KXWEEK"  in body
+
+
+# ─── _signal_strength ─────────────────────────────────────────────────────────
+
+def test_signal_strength_zero_for_bare_br_none():
+    """A bare BR_NONE market with no corroborating signals scores 0."""
+    s = _signal(flag_path="BR_NONE")
+    assert report._signal_strength(s) == 0
+
+
+def test_signal_strength_heuristic_adds_one():
+    s = _signal(flag_path="HEURISTIC")
+    assert report._signal_strength(s) == 1
+
+
+def test_signal_strength_poly_gap_adds_one():
+    s = _signal(
+        flag_path="HEURISTIC",
+        poly={"price_gap": 0.12, "poly_price": 0.50, "poly_question": "Q", "match_score": 0.80},
+    )
+    assert report._signal_strength(s) == 2
+
+
+def test_signal_strength_ext_market_adds_one():
+    s = _signal(
+        flag_path="HEURISTIC",
+        ext_markets=[{"source": "Manifold", "probability": 0.55, "price_gap": 0.08, "match_score": 0.70}],
+    )
+    assert report._signal_strength(s) == 2
+
+
+def test_signal_strength_watchlist_adds_one():
+    s = _signal(flag_path="HEURISTIC", watchlist_signal=True)
+    assert report._signal_strength(s) == 2
+
+
+def test_signal_strength_cross_market_adds_one():
+    s = _signal(flag_path="CROSS_MARKET")
+    assert report._signal_strength(s) == 1
+
+
+def test_signal_strength_multi_corroboration():
+    """HEURISTIC + poly gap + watchlist = 3."""
+    s = _signal(
+        flag_path="HEURISTIC",
+        poly={"price_gap": 0.20, "poly_price": 0.60, "poly_question": "Q", "match_score": 0.85},
+        watchlist_signal=True,
+    )
+    assert report._signal_strength(s) == 3
+
+
+def test_signal_strength_shown_in_header_when_two_or_more():
+    """★×N label appears when signal_strength >= 2."""
+    s = _signal(
+        flag_path="HEURISTIC",
+        poly={"price_gap": 0.15, "poly_price": 0.55, "poly_question": "Q", "match_score": 0.80},
+    )
+    lines = report._signal_block(s, index=1)
+    header = lines[0]
+    assert "★" in header
+
+
+def test_signal_strength_not_shown_in_header_when_one():
+    """No ★ label when only one signal fires."""
+    s = _signal(flag_path="HEURISTIC")
+    lines = report._signal_block(s, index=1)
+    header = lines[0]
+    assert "★" not in header
