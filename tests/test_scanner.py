@@ -1055,6 +1055,17 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # False positive guard — "Nobel" in unrelated context
     # "Nobel conference" → no match (our patterns require "nobel prize"/"win the nobel"/"nobel laureate")
     ("Will the Nobel conference attract more attendees in 2026?", None),  # no heuristic
+    # Pulitzer Prize — small finalists field, single annual winner → ~10%
+    ("Will Bob Woodward win the Pulitzer Prize in 2026?", 0.10),
+    ("Will the newspaper win a Pulitzer for its investigative series?", 0.10),
+    # Extradition — legal process already underway → ~35%
+    ("Will Julian Assange be extradited to the United States?", 0.35),
+    ("Will the cartel leader face an extradition request by Q3 2026?", 0.35),
+    # Primary challenge — incumbent faces opposition (not whether challenger wins) → ~30%
+    ("Will Biden face a primary challenge from the left?", 0.30),
+    ("Will the incumbent senator face a primary opponent in 2026?", 0.30),
+    # False positive guard — "primary" in context of "win the primary" stays at 0.52
+    ("Will Trump win the primary in 2028?", 0.52),
     # Fed pause / hold rates
     ("Will the Fed pause rate hikes at the June 2026 meeting?", 0.50),
     ("Will the FOMC hold rates unchanged in Q3 2026?", 0.50),

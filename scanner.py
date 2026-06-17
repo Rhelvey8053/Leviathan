@@ -159,6 +159,12 @@ def estimate_base_rate(market: dict) -> float | None:
         (["be reelected", "win reelection", "win re-election",
           "reelected", "re-elected", "secure a second term",
           "win a second term", "second presidential term"], 0.52),
+        # Primary challenge — whether a challenge EXISTS (not whether it wins) → ~30%
+        # Most incumbents don't face serious primary opponents
+        (["primary challenge", "primary challenger", "face a primary",
+          "challenge in the primary", "defeated in the primary",
+          "lose the primary", "lost the primary",
+          "primary opponent"], 0.30),
         # Congressional spending — continuing resolutions / omnibus bills (must come before
         # generic "signed into law" because "omnibus bill" is a more specific match)
         (["continuing resolution", "omnibus bill", "appropriations bill",
@@ -241,6 +247,10 @@ def estimate_base_rate(market: dict) -> float | None:
         (["be arrested", "get arrested", "was arrested", "been arrested",
           "arrested for", "arrested by", "taken into custody",
           "arraigned", "in custody"], 0.30),
+        # Extradition — formal international legal process, moderately likely when
+        # request already filed; much less likely for non-treaty countries
+        (["be extradited", "extradited to", "extradition of",
+          "extradition request", "extradited from"], 0.35),
         # Congressional testimony / hearings — scheduled hearings usually proceed
         (["testify before congress", "testify before the senate", "testify before the house",
           "testify before a", "congressional testimony", "appear before congress",
@@ -357,6 +367,9 @@ def estimate_base_rate(market: dict) -> float | None:
         # Must come BEFORE generic " win " catch-all and entertainment awards
         (["nobel prize", "nobel peace prize", "nobel laureate",
           "win the nobel", "receive the nobel"], 0.10),
+        # Pulitzer Prize — small field of finalists, journalism/arts awards → ~10%
+        # Must come BEFORE " win " catch-all
+        (["pulitzer prize", "pulitzer", "win the pulitzer"], 0.10),
         # Entertainment awards — single winner from ~5 nominees → ~20%
         # Must come BEFORE generic entertainment (streaming/movie/film at 0.25) and " win " catch-all
         (["grammy", "oscar", "academy award", "palme d'or",
