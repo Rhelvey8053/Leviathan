@@ -949,14 +949,18 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will the Treasury Secretary be fired before 2027?", 0.25),
     ("Will Kash Patel be dismissed from his position before June 2027?", 0.25),
     ("Will the White House Chief of Staff get fired before Q4 2026?", 0.25),
-    # Government shutdown
+    # Government shutdown — STARTS (0.15) vs AVOIDED (0.85)
     ("Will there be a government shutdown before October 2026?", 0.15),
-    ("Will Congress avoid a shutdown by the deadline?", 0.15),
     ("Will a partial shutdown begin in September 2026?", 0.15),
-    # Debt ceiling
-    ("Will Congress raise the debt ceiling before August 2026?", 0.15),
-    ("Will the US hit the debt ceiling in 2026?", 0.15),
-    ("Will Democrats and Republicans reach a debt limit deal?", 0.15),
+    ("Will Congress avoid a shutdown by the deadline?", 0.85),
+    ("Will lawmakers avert a shutdown before the CR expires?", 0.85),
+    ("Will the government shutdown end before March 2026?", 0.85),
+    # Debt ceiling — raise/deal (0.70) vs generic (0.65)
+    ("Will Congress raise the debt ceiling before August 2026?", 0.70),
+    ("Will Democrats and Republicans reach a debt ceiling deal?", 0.70),
+    ("Will the debt limit be suspended again by March 2026?", 0.70),
+    ("Will the US hit the debt ceiling in 2026?", 0.65),
+    ("Will the US breach the debt limit before September 2026?", 0.65),
     # Congressional spending / continuing resolution
     ("Will Congress pass a continuing resolution before October 2026?", 0.40),
     ("Will an omnibus bill be signed into law before end of 2026?", 0.40),

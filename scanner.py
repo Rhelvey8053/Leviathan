@@ -232,14 +232,25 @@ def estimate_base_rate(market: dict) -> float | None:
           " fired ", "dismissed", "terminated",
           "removed from his position", "removed from her position",
           "removed from the position"], 0.25),
-        # Government shutdown / budget standoff — relatively rare per quarter
+        # Government shutdown: CONGRESS AVOIDS a shutdown → ~85% base rate
+        # More specific "avoid/avert/end" must come BEFORE general "shutdown" patterns
+        (["avoid a shutdown", "avert a shutdown", "prevent a shutdown",
+          "avoid the shutdown", "avert the shutdown",
+          "end the shutdown", "shutdown ends", "shutdown end",
+          "reopen the government", "resolve the shutdown"], 0.85),
+        # Government shutdown: a shutdown STARTS / is currently ongoing → ~15%
         (["government shutdown", "partial shutdown", "federal shutdown",
-          "avoid a shutdown", "avert a shutdown", "prevent a shutdown",
-          "shutdown begins", "shutdown ends"], 0.15),
-        # Debt ceiling / borrowing limit — usually resolved but cliff-hangers are common
+          "shutdown begins", "shutdown starts"], 0.15),
+        # Debt ceiling: Congress raises/suspends it — nearly always happens → ~70%
+        # More specific resolution terms must come BEFORE generic "debt ceiling"
+        (["raise the debt ceiling", "lift the debt ceiling",
+          "suspend the debt limit", "debt limit be suspended",
+          "debt limit suspended", "increase the debt limit",
+          "raise the debt limit", "debt ceiling deal",
+          "debt ceiling agreement", "resolve the debt limit"], 0.70),
+        # Generic debt ceiling / debt limit — resolution likely but timing uncertain
         (["debt ceiling", "debt limit", "hit the debt ceiling",
-          "debt ceiling deal", "raise the debt ceiling",
-          "lift the debt ceiling", "suspend the debt limit"], 0.15),
+          "breach the debt limit", "x-date"], 0.65),
         # Antitrust / regulatory block on mergers
         (["antitrust", "ftc block", "doj block", "block the merger",
           "block the acquisition", "reject the merger",
