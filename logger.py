@@ -785,3 +785,46 @@ def get_brier_score() -> dict:
         label = "POOR"
 
     return {"brier_score": round(brier, 4), "n": len(rows), "label": label}
+
+
+def get_stats_by_confidence() -> dict:
+    """
+    Win rate and P&L grouped by confidence level for resolved paper signals.
+
+    Returns a dict keyed by "HIGH" / "MED" / "LOW", each with:
+      total, wins, losses, win_rate (float|None), total_pnl (float|None)
+    """
+    result = {lvl: {"total": 0, "wins": 0, "losses": 0, "win_rate": None, "total_pnl": None}
+              for lvl in ("HIGH", "MED", "LOW")}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT confidence, result, pnl_if_traded
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                  AND confidence IN ('HIGH','MED','LOW')
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    for r in rows:
+        lvl = r["confidence"]
+        if lvl not in result:
+            continue
+        result[lvl]["total"] += 1
+        if r["result"] == "WIN":
+            result[lvl]["wins"] += 1
+        elif r["result"] == "LOSS":
+            result[lvl]["losses"] += 1
+        if r["pnl_if_traded"] is not None:
+            prev = result[lvl]["total_pnl"] or 0.0
+            result[lvl]["total_pnl"] = prev + float(r["pnl_if_traded"])
+
+    for lvl, d in result.items():
+        if d["total"] > 0:
+            d["win_rate"] = d["wins"] / d["total"] * 100
+
+    return result

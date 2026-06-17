@@ -906,3 +906,51 @@ def test_brier_score_excludes_probe_rows(tmp_db):
         )
     result = logger.get_brier_score()
     assert result["n"] == 0  # probe not counted
+
+
+# ─── get_stats_by_confidence ─────────────────────────────────────────────────
+
+def _insert_conf(call_id, confidence, result_val, pnl, tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,market_price,our_estimate,"
+            "confidence,result,outcome,pnl_if_traded) "
+            "VALUES (?,datetime('now'),?,?,?,?,?,?,?,?)",
+            (call_id, f"KX{call_id}", "YES", 0.4, 0.6, confidence,
+             result_val, "YES", pnl)
+        )
+
+
+def test_conf_stats_empty_when_no_resolved(tmp_db):
+    """Returns zero totals for all levels when DB is empty."""
+    stats = logger.get_stats_by_confidence()
+    for lvl in ("HIGH", "MED", "LOW"):
+        assert stats[lvl]["total"] == 0
+        assert stats[lvl]["win_rate"] is None
+
+
+def test_conf_stats_accumulates_wins_and_losses(tmp_db):
+    """Tracks wins and losses correctly per confidence level."""
+    _insert_conf("h1", "HIGH", "WIN",  0.60, tmp_db)
+    _insert_conf("h2", "HIGH", "WIN",  0.60, tmp_db)
+    _insert_conf("h3", "HIGH", "LOSS", -0.40, tmp_db)
+    _insert_conf("m1", "MED",  "WIN",  0.60, tmp_db)
+    _insert_conf("l1", "LOW",  "LOSS", -0.40, tmp_db)
+
+    stats = logger.get_stats_by_confidence()
+    assert stats["HIGH"]["total"] == 3
+    assert stats["HIGH"]["wins"]  == 2
+    assert stats["HIGH"]["losses"] == 1
+    assert abs(stats["HIGH"]["win_rate"] - 66.67) < 0.1
+    assert stats["MED"]["total"]  == 1
+    assert stats["LOW"]["total"]  == 1
+    assert stats["LOW"]["wins"]   == 0
+
+
+def test_conf_stats_pnl_sums_correctly(tmp_db):
+    """total_pnl sums across all signals for a confidence level."""
+    _insert_conf("a1", "HIGH", "WIN",  0.70, tmp_db)
+    _insert_conf("a2", "HIGH", "LOSS", -0.30, tmp_db)
+    stats = logger.get_stats_by_confidence()
+    assert abs(stats["HIGH"]["total_pnl"] - 0.40) < 0.001

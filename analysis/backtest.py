@@ -173,8 +173,27 @@ def main(resolve: bool = True):
     _print_section("real fills", fill_rows)
 
     # ── Signal type breakdown ─────────────────────────────────────────────────
-    flag_stats = logger.get_stats_by_flag_path()
-    sig_stats  = logger.get_stats_by_sig()
+    flag_stats  = logger.get_stats_by_flag_path()
+    sig_stats   = logger.get_stats_by_sig()
+    conf_stats  = logger.get_stats_by_confidence()
+
+    # ── Confidence breakdown ───────────────────────────────────────────────────
+    any_conf = any(conf_stats[lvl]["total"] > 0 for lvl in ("HIGH", "MED", "LOW"))
+    if any_conf:
+        print()
+        print(_rule("="))
+        print("CONFIDENCE BREAKDOWN  (paper signals, resolved only)")
+        print(_rule("-"))
+        print()
+        print(f"  {'Level':<6}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}")
+        print(f"  {'-'*6}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
+        for lvl in ("HIGH", "MED", "LOW"):
+            d = conf_stats[lvl]
+            if not d["total"]:
+                continue
+            wr_s  = f"{d['win_rate']:.0f}%" if d["win_rate"] is not None else "—"
+            pnl_s = _fmt_pnl(d["total_pnl"]) if d["total_pnl"] is not None else "—"
+            print(f"  {lvl:<6}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
     if flag_stats or sig_stats:
         print()
