@@ -121,6 +121,14 @@ def main():
             print(f"      FAILED: {e2}")
             traceback.print_exc()
 
+    # Save fresh snapshot for smart money cross-reference and analysis scripts
+    if all_markets:
+        try:
+            from analysis.snapshot_markets import save_snapshot
+            save_snapshot(all_markets, 0, config)
+        except Exception as _e:
+            print(f"      [warn] Snapshot save failed: {_e}")
+
     # Step 3 — Filter and score for mispricing
     print("[3/8] Scanning for mispriced markets...")
     try:
