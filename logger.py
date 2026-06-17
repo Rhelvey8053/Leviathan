@@ -93,6 +93,8 @@ def _init_db() -> None:
             "claude_estimate       REAL",
             "divergence            REAL",
             "predicted_direction   TEXT",
+            "flag_path             TEXT",
+            "watchlist_signal      INTEGER DEFAULT 0",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -189,8 +191,9 @@ def log_signal(signal: dict) -> None:
                 INSERT OR IGNORE INTO signals
                 (call_id,timestamp,ticker,title,market_price,our_estimate,
                  edge,direction,confidence,whale_detected,whale_direction,
-                 outcome,result,pnl_if_traded,run_id,source)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 outcome,result,pnl_if_traded,run_id,source,
+                 flag_path,watchlist_signal)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -207,6 +210,8 @@ def log_signal(signal: dict) -> None:
                 None,    # pnl_if_traded
                 signal.get("run_id", ""),
                 "paper",
+                signal.get("flag_path"),
+                1 if signal.get("watchlist_signal") else 0,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -479,6 +484,47 @@ def get_stats() -> dict:
         "best_call":              dict(best)  if best  else None,
         "worst_call":             dict(worst) if worst else None,
     }
+
+
+def get_stats_by_flag_path() -> list[dict]:
+    """
+    Win rate and P&L broken down by flag_path (EDGE / BR_NONE / DRIFT / HEURISTIC / WATCHLIST).
+    Only includes paper signals with a resolved outcome.
+    Returns a list of dicts sorted by win_rate descending.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    COALESCE(flag_path, 'UNKNOWN') AS path,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) AS wins,
+                    AVG(edge) AS avg_edge,
+                    SUM(pnl_if_traded) AS total_pnl
+                FROM signals
+                WHERE ({_PAPER})
+                  AND outcome != '' AND outcome IS NOT NULL
+                GROUP BY flag_path
+                ORDER BY wins * 1.0 / COUNT(*) DESC
+                """
+            ).fetchall()
+    except Exception:
+        return []
+
+    result = []
+    for r in rows:
+        total = r["total"]
+        wins  = r["wins"] or 0
+        result.append({
+            "flag_path":  r["path"],
+            "total":      total,
+            "wins":       wins,
+            "win_rate":   round(wins / total * 100, 1) if total else None,
+            "avg_edge":   r["avg_edge"],
+            "total_pnl":  r["total_pnl"],
+        })
+    return result
 
 
 def log_probe(probe: dict) -> str:

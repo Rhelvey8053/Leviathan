@@ -345,6 +345,7 @@ def main():
             "ext_consensus":   m.get("ext_consensus", {}),
             "smart_money":     m.get("smart_money", []),
             "watchlist_signal": m.get("watchlist_signal", False),
+            "flag_path":       m.get("flag_path"),
             "run_id":          run_id,
         }
 
@@ -382,6 +383,7 @@ def main():
                     "ext_consensus":   m.get("ext_consensus", {}),
                     "smart_money":     m.get("smart_money", []),
                     "watchlist_signal": m.get("watchlist_signal", False),
+                    "flag_path":       m.get("flag_path"),
                     "run_id":          run_id,
                     "second_pass":     True,
                 }
