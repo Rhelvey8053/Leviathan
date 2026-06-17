@@ -1029,8 +1029,18 @@ def score_market(market: dict, config: dict) -> dict:
     else:
         heuristic_direction = None
 
+    # Short-horizon flag: markets closing within 7 days require a higher edge
+    # bar (Rule 28: 15pp) because heuristic base rates are long-run averages,
+    # not calibrated to specific 1-7 day windows.
+    is_short_horizon = market.get("time_horizon") in ("INTRADAY", "WEEKLY")
+    short_edge_threshold = mkt_cfg.get("short_horizon_edge_threshold", 0.15)
+
+    # Effective edge threshold for flagging: elevated for short-horizon markets.
+    flag_edge_threshold = short_edge_threshold if is_short_horizon else edge_threshold
+
     # All signals computed independently of flag_mode — truthful regardless of branch order.
-    has_edge    = raw_edge is not None and raw_edge > edge_threshold
+    has_edge    = raw_edge is not None and raw_edge > edge_threshold          # informational
+    flag_edge   = raw_edge is not None and raw_edge > flag_edge_threshold     # for flagging
     has_drift   = drift["drift_flag"]
     has_br_none = base_rate is None and mid_price is not None
 
@@ -1038,7 +1048,7 @@ def score_market(market: dict, config: dict) -> dict:
     flag_path = None   # "EDGE" | "BR_NONE" | "DRIFT" | "HEURISTIC" | None
 
     if flag_mode == "passthrough":
-        if has_edge:
+        if flag_edge:
             flag, flag_path = True, "EDGE"
         elif base_rate is None and mid_price is not None:
             flag, flag_path = True, "BR_NONE"
@@ -1052,7 +1062,7 @@ def score_market(market: dict, config: dict) -> dict:
     elif flag_mode == "strict_with_heuristic":
         if has_drift:
             flag, flag_path = True, "DRIFT"
-        elif base_rate is not None and has_edge:
+        elif base_rate is not None and flag_edge:
             flag, flag_path = True, "HEURISTIC"
 
     else:
@@ -1070,6 +1080,7 @@ def score_market(market: dict, config: dict) -> dict:
         "flag":                flag,
         "flag_path":           flag_path,
         "flag_mode":           flag_mode,
+        "short_horizon":       is_short_horizon,
         # Per-signal presence — always set, independent of mode and branch order.
         "sig_edge":      has_edge,
         "sig_drift":     has_drift,

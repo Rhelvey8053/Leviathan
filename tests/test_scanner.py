@@ -1358,3 +1358,73 @@ def test_heuristic_direction_none_when_no_base_rate():
     result = scanner.score_market(m, BASE_CFG)
     assert result["base_rate"] is None
     assert result["heuristic_direction"] is None
+
+
+# ─── Short-horizon edge decay (Rule 28) ───────────────────────────────────────
+
+def _sh_cfg(edge_threshold=0.08, short_threshold=0.15, flag_mode="strict_with_heuristic"):
+    """Config with explicit short_horizon_edge_threshold."""
+    cfg = {k: v for k, v in BASE_CFG["markets"].items()}
+    cfg["edge_threshold"] = edge_threshold
+    cfg["short_horizon_edge_threshold"] = short_threshold
+    cfg["flag_mode"] = flag_mode
+    return {"markets": cfg}
+
+
+def test_short_horizon_flagged_when_edge_exceeds_15pp():
+    """WEEKLY market with 20pp edge (>15pp) fires HEURISTIC flag."""
+    # "government shutdown" base_rate=0.15; mid=0.40 → edge=0.25 > 0.15
+    m = _market(mid=0.40, title="government shutdown", days_out=3)
+    m["time_horizon"] = "WEEKLY"
+    result = scanner.score_market(m, _sh_cfg())
+    assert result["short_horizon"] is True
+    assert result["flag"]      is True
+    assert result["flag_path"] == "HEURISTIC"
+
+
+def test_short_horizon_suppressed_when_edge_below_15pp():
+    """WEEKLY market with 12pp edge (>8pp but <15pp) does NOT fire HEURISTIC flag."""
+    # "government shutdown" base_rate=0.15; mid=0.27 → edge=0.12 (>8pp, <15pp)
+    m = _market(mid=0.27, title="government shutdown", days_out=3)
+    m["time_horizon"] = "WEEKLY"
+    result = scanner.score_market(m, _sh_cfg())
+    assert result["short_horizon"] is True
+    assert result["flag"] is False  # edge 0.12 < 0.15 short threshold → suppressed
+
+
+def test_long_horizon_uses_normal_threshold():
+    """MONTHLY market with 12pp edge (>8pp) DOES fire flag (normal threshold applies)."""
+    # "government shutdown" base_rate=0.15; mid=0.27 → edge=0.12 > 0.08
+    m = _market(mid=0.27, title="government shutdown", days_out=30)
+    m["time_horizon"] = "MONTHLY"
+    result = scanner.score_market(m, _sh_cfg())
+    assert result["short_horizon"] is False
+    assert result["flag"] is True
+    assert result["flag_path"] == "HEURISTIC"
+
+
+def test_short_horizon_drift_still_fires():
+    """Drift always fires regardless of short_horizon (drift is real-time, not heuristic)."""
+    m = _market(mid=0.50, title="government shutdown", days_out=2)
+    m["time_horizon"] = "INTRADAY"
+    m["last_price_dollars"] = "0.30"   # 20pp drift → above drift_min_pct=5%
+    result = scanner.score_market(m, _sh_cfg())
+    assert result["short_horizon"] is True
+    assert result["flag"]      is True
+    assert result["flag_path"] == "DRIFT"
+
+
+def test_short_horizon_field_false_for_monthly():
+    """MONTHLY time_horizon → short_horizon=False."""
+    m = _market(mid=0.50, days_out=30)
+    m["time_horizon"] = "MONTHLY"
+    result = scanner.score_market(m, _sh_cfg())
+    assert result["short_horizon"] is False
+
+
+def test_short_horizon_field_true_for_intraday():
+    """INTRADAY time_horizon → short_horizon=True."""
+    m = _market(mid=0.50, days_out=0.5)
+    m["time_horizon"] = "INTRADAY"
+    result = scanner.score_market(m, _sh_cfg())
+    assert result["short_horizon"] is True
