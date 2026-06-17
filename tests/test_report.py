@@ -143,6 +143,54 @@ def test_no_conflict_when_no_base_rate():
     assert "SIGNAL CONFLICT" not in full
 
 
+# ─── CLAUDE OVERRIDE warning in signal block ─────────────────────────────────
+
+def test_claude_override_shown_when_claude_yes_but_base_rate_leans_no():
+    """Base rate 20% vs market 40% → heuristic leans NO. Claude says YES → OVERRIDE."""
+    s = _signal(
+        direction="YES",
+        market_price=0.40,
+        base_rate=0.20,  # leans NO (0.20 < 0.40 - 0.05)
+    )
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "CLAUDE OVERRIDE" in full
+    assert "NO" in full
+
+
+def test_claude_override_shown_when_claude_no_but_base_rate_leans_yes():
+    """Base rate 75% vs market 45% → heuristic leans YES. Claude says NO → OVERRIDE."""
+    s = _signal(
+        direction="NO",
+        market_price=0.45,
+        base_rate=0.75,  # leans YES (0.75 > 0.45 + 0.05)
+    )
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "CLAUDE OVERRIDE" in full
+    assert "YES" in full
+
+
+def test_claude_override_absent_when_claude_agrees_with_base_rate():
+    """Claude says YES, base rate 70% > market 40% → heuristic also leans YES → no override."""
+    s = _signal(
+        direction="YES",
+        market_price=0.40,
+        base_rate=0.70,
+    )
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "CLAUDE OVERRIDE" not in full
+
+
+def test_claude_override_absent_when_no_base_rate():
+    """No base_rate → cannot determine heuristic lean → no override warning."""
+    s = _signal(direction="YES", market_price=0.50)
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "CLAUDE OVERRIDE" not in full
+
+
 # ─── _qualifying: confidence filter and sorting ───────────────────────────────
 
 def _qs(direction="YES", confidence="MED", edge=0.10, second_pass=False):

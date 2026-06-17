@@ -237,6 +237,20 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
                 f"(Claude was instructed to weight base rate)"
             )
 
+    # Heuristic vs Claude direction conflict — Claude overrode the base rate
+    _direction = s.get("direction", "PASS")
+    _br        = s.get("base_rate")
+    _mkt_p     = float(s.get("market_price") or 0)
+    if _direction in ("YES", "NO") and _br is not None and _mkt_p > 0:
+        _leans_yes = _br > _mkt_p + 0.05
+        _leans_no  = _br < _mkt_p - 0.05
+        if (_direction == "YES" and _leans_no) or (_direction == "NO" and _leans_yes):
+            _heuristic_call = "YES" if _leans_yes else "NO"
+            lines.append(
+                f"  [!] CLAUDE OVERRIDE: Base rate {_br*100:.0f}% leans {_heuristic_call} "
+                f"but Claude called {_direction} — requires strong independent evidence."
+            )
+
     # Cross-market
     poly = s.get("poly")
     ext  = s.get("ext_markets") or []
