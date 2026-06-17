@@ -53,7 +53,21 @@
     "max_wallets_to_track": 50,
     "max_wallets_per_scan": 20,
     "cache_ttl_hours": 24,
-    "discovery_sample_size": 1000
+    "discovery_sample_size": 1000,
+    "watchlist": [
+      {"address": "0x96cfcb0c30942cfcd1cdf76c7d408794d66b1acb", "name": "mintblade",       "monthly_pnl": 9238345},
+      {"address": "0xed64a7bf029040aa331abc87902434d815ef217d", "name": "fishalive",        "monthly_pnl": 9063378},
+      {"address": "0x5e4c3b5b81171e2ca4ab776ac0d6bba787f9dba2", "name": "endlessFate",     "monthly_pnl": 4698128},
+      {"address": "0xf8831548531d56ad6a4331493243c447a827cd1f", "name": "Inaccuratestake", "monthly_pnl": 3947667},
+      {"address": "0x26437896ed9dfeb2f69765edcafe8fdceaab39ae", "name": "Latina",           "monthly_pnl": 3435393},
+      {"address": "0x4761ecf3578e388a9b16c43f874efe32ee855ae8", "name": "Grenderen",        "monthly_pnl": 2247630},
+      {"address": "0xf0318c32136c2db7fec88b84869aee6a1106c80c", "name": "BreakTheBank",    "monthly_pnl": 1927296},
+      {"address": "0x2c335066fe58fe9237c3d3dc7b275c2a034a0563", "name": "0x2c3350",        "monthly_pnl": 1801092},
+      {"address": "0x8cb4ca5af7d9361322340bb307a828d288c91057", "name": "0x8cb4ca",        "monthly_pnl": 1651017},
+      {"address": "0xb91aeb5accc33a5f9a8615b8ed6b2d352e913987", "name": "afghj2421",       "monthly_pnl": 1493135}
+    ],
+    "watchlist_min_position_value": 1000,
+    "watchlist_cache_ttl_hours": 4
   },
 
   "external_markets": {
