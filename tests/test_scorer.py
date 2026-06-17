@@ -171,3 +171,25 @@ def test_empty_markets_returns_empty_prompt():
     prompt = scorer.build_prompt([])
     # Should not crash, just return the header
     assert isinstance(prompt, str)
+
+
+# ─── Calibration rules in system prompt ──────────────────────────────────────
+
+def test_system_prompt_has_ipo_rule():
+    assert "IPO ANNOUNCEMENT" in scorer.SYSTEM_PROMPT
+    assert "confidentially filed" in scorer.SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_has_cabinet_rule():
+    assert "CABINET" in scorer.SYSTEM_PROMPT
+    assert "65%" in scorer.SYSTEM_PROMPT
+
+
+def test_system_prompt_has_sports_debut_rule():
+    assert "SPORTS DEBUT" in scorer.SYSTEM_PROMPT
+    assert "35%" in scorer.SYSTEM_PROMPT
+
+
+def test_system_prompt_has_entertainment_rule():
+    assert "ENTERTAINMENT" in scorer.SYSTEM_PROMPT
+    assert "MUST be below 15%" in scorer.SYSTEM_PROMPT
