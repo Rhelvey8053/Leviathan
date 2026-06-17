@@ -103,3 +103,41 @@ def test_drift_signal_shown_in_fired():
     full = "\n".join(lines)
     assert "Drift" in full
     assert "+25%" in full
+
+
+# ─── SIGNAL CONFLICT warning in signal block ──────────────────────────────────
+
+def test_signal_conflict_shown_when_drift_and_base_rate_disagree():
+    # drift_pct < 0 → mean revert UP → drift says YES
+    # base_rate=0.35 < market_price=0.77 → base rate says NO → CONFLICT
+    s = _signal(
+        drift_flag=True,
+        price_drift=-0.08,  # negative: mid < last → drift up → buy YES
+        market_price=0.77,
+        base_rate=0.35,
+    )
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "SIGNAL CONFLICT" in full
+    assert "YES" in full
+    assert "NO" in full
+
+
+def test_no_conflict_when_drift_and_base_rate_agree():
+    # drift_pct < 0 → drift says YES; base_rate=0.80 > market=0.20 → also YES → no conflict
+    s = _signal(
+        drift_flag=True,
+        price_drift=-0.05,
+        market_price=0.20,
+        base_rate=0.80,
+    )
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "SIGNAL CONFLICT" not in full
+
+
+def test_no_conflict_when_no_base_rate():
+    s = _signal(drift_flag=True, price_drift=-0.08, market_price=0.77)
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "SIGNAL CONFLICT" not in full
