@@ -168,9 +168,21 @@ def estimate_base_rate(market: dict) -> float | None:
         (["senate confirmation", "confirmed by the senate",
           "cabinet nomination", "confirmed as secretary",
           "confirmed as director", "confirmed as ambassador"], 0.55),
+        # Cabinet departure — "will any member of X's cabinet leave" (aggregate, high turnover)
+        (["member of trump's cabinet", "trump cabinet member",
+          "member of the cabinet leave", "cabinet member leave",
+          "leave the cabinet", "depart from the cabinet"], 0.65),
         (["resign", "step down", "stepping down",
           "resigns from", "resignation"], 0.20),
         (["pardon", "presidential pardon", "commute the sentence"], 0.35),
+        # Congressional control — election-cycle markets near 50/50
+        (["control the senate", "senate majority", "senate control",
+          "majority in the senate", "control of the senate",
+          "control the house", "house majority", "house control",
+          "majority in the house", "control of the house",
+          "congressional majority", "take control of the senate",
+          "take control of the house", "flip the senate", "flip the house",
+          "senate seat", "senate race 20"], 0.50),
         # Sanctions — check "lift/remove" first (more specific) before generic "impose"
         (["lift sanctions", "remove sanctions",
           "ease sanctions", "waive sanctions"], 0.20),

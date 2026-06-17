@@ -901,6 +901,15 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will Kade Anderson play in a game for any team in the MLB before Nov 1?", 0.35),
     ("Will Scott Walcott play in a game for any MLB team before November 1?", 0.35),
     ("Will the prospect make his MLB debut before August?", 0.35),
+    # Cabinet departure markets
+    ("Will any member of Trump's Cabinet leave before Sep 2026?", 0.65),
+    ("Will any Trump cabinet member depart before January 2027?", 0.65),
+    ("Will any senior official leave the cabinet before midterms?", 0.65),
+    # Congressional control markets
+    ("Will Democrats control the Senate after 2026 midterms?", 0.50),
+    ("Which party will have a senate majority after November 2026?", 0.50),
+    ("Will Republicans flip the House in 2026?", 0.50),
+    ("Senate control 2026 election outcome", 0.50),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
