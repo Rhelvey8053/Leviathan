@@ -2,6 +2,50 @@
 
 ---
 
+## Session 5 — 2026-06-17
+
+### Watchlist pipeline direction enrichment
+
+Enriched the watchlist signal pipeline so Claude sees *which way* top Polymarket traders are positioned, not just that they have a position:
+
+**`analysis/smart_money_scan.py`** — `save_signals_cache()` now writes a `ticker_details` dict alongside `kalshi_tickers`:
+```json
+"ticker_details": {
+  "KXABRAHAMSA-29-JAN20": {
+    "consensus_direction": "NO",
+    "trader_count": 2,
+    "total_position_val": 15000.0,
+    "kalshi_title": "Will Saudi Arabia join BRICS..."
+  }
+}
+```
+Primary source is `grouped_signals`; falls back to flat `kalshi_signals` if grouping produced no data.
+
+**`scanner.py`** — `tag_watchlist_overlap()` gained an optional `ticker_details` parameter. When provided, matching markets are annotated with `watchlist_direction`, `watchlist_position_val`, and `watchlist_trader_count`.
+
+**`main.py`** — Extracts `_ticker_details` from the signals cache JSON and passes it to `tag_watchlist_overlap()`.
+
+**`scorer.py`** — WATCHLIST SIGNAL prompt now surfaces trader count, combined $ position, and consensus direction:
+```
+WATCHLIST SIGNAL: 2 trader(s) ($15,000 combined) on Polymarket hold significant
+open positions on a related market — pointing NO. These are top-20 traders by
+monthly PnL — weight this signal; they have demonstrated edge over thousands of trades.
+```
+
+**Tests:** 5 new `tag_watchlist_overlap` tests for `ticker_details` parameter (293 total, all pass).
+
+### Git commits this session
+
+1. `70791c7` — Enrich watchlist pipeline with direction/value/trader context (293 tests)
+
+### Open items
+
+1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-27JUL01`) settles 2026-07-08.
+2. **Run a fresh daily scan** to verify entity contradiction guard eliminates the 3 FPs.
+3. **Flag_path outcome data** — 0 resolved paper signals. Once 10+ markets resolve, `get_stats_by_flag_path()` will show signal path win rates.
+
+---
+
 ## Goal 1b — pytest suite for logger and scanner
 
 **Branch:** `tests-1b`

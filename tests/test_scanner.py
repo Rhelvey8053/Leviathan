@@ -74,6 +74,59 @@ def test_price_midrange_kept():
     assert len(scanner.filter_markets([_market(mid=0.50)], BASE_CFG)) == 1
 
 
+# ─── filter_markets: empty order book fallback ───────────────────────────────
+
+def test_empty_orderbook_low_last_price_dropped():
+    """Empty bid/ask + last_price_dollars below min → should be dropped."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 0.0
+    m["yes_bid_dollars"] = "0.0000"
+    m["yes_ask_dollars"] = "0.0000"
+    m["last_price_dollars"] = "0.0300"  # 3% — below 5% floor
+    assert scanner.filter_markets([m], BASE_CFG) == []
+
+def test_empty_orderbook_valid_last_price_kept():
+    """Empty bid/ask + last_price_dollars above min → should pass."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 0.0
+    m["yes_bid_dollars"] = "0.0000"
+    m["yes_ask_dollars"] = "0.0000"
+    m["last_price_dollars"] = "0.2500"  # 25% — passes price filter
+    assert len(scanner.filter_markets([m], BASE_CFG)) == 1
+
+def test_empty_orderbook_no_last_price_kept():
+    """Empty bid/ask AND no last_price_dollars → mid=None → price check skipped → kept."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 0.0
+    m["yes_bid_dollars"] = "0.0000"
+    m["yes_ask_dollars"] = "0.0000"
+    # no last_price_dollars key → mid stays None → no price check (unchanged behaviour)
+    assert len(scanner.filter_markets([m], BASE_CFG)) == 1
+
+def test_score_market_uses_last_price_when_no_bid_ask():
+    """score_market mid_price falls back to last_price_dollars when bid/ask are 0."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 0.0
+    m["last_price_dollars"] = "0.3000"
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["mid_price"] == pytest.approx(0.30, abs=1e-6)
+
+def test_score_market_no_spurious_drift_from_empty_orderbook():
+    """Empty order book should NOT generate a drift signal vs last_price_dollars."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 0.0
+    m["last_price_dollars"] = "0.2700"
+    # mid_price == last_price_dollars → no drift
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["drift_flag"] is False
+    assert result["mid_price"] == pytest.approx(0.27, abs=1e-6)
+
+
 # ─── filter_markets: volume floors ───────────────────────────────────────────
 
 def test_volume_below_bucket_min_dropped():
