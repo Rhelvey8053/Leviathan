@@ -689,3 +689,47 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
         assert rate is not None, f"Expected non-None base rate for: {title}"
     else:
         assert rate is None, f"Expected None base rate for: {title}"
+
+
+@pytest.mark.parametrize("title,expected_rate", [
+    # Legislative
+    ("Will the infrastructure bill pass the Senate by July?", 0.35),
+    ("Will the spending bill pass the House in Q3?", 0.35),
+    ("Will the bill be signed into law before August?", 0.35),
+    ("Will Biden veto the tax reform bill?", 0.20),
+    # Executive / appointments
+    ("Will Trump sign an executive order on immigration?", 0.45),
+    ("Will the new Treasury Secretary be confirmed by the Senate?", 0.55),
+    ("Will the Fed chair resign before 2027?", 0.20),
+    ("Will Trump pardon Roger Stone?", 0.35),
+    # Sanctions
+    ("Will the US impose new sanctions on Iran?", 0.45),
+    ("Will the EU lift sanctions on Russia by 2027?", 0.20),
+    # International agreements
+    ("Will the US and Iran reach a nuclear deal by 2027?", 0.20),
+    ("Will Ukraine join NATO before 2030?", 0.35),
+    # Legal / court
+    ("Will the Supreme Court overturn Chevron deference?", 0.50),
+    ("Will SCOTUS rule in favor of the plaintiff?", 0.50),
+    ("Will the appeals court strike down the regulation?", 0.50),
+    ("Will Elon Musk reach a lawsuit settlement?", 0.40),
+    # Economic indicators
+    ("Will the unemployment rate fall below 4% in June?", 0.50),
+    ("Will CPI inflation exceed 3% in May 2026?", 0.50),
+    ("Will US GDP growth exceed 2% in Q2 2026?", 0.50),
+    # Crypto
+    ("Will Bitcoin price exceed $120,000 by end of 2026?", 0.50),
+    ("Will Ethereum ETF approval happen before July 2026?", 0.50),
+    ("Will crypto market cap exceed $5T by 2027?", 0.50),
+    # Weather / natural
+    ("Will a Category 4 hurricane hit the US in 2026?", 0.45),
+    # Geopolitical
+    ("Will US recognize Palestinian statehood before 2027?", 0.30),
+    ("Will Saudi Arabia normalize relations with Israel?", 0.30),
+])
+def test_base_rate_new_categories(title, expected_rate):
+    m = _market(title=title)
+    rate = scanner.estimate_base_rate(m)
+    assert rate == pytest.approx(expected_rate), (
+        f"title={title!r}: expected {expected_rate}, got {rate}"
+    )

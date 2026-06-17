@@ -145,9 +145,71 @@ def estimate_base_rate(market: dict) -> float | None:
         (["win the election", "win election", "wins the election",
           "win the primary", "win the runoff"], 0.52),
         (["win the presidency", "win the white house"], 0.50),
-        (["win the senate race", "win the house race", "win the gubernatorial"], 0.52),
+        (["win the senate race", "win the house race", "win the gubernatorial",
+          "win the mayoral", "mayor race", "win the governor"], 0.52),
+        # Legislative — most Kalshi bills have some momentum; passage ~35%
+        (["pass the senate", "pass the house", "pass congress",
+          "pass in the senate", "pass in the house",
+          "pass into law", "signed into law", "sign into law",
+          "pass the bill", "passes the bill", "pass legislation",
+          "become law", "enacted into law"], 0.35),
+        (["veto", "presidential veto", "veto the bill",
+          "pocket veto"], 0.20),
+        # Executive / political appointments
+        (["executive order", "sign an executive order",
+          "issue an executive order"], 0.45),
+        (["senate confirmation", "confirmed by the senate",
+          "cabinet nomination", "confirmed as secretary",
+          "confirmed as director", "confirmed as ambassador"], 0.55),
+        (["resign", "step down", "stepping down",
+          "resigns from", "resignation"], 0.20),
+        (["pardon", "presidential pardon", "commute the sentence"], 0.35),
+        # Sanctions — check "lift/remove" first (more specific) before generic "impose"
+        (["lift sanctions", "remove sanctions",
+          "ease sanctions", "waive sanctions"], 0.20),
+        (["impose sanctions", "new sanctions",
+          "sanctions on", "sanctions against"], 0.45),
+        (["nuclear deal", "nuclear agreement", "nuclear accord",
+          "nuclear treaty", "npt", "iaea agreement"], 0.20),
+        (["peace deal", "ceasefire", "peace agreement", "armistice"], 0.25),
+        (["join nato", "nato membership", "nato expansion",
+          "nato accession"], 0.35),
+        (["join the eu", "eu membership", "eu accession",
+          "european union membership"], 0.25),
+        (["recognize", "diplomatic recognition",
+          "normalize relations", "establish relations"], 0.30),
+        # Supreme Court / legal rulings
+        (["supreme court", "scotus", "high court ruling",
+          "appeals court", "circuit court"], 0.50),
+        (["overturns", "upholds", "rules in favor",
+          "strikes down", "court ruling", "court decision"], 0.50),
+        # Criminal / legal — conviction base rates are moderate
+        (["convicted", "found guilty", "indicted", "charged with"], 0.40),
+        (["impeach", "impeachment", "removed from office"], 0.15),
+        (["lawsuit", "settlement", "settle the lawsuit",
+          "class action", "reaches settlement"], 0.40),
         # Weather
         (["will it rain", "chance of rain", "precipitation"], 0.40),
+        (["hurricane", "tropical storm", "tropical cyclone",
+          "category 4", "category 5"], 0.45),
+        (["earthquake", "magnitude"], 0.30),
+        # Macroeconomic — cuts/hikes depend on market pricing already
+        (["rate cut", "rate hike", "interest rate cut", "interest rate hike"], 0.50),
+        (["recession", "in recession", "enters recession"], 0.25),
+        (["default", "debt default", "sovereign default"], 0.10),
+        # Economic indicators — near 50/50 for specific threshold questions
+        (["unemployment rate", "jobless rate", "nonfarm payroll",
+          "jobs report", "labor market"], 0.50),
+        (["inflation rate", "cpi", "pce", "consumer price index",
+          "core inflation"], 0.50),
+        (["gdp growth", "gdp contraction", "gdp shrinks",
+          "economic growth", "economic contraction"], 0.50),
+        # Crypto — price-level markets are 50/50 by definition
+        (["bitcoin", "btc price", "btc above", "btc below",
+          "ethereum", "eth price", "eth above", "eth below",
+          "crypto", "cryptocurrency"], 0.50),
+        (["bitcoin etf", "crypto etf", "ethereum etf",
+          "spot etf", "etf approval"], 0.50),
         # Price / market levels — mean-reversion roughly 50/50 near current levels
         (["reach $", "hits $", "exceed $", "above $",
           "surpass $", "cross $", "break $"], 0.35),
@@ -158,13 +220,8 @@ def estimate_base_rate(market: dict) -> float | None:
         (["merger", "acquisition", "acquired by", "take private",
           "buyout", "takeover"], 0.35),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt"], 0.15),
-        # Macroeconomic — cuts/hikes depend on market pricing already
-        (["rate cut", "rate hike", "interest rate cut", "interest rate hike"], 0.50),
-        (["recession", "in recession", "enters recession"], 0.25),
-        (["default", "debt default", "sovereign default"], 0.10),
         # Geopolitical — low base rate for dramatic events
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
-        (["peace deal", "ceasefire", "peace agreement", "armistice"], 0.25),
         (["coup", "overthrow", "regime change"], 0.10),
         # Media / entertainment — very low: release dates often slip
         (["release", "released", "premieres", "premiere by",
@@ -172,9 +229,6 @@ def estimate_base_rate(market: dict) -> float | None:
         # Technology
         (["fda approval", "fda approves", "fda cleared"], 0.40),
         (["launch", "launches", "launched by", "launches by"], 0.35),
-        # Criminal / legal — conviction base rates are moderate
-        (["convicted", "found guilty", "indicted", "charged with"], 0.40),
-        (["impeach", "impeachment", "removed from office"], 0.15),
         # Generic sports/competition catch-all — must come LAST
         # " win " (with spaces) catches "Will X win [any competition]?"
         ([" win "], 0.52),
