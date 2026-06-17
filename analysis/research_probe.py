@@ -132,7 +132,17 @@ PROBE_SYSTEM = (
     "prediction-market trials. Only imminent agreement or jury outcome is HIGH confidence.\n"
     "20. GOVERNMENT FUNDING/DEBT CEILING: Shutdown averted ~85%; Shutdown begins ~15%; "
     "Debt ceiling raised ~70%; generic debt ceiling ~65%. CRITICAL: distinguish "
-    "averted/raised (high base rate) from starts/default (low base rate)."
+    "averted/raised (high base rate) from starts/default (low base rate).\n"
+    "21. GEOPOLITICAL/MILITARY ESCALATION: Military invasion ~15%; NATO Article 5 ~5%; "
+    "US military strike ~15%; coup/regime change ~10%. Escalating rhetoric and troop "
+    "mobilization headlines are already priced in — NOT independent evidence. Require "
+    "a verified, dated incident (confirmed military action, official declaration) to "
+    "deviate from base rate. Default to PASS unless edge > 15pp.\n"
+    "22. NATURAL DISASTER/WEATHER SEVERITY: Wildfire acreage threshold ~35%; major "
+    "hurricane landfall ~45% in active seasons; earthquake at specific magnitude ~30%. "
+    "Weather forecasts and active-season outlooks are already priced in by the crowd. "
+    "Only a confirmed developing event (named storm within 3 days, active fire near "
+    "threshold) justifies deviation. Default to PASS."
 )
 
 PROBE_SCHEMA = """
