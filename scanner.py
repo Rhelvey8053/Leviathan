@@ -200,6 +200,19 @@ def estimate_base_rate(market: dict) -> float | None:
           "kicked off the ballot", "barred from the ballot",
           "disqualified from the", "removed from the ballot",
           "disqualified from running", "disqualified from appearing"], 0.20),
+        # Student loan forgiveness / debt cancellation — executive or legislative → ~30%
+        (["student loan forgiveness", "student loan cancellation",
+          "student debt cancellation", "student loan relief",
+          "cancel student debt", "student debt forgiveness",
+          "student loan discharge"], 0.30),
+        # Healthcare reform — comprehensive overhaul is historically rare → ~20%
+        # Placed BEFORE generic "pass the senate"/"become law" to take priority
+        (["healthcare reform", "health care reform", "healthcare system be reformed",
+          "healthcare system reformed", "health care system",
+          "universal healthcare", "universal health care",
+          "medicare for all", "medicaid expansion",
+          "affordable care act", "health insurance reform",
+          "single payer", "public option"], 0.20),
         # Minimum wage legislation — requires Congressional action; historically slow → ~25%
         # Placed BEFORE generic legislative block ("pass the senate" etc.) because title
         # typically says "raise the minimum wage" rather than "pass the bill"
@@ -273,6 +286,12 @@ def estimate_base_rate(market: dict) -> float | None:
         (["peace deal", "ceasefire", "peace agreement", "armistice"], 0.25),
         (["join nato", "nato membership", "nato expansion",
           "nato accession"], 0.35),
+        # Rejoin an international agreement — countries rarely rejoin after withdrawal → ~25%
+        (["rejoin the paris", "rejoin paris", "rejoin the un",
+          "rejoin the who", "rejoin the tpp",
+          "return to the agreement", "re-enter the agreement",
+          "rejoin the deal", "return to the accord",
+          "re-enter the paris", "rejoin the accord"], 0.25),
         (["join the eu", "eu membership", "eu accession",
           "european union membership"], 0.25),
         # Common/shared currency adoption — extremely rare monetary policy change → ~10%
@@ -334,10 +353,12 @@ def estimate_base_rate(market: dict) -> float | None:
         (["be fined by", "get fined by", "receive a fine",
           "pay a fine", "fined for", "eu fine",
           "regulatory fine", "antitrust fine"], 0.40),
-        # Cyberattack / data breach — significant attacks are unfortunately common (~35%)
+        # Cyberattack / data breach / data leak — significant incidents are unfortunately common (~35%)
         (["cyberattack", "cyber attack", "cyber breach",
-          "data breach", "ransomware attack", "hack the infrastructure",
-          "critical infrastructure attack", "attack on the grid"], 0.35),
+          "data breach", "data leak", "data theft",
+          "ransomware attack", "hack the infrastructure",
+          "critical infrastructure attack", "attack on the grid",
+          "government data", "hacked by", "hack into"], 0.35),
         # Arrested / in custody — before convicted/indicted; arrest ≠ conviction
         # "house arrest" avoided by requiring "arrested for/by/in" or standalone phrases
         (["be arrested", "get arrested", "was arrested", "been arrested",
@@ -576,6 +597,11 @@ def estimate_base_rate(market: dict) -> float | None:
           "troops leave", "forces leave", "exit afghanistan",
           "end the mission", "end combat operations",
           "remove troops from", "troops return home"], 0.30),
+        # Civil war / internal armed conflict — specific-country risk (~25% in a 1-year window)
+        # Placed BEFORE "declare war" (0.15) to catch internal conflict separately
+        (["civil war", "armed conflict", "armed uprising",
+          "insurgency", "rebel forces", "sectarian conflict",
+          "internal conflict", "internal war", "militias", "warlord"], 0.25),
         # Geopolitical — low base rate for dramatic events
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
         (["coup", "overthrow", "regime change"], 0.10),
@@ -591,6 +617,37 @@ def estimate_base_rate(market: dict) -> float | None:
         (["grammy", "oscar", "academy award", "palme d'or",
           "emmy award", "golden globe award", "tony award", "bafta award",
           "sag award", "screen actors guild", "sundance award"], 0.20),
+        # Renewable energy supply thresholds — energy transition is accelerating → ~40%
+        (["renewable energy", "solar energy supply", "wind energy supply",
+          "clean energy supply", "electricity from renewables",
+          "green energy percentage", "renewables share",
+          "renewable electricity", "clean electricity"], 0.40),
+        # Political scandal — high-visibility administrations have frequent scandals → ~45%
+        (["political scandal", "sex scandal", "financial scandal",
+          "corruption scandal", "bribery scandal", "abuse of power",
+          "misconduct scandal", "cover-up", "whistleblower alleges",
+          "kickback scheme"], 0.45),
+        # Housing market correction — milder than crash; ~20% decline threshold → ~20%
+        # Placed AFTER housing crash (0.15) — overlap is fine; "correction" is distinct from "crash"
+        (["housing correction", "home price correction", "real estate correction",
+          "housing market correct", "home prices correct", "prices correct",
+          "housing downturn", "housing slowdown", "price correction",
+          "market correction"], 0.20),
+        # Autonomous vehicle / self-driving car deployment — ambitious timeline → ~25%
+        # "Announced" ≠ deployed; treat like Rule 3 (announced vs completed)
+        (["autonomous vehicle", "self-driving car", "robotaxi",
+          "full self-driving", "autonomous taxi",
+          "level 4 autonomy", "level 5 autonomy", "fully autonomous driving",
+          "driverless car", "driverless vehicle"], 0.25),
+        # Quantum computing / tech breakthroughs — long-horizon, low near-term probability → ~10%
+        (["quantum computing", "quantum supremacy", "quantum advantage",
+          "break encryption", "quantum computer", "quantum error correction",
+          "fault-tolerant quantum"], 0.10),
+        # Mars / deep space mission — beyond moon; very ambitious timeline → ~10-15%
+        # Placed AFTER general NASA block (0.30) to catch specifically Mars/deep space framing
+        (["mars mission", "mission to mars", "manned mars", "crewed mars",
+          "human mission to mars", "mars landing", "mars orbit",
+          "mars colony", "deep space mission", "interplanetary"], 0.15),
         # Concert / live music — artists tour regularly; if market is open, tour is likely → ~45%
         # Placed BEFORE generic entertainment (0.25) because tours materialize more reliably
         (["concert tour", "world tour", "go on tour", "announce a tour",

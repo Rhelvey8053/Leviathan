@@ -1239,6 +1239,41 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Economic performance comparisons (~50%)
     ("Will the UK economy outperform the EU average in 2026?", 0.50),
     ("Will US GDP growth exceed the G7 average in 2026?", 0.50),
+    # Student loan forgiveness (~30%)
+    ("Will student loan forgiveness be implemented in 2026?", 0.30),
+    ("Will the government cancel student debt by year end?", 0.30),
+    # Healthcare reform (~20%)
+    ("Will the US healthcare system be reformed in 2026?", 0.20),
+    ("Will Congress pass a single payer healthcare bill?", 0.20),
+    # International agreement re-entry (~25%)
+    ("Will the US rejoin the Paris Climate Agreement in 2026?", 0.25),
+    ("Will the UK rejoin the Paris accord by 2027?", 0.25),
+    # Data leak / government hack (~35%)
+    ("Will there be a major data leak at a US government agency?", 0.35),
+    ("Will a federal database be hacked by foreign actors?", 0.35),
+    # Civil war / internal armed conflict (~25%)
+    ("Will Afghanistan fall into civil war again by 2027?", 0.25),
+    ("Will a rebel insurgency destabilize the government?", 0.25),
+    # Political scandal (~45%)
+    ("Will there be a political scandal involving the president?", 0.45),
+    ("Will a bribery scandal emerge in the administration?", 0.45),
+    # Autonomous vehicle (~25%)
+    ("Will Tesla release a fully autonomous robotaxi by end of 2026?", 0.25),
+    ("Will a driverless car service launch in a major US city?", 0.25),
+    # Quantum computing breakthrough (~10%)
+    ("Will quantum computing break standard encryption by 2027?", 0.10),
+    ("Will a company achieve quantum supremacy at scale?", 0.10),
+    # Mars / deep space mission (~15%)
+    ("Will there be a successful manned Mars mission by 2030?", 0.15),
+    ("Will SpaceX send a crewed mission to Mars?", 0.15),
+    # Renewable energy threshold (~40%)
+    ("Will renewable energy supply 30% of US electricity by 2026?", 0.40),
+    ("Will clean energy supply exceed fossil fuels in the EU?", 0.40),
+    # Housing market correction (~20%)
+    # Note: "home prices correct" would hit the housing prices block (0.50) first
+    # Use "housing market correct" or "housing correction" to reach the 0.20 block
+    ("Will the housing market correct more than 20% in 2026?", 0.20),
+    ("Will there be a housing correction in the US by Q3 2026?", 0.20),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
