@@ -98,6 +98,8 @@ def _init_db() -> None:
             "sig_edge              INTEGER DEFAULT 0",
             "sig_drift             INTEGER DEFAULT 0",
             "sig_br_none           INTEGER DEFAULT 0",
+            "base_rate             REAL",
+            "heuristic_direction   TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -195,8 +197,9 @@ def log_signal(signal: dict) -> None:
                 (call_id,timestamp,ticker,title,market_price,our_estimate,
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
-                 flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
+                 base_rate,heuristic_direction)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -218,6 +221,8 @@ def log_signal(signal: dict) -> None:
                 1 if signal.get("sig_edge") else 0,
                 1 if signal.get("sig_drift") else 0,
                 1 if signal.get("sig_br_none") else 0,
+                _to_float(signal.get("base_rate")),
+                signal.get("heuristic_direction"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
