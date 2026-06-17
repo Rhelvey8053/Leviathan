@@ -731,3 +731,57 @@ def get_stats_probe(high_divergence_threshold: float = 0.10) -> dict:
         "avg_abs_divergence": avg_div,
         "verdict":           verdict,
     }
+
+
+def get_brier_score() -> dict:
+    """
+    Compute Brier score for resolved paper signals.
+
+    Brier score = mean((estimate - outcome_binary)^2)
+      - outcome_binary: 1 if the trade was a WIN (our direction resolved correctly), 0 if LOSS
+      - estimate: our_estimate (Claude's probability for YES)
+      - For YES trades: outcome_binary = 1 if WIN, 0 if LOSS
+      - For NO trades:  outcome_binary = 0 if WIN (YES didn't happen), 1 if LOSS
+
+    Lower is better. Perfect calibration = 0. Random 50/50 = 0.25.
+    Returns None if no resolved signals exist.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT our_estimate, direction, result
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                  AND our_estimate IS NOT NULL
+                  AND direction IN ('YES','NO')
+                """
+            ).fetchall()
+    except Exception:
+        return {"brier_score": None, "n": 0, "label": "PENDING"}
+
+    if not rows:
+        return {"brier_score": None, "n": 0, "label": "PENDING — no resolved signals"}
+
+    total_sq = 0.0
+    for r in rows:
+        estimate = float(r["our_estimate"])
+        win      = r["result"] == "WIN"
+        if r["direction"] == "YES":
+            outcome_binary = 1.0 if win else 0.0
+        else:
+            outcome_binary = 0.0 if win else 1.0
+        total_sq += (estimate - outcome_binary) ** 2
+
+    brier = total_sq / len(rows)
+    if brier <= 0.10:
+        label = "EXCELLENT"
+    elif brier <= 0.20:
+        label = "GOOD"
+    elif brier <= 0.25:
+        label = "FAIR (near random)"
+    else:
+        label = "POOR"
+
+    return {"brier_score": round(brier, 4), "n": len(rows), "label": label}

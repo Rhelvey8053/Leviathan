@@ -854,3 +854,38 @@ def test_kelly_absent_for_pass_direction():
     s = _signal(direction="PASS", market_price=0.50, our_estimate=0.52, edge=0.02)
     lines = report._signal_block(s)
     assert not any("Kelly" in l for l in lines)
+
+
+# ─── compile_weekly_digest: Brier score ───────────────────────────────────────
+
+def _make_weekly_stats(**kwargs):
+    base = {
+        "total_calls": 5, "resolved": 3, "wins": 2, "losses": 1,
+        "win_rate": 66.7, "avg_edge_captured": 0.12, "total_hypothetical_pnl": 5.50,
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_weekly_digest_brier_shown_when_resolved():
+    """Brier score line appears in TRACK RECORD when brier dict has a score."""
+    brier = {"brier_score": 0.1200, "n": 3, "label": "GOOD"}
+    text = report.compile_weekly_digest([], _make_weekly_stats(), {}, brier=brier)
+    assert "Brier Score:" in text
+    assert "0.1200" in text
+    assert "GOOD" in text
+    assert "n=3" in text
+
+
+def test_weekly_digest_brier_pending_when_none():
+    """Shows PENDING line when brier dict has no resolved score yet."""
+    brier = {"brier_score": None, "n": 0, "label": "PENDING"}
+    text = report.compile_weekly_digest([], _make_weekly_stats(), {}, brier=brier)
+    assert "Brier Score:" in text
+    assert "PENDING" in text
+
+
+def test_weekly_digest_brier_absent_when_param_omitted():
+    """compile_weekly_digest still works when brier= is not passed at all."""
+    text = report.compile_weekly_digest([], _make_weekly_stats(), {})
+    assert "Brier Score:" not in text
