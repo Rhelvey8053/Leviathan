@@ -117,6 +117,8 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
         n_cross += 1
     if n_cross:
         fired.append(f"Cross-Market x{n_cross}")
+    if s.get("watchlist_signal"):
+        fired.append("Watchlist: Top Polymarket Trader")
     if s.get("smart_money"):
         dirs = set(sm.get("direction") for sm in s["smart_money"] if sm.get("direction"))
         fired.append(f"Smart Money x{len(s['smart_money'])} ({'·'.join(dirs)})")
@@ -217,19 +219,28 @@ def _smart_money_section(result: dict | None) -> list[str]:
     out.append(f"  Snapshot:           {run_at} UTC")
     out.append("")
 
-    # Kalshi cross-references — most actionable signals
+    # Kalshi cross-references — sorted by match quality × position size
     if signals:
         out.append("  Kalshi Cross-References (smart money + Kalshi overlap):")
-        out.append(f"  {'Trader':<20}  {'Outcome':<5}  {'Poly Price':>10}  {'Position':>10}  {'Kalshi Ticker':<28}  Market")
-        out.append(f"  {'-'*20}  {'-'*5}  {'-'*10}  {'-'*10}  {'-'*28}  -----")
-        for s in sorted(signals, key=lambda x: -x["position_val"])[:10]:
-            trader  = s["trader"][:20]
-            outcome = s["poly_outcome"][:5]
-            price   = f"{s['poly_price']:.2f}"
+        out.append(f"  {'Trader':<18}  {'Out':<4}  {'$Position':>10}  {'Price':>5}  {'Match':>5}  Kalshi Ticker")
+        out.append(f"  {'-'*18}  {'-'*4}  {'-'*10}  {'-'*5}  {'-'*5}  {'-'*32}")
+        ranked = sorted(signals, key=lambda x: -(x["match_score"] * x["position_val"]))
+        for s in ranked[:12]:
+            trader  = s["trader"][:18]
+            outcome = s["poly_outcome"][:4]
             val     = f"${s['position_val']:,.0f}"
-            ticker  = s["kalshi_ticker"][:28]
-            title   = s["poly_title"][:35]
-            out.append(f"  {trader:<20}  {outcome:<5}  {price:>10}  {val:>10}  {ticker:<28}  {title}")
+            price   = f"{s['poly_price']:.2f}"
+            score   = f"{s['match_score']:.0%}"
+            ticker  = s["kalshi_ticker"]
+            out.append(f"  {trader:<18}  {outcome:<4}  {val:>10}  {price:>5}  {score:>5}  {ticker}")
+            # Second line: Poly title → Kalshi title
+            poly_t   = s["poly_title"][:48]
+            kalshi_t = s.get("kalshi_title", "")[:48]
+            if kalshi_t and kalshi_t != poly_t:
+                out.append(f"    Poly:   {poly_t}")
+                out.append(f"    Kalshi: {kalshi_t}")
+            else:
+                out.append(f"    {poly_t}")
         out.append("")
 
     # Top 10 positions across all traders by value
@@ -260,7 +271,7 @@ def _smart_money_section(result: dict | None) -> list[str]:
 def compile_report(
     signals, whale_only, stats, run_meta, config,
     all_filtered=None, new_signals=None, repeat_signals=None,
-    smart_money_result=None,
+    smart_money_result=None, probe_stats=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
@@ -283,11 +294,12 @@ def compile_report(
     out.append(f"{date_str}  ·  {time_str}  ·  {env}")
     out.append(_rule("="))
     out.append("")
+    sm_xref = len(smart_money_result.get("kalshi_signals", [])) if smart_money_result else 0
     out.append(f"  New Signals:    {len(new_q)}")
     out.append(f"  Repeat Signals: {len(repeat_q)}")
     out.append(f"  Whale Flags:    {len(whale_only)}")
     out.append(f"  Markets Scanned:{n_mkt}")
-    out.append(f"  Smart Money:    active — winning wallets cached & scanning")
+    out.append(f"  Smart Money:    {sm_xref} Kalshi x-refs from top Polymarket traders")
     out.append("")
 
     # ── New signals ───────────────────────────────────────────────────────
@@ -407,6 +419,22 @@ def compile_report(
     out.append(f"  Avg Edge:       {_pct(ae) if ae is not None else '—'}")
     out.append(f"  Hypothetical P&L ($10/contract): {f'${pnl:.2f}' if pnl is not None else '—'}")
     out.append("")
+
+    if probe_stats:
+        p_total   = probe_stats.get("total_probes", 0)
+        p_res     = probe_stats.get("resolved", 0)
+        p_hr      = probe_stats.get("hit_rate")
+        p_hi_hr   = probe_stats.get("hi_div_hit_rate")
+        p_hi_tot  = probe_stats.get("hi_div_total", 0)
+        p_verdict = probe_stats.get("verdict", "")
+        out.append("  Research Probe Track Record:")
+        out.append(f"    Probes Logged:  {p_total}")
+        out.append(f"    Resolved:       {p_res}")
+        out.append(f"    Hit Rate:       {f'{p_hr:.1f}%' if p_hr is not None else '— (pending settlement)'}")
+        out.append(f"    Hi-Div (≥10%):  {p_hi_tot} probes, {f'{p_hi_hr:.1f}%' if p_hi_hr is not None else 'pending'}")
+        if p_verdict:
+            out.append(f"    Verdict:        {p_verdict}")
+        out.append("")
 
     # ── Run stats ─────────────────────────────────────────────────────────
     out.append(_rule("="))

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from analysis.smart_money_scan import load_config, run_smart_money_scan, save_report
+from analysis.smart_money_scan import load_config, run_smart_money_scan, save_report, save_signals_cache
 from analysis.snapshot_markets import fetch_snapshot, save_snapshot
 
 
@@ -33,12 +33,13 @@ def main():
         _kalshi.authenticate(cfg)
         markets, event_count = fetch_snapshot(cfg)
         snap_path = save_snapshot(markets, event_count, cfg)
-        print(f"  Snapshot refreshed: {len(markets)} markets → {snap_path}")
+        print(f"  Snapshot refreshed: {len(markets)} markets -> {snap_path}")
     except Exception as e:
         print(f"  [warn] Snapshot refresh failed: {e} — using cached snapshot")
 
     result = run_smart_money_scan(cfg, force_refresh=True)
     path   = save_report(result)
+    save_signals_cache(result)
     print(f"Report saved: {path}")
 
     rel_path = os.path.relpath(path, ROOT).replace("\\", "/")
