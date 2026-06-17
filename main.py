@@ -146,9 +146,10 @@ def main():
                                       "data", "smart_money", "latest_signals.json")
             if os.path.exists(_sig_cache):
                 import json as _json
-                _sig_data   = _json.load(open(_sig_cache, encoding="utf-8"))
-                _sm_tickers = set(_sig_data.get("kalshi_tickers", []))
-                scanner.tag_watchlist_overlap(filtered, _sm_tickers)
+                _sig_data        = _json.load(open(_sig_cache, encoding="utf-8"))
+                _sm_tickers      = set(_sig_data.get("kalshi_tickers", []))
+                _ticker_details  = _sig_data.get("ticker_details", {})
+                scanner.tag_watchlist_overlap(filtered, _sm_tickers, _ticker_details)
                 n_boost = sum(1 for m in filtered if m.get("watchlist_signal"))
                 if n_boost:
                     print(f"      Smart money boost: {n_boost} market(s) matched watchlist tickers "
