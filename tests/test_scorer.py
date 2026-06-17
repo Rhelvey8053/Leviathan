@@ -574,3 +574,49 @@ def test_rule_22_natural_disaster_keywords_in_system_prompt():
     assert "Wildfire" in sp or "wildfire" in sp.lower()
     assert "hurricane" in sp.lower()
     assert "NATURAL DISASTER" in sp or "natural disaster" in sp.lower()
+
+
+# ─── Calibration rules 23-27 ─────────────────────────────────────────────────
+
+def test_rule_23_ai_capability_keywords_in_system_prompt():
+    """Rule 23 covers AI capability milestones (exam passage, benchmarks) with optimism-bias correction."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "23." in sp
+    assert "AI CAPABILITY" in sp or "ai capability" in sp.lower()
+    assert "training-data bias" in sp or "training data bias" in sp.lower()
+    assert "AGI" in sp
+
+
+def test_rule_24_bank_failure_keywords_in_system_prompt():
+    """Rule 24 covers bank failure and financial system risk markets."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "24." in sp
+    assert "BANK FAILURE" in sp or "bank failure" in sp.lower()
+    assert "FDIC" in sp
+    assert "~15%" in sp or "15%" in sp
+
+
+def test_rule_25_emerging_tech_readiness_keywords_in_system_prompt():
+    """Rule 25 covers emerging technology readiness (AV, quantum computing, humanoid robots)."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "25." in sp
+    assert "quantum" in sp.lower()
+    assert "autonomous vehicle" in sp.lower() or "self-driving" in sp.lower()
+    assert "EMERGING TECHNOLOGY" in sp or "emerging technology" in sp.lower()
+
+
+def test_rule_26_climate_records_keywords_in_system_prompt():
+    """Rule 26 covers climate/environmental records markets, distinct from disaster severity."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "26." in sp
+    assert "CLIMATE" in sp or "climate" in sp.lower()
+    assert "hottest year" in sp.lower() or "temperature" in sp.lower()
+
+
+def test_rule_27_cryptocurrency_keywords_in_system_prompt():
+    """Rule 27 covers cryptocurrency price-level markets with Rule 13 reinforcement."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "27." in sp
+    assert "CRYPTOCURRENCY" in sp or "cryptocurrency" in sp.lower()
+    assert "Bitcoin" in sp or "bitcoin" in sp.lower()
+    assert "25pp from 50%" in sp or "25 pp from 50" in sp.lower() or "25pp" in sp
