@@ -1101,6 +1101,23 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # 25th Amendment — historically never successfully invoked non-voluntarily
     ("Will the 25th Amendment be invoked against the President?", 0.05),
     ("Will Congress invoke the 25th to remove the President?", 0.05),
+    # Pardon / clemency — president has broad authority; depends on political climate
+    ("Will Trump pardon Michael Flynn before the end of 2026?", 0.35),
+    ("Will the President grant clemency to the former official?", 0.35),
+    ("Will Hunter Biden receive a presidential pardon in 2026?", 0.35),
+    ("Will the governor grant clemency to the former official?", 0.35),
+    # Plea deal — most criminal cases resolve via plea (~45% for high-profile cases)
+    ("Will Michael Cohen enter a plea deal with prosecutors?", 0.45),
+    ("Will the defendant accept a plea agreement before trial?", 0.45),
+    ("Will the former official plead guilty to the charges?", 0.45),
+    # Acquittal / not guilty — contested high-profile trial outcome (~35%)
+    ("Will the defendant be acquitted on all charges?", 0.35),
+    ("Will the jury return a not guilty verdict?", 0.35),
+    ("Will the former president be acquitted in the second trial?", 0.35),
+    # False positive guard: "found guilty" still returns 0.40
+    ("Will the executive be found guilty of fraud charges?", 0.40),
+    # False positive guard: "convicted" still returns 0.40
+    ("Will the official be convicted before year end?", 0.40),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
