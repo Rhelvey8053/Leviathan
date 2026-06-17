@@ -989,6 +989,27 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will TikTok be banned in the US by August 2026?", 0.20),
     ("Will the US ban TikTok before end of 2026?", 0.20),
     ("Will Trump sign a TikTok ban into law?", 0.20),
+    # Arrested / in custody
+    ("Will Donald Trump be arrested before the 2026 midterms?", 0.30),
+    ("Will the suspect be taken into custody before trial?", 0.30),
+    ("Will Hunter Biden be arraigned on new charges in 2026?", 0.30),
+    # Congressional testimony / hearings
+    ("Will Elon Musk testify before the Senate in 2026?", 0.50),
+    ("Will the CEO appear before a congressional committee in June?", 0.50),
+    # Approval ratings
+    ("Will Trump's approval rating be above 50% in June 2026?", 0.50),
+    ("Will Biden's net approval be positive by year end?", 0.50),
+    # Labor strikes
+    ("Will Hollywood writers go on strike again in 2026?", 0.30),
+    ("Will the UAW announce a work stoppage in Q3 2026?", 0.30),
+    # Entertainment awards — must NOT hit the " win " catch-all (0.52)
+    ("Will Beyoncé win the Grammy for Album of the Year?", 0.20),
+    ("Will the Oscars Academy Award go to a streaming film?", 0.20),
+    ("Will the Golden Globe Award for Best Drama go to HBO?", 0.20),
+    # False positive guards
+    # "senator" contains "senate" — but "senate hearing" is the pattern, not a substring issue
+    # "movie arrest scene" → "arrest" alone not in list; only specific phrases
+    ("Will a movie arrest scene win an Oscar?", 0.20),   # hits "oscar" → 0.20, not arrested
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

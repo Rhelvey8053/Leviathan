@@ -215,6 +215,17 @@ def estimate_base_rate(market: dict) -> float | None:
         (["impeach", "impeachment", "removed from office"], 0.15),
         (["lawsuit", "settlement", "settle the lawsuit",
           "class action", "reaches settlement"], 0.40),
+        # Arrested / in custody — before convicted/indicted; arrest ≠ conviction
+        # "house arrest" avoided by requiring "arrested for/by/in" or standalone phrases
+        (["be arrested", "get arrested", "was arrested", "been arrested",
+          "arrested for", "arrested by", "taken into custody",
+          "arraigned", "in custody"], 0.30),
+        # Congressional testimony / hearings — scheduled hearings usually proceed
+        (["testify before congress", "testify before the senate", "testify before the house",
+          "testify before a", "congressional testimony", "appear before congress",
+          "appear before the senate", "appear before the house",
+          "appear before a", "senate hearing", "house hearing", "committee testimony",
+          "congressional committee"], 0.50),
         # Fired / dismissed — higher rate than voluntary resignation
         # "fired" excluded (substring of "misfired", "backfired"); use space-bounded forms instead
         (["be fired", "get fired", "was fired", "been fired", "gets fired",
@@ -287,6 +298,11 @@ def estimate_base_rate(market: dict) -> float | None:
         # Geopolitical — low base rate for dramatic events
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
         (["coup", "overthrow", "regime change"], 0.10),
+        # Entertainment awards — single winner from ~5 nominees → ~20%
+        # Must come BEFORE generic entertainment (streaming/movie/film at 0.25) and " win " catch-all
+        (["grammy", "oscar", "academy award", "palme d'or",
+          "emmy award", "golden globe award", "tony award", "bafta award",
+          "sag award", "screen actors guild", "sundance award"], 0.20),
         # Media / entertainment — very low: release dates often slip
         # "release" and "show" excluded — too broad (hits Fed minutes, data reports, etc.)
         # "season" kept but specific entertainment-flavored phrases handle most cases
@@ -330,6 +346,12 @@ def estimate_base_rate(market: dict) -> float | None:
         # Immigration / deportation — executive action, moderate base rate
         (["deport", "deportation", "mass deportation",
           "immigration ban", "border wall", "sanctuary city"], 0.35),
+        # Approval ratings — market already prices current polling; near 50/50
+        (["approval rating", "job approval", "favorability rating",
+          "approve of the", "disapprove of the", "net approval"], 0.50),
+        # Labor strikes / work stoppages
+        (["go on strike", "labor strike", "workers strike", "union strike",
+          "strike action", "work stoppage", "walkout"], 0.30),
         # Sports awards / honors — single winner from many candidates
         (["mvp", "cy young", "rookie of the year", "heisman",
           "hall of fame", "all-star", "golden glove", "best player"], 0.20),
