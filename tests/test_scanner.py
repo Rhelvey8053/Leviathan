@@ -1201,6 +1201,44 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Immigration legislation (~35%)
     ("Will Congress pass a new immigration bill?", 0.35),
     ("Will Congress pass comprehensive immigration reform in 2026?", 0.35),
+    # Merger/acquisition — "be acquired" phrasing (~35%)
+    ("Will OpenAI be acquired in 2026?", 0.35),
+    ("Will X be taken over by a major tech company?", 0.35),
+    # Bankruptcy — "go bankrupt" phrasing (~15%)
+    ("Will a US airline go bankrupt in 2026?", 0.15),
+    ("Will the retailer declare bankruptcy before year end?", 0.15),
+    # Bank failure (~15%)
+    ("Will there be a major bank failure in the US in 2026?", 0.15),
+    ("Will a bank collapse trigger a banking crisis in 2026?", 0.15),
+    # Gun control / firearms legislation (~20%)
+    ("Will Congress pass a new gun control bill in 2026?", 0.20),
+    # "become law" hits the legislative block first (0.35) — gun control framing without
+    # "pass" / "become law" is needed to hit the 0.20 gun control block
+    ("Will there be a federal assault weapons ban in 2026?", 0.20),
+    # Currency / exchange rate (~40%)
+    ("Will the Mexican peso depreciate more than 10% against the dollar?", 0.40),
+    ("Will the euro appreciate against the dollar by year end?", 0.40),
+    # Company valuation (~35%)
+    ("Will X be valued above $50B in 2026?", 0.35),
+    ("Will OpenAI reach a valuation above $200B?", 0.35),
+    # Tech market position (~35%)
+    ("Will a new AI coding assistant surpass GitHub Copilot by Q4?", 0.35),
+    ("Will Apple beat Microsoft in market cap by end of 2026?", 0.35),
+    # Social media age restrictions (~30%)
+    ("Will social media use be restricted for minors in the US?", 0.30),
+    ("Will Congress pass online age verification legislation?", 0.30),
+    # Corporate leadership retention (~65%)
+    ("Will Elon Musk remain CEO of Tesla in 2026?", 0.65),
+    ("Will Jensen Huang stay as CEO of Nvidia through 2026?", 0.65),
+    # Volcanic eruption (~5%)
+    ("Will Yellowstone National Park have a major volcanic eruption?", 0.05),
+    ("Will a volcanic eruption disrupt European air travel?", 0.05),
+    # Common currency (~10%)
+    ("Will a BRICS country adopt a common currency by 2027?", 0.10),
+    ("Will the BRICS nations form a currency union?", 0.10),
+    # Economic performance comparisons (~50%)
+    ("Will the UK economy outperform the EU average in 2026?", 0.50),
+    ("Will US GDP growth exceed the G7 average in 2026?", 0.50),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
