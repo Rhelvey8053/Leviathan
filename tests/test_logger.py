@@ -278,7 +278,8 @@ def test_schema_new_columns_present(tmp_db):
                 "entry_price", "fill_count", "fill_fee",
                 "contract_type", "segment", "resolution_date", "logged_under",
                 "flag_path", "watchlist_signal",
-                "sig_edge", "sig_drift", "sig_br_none"):
+                "sig_edge", "sig_drift", "sig_br_none",
+                "base_rate", "heuristic_direction"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -562,6 +563,61 @@ def test_log_signal_sig_drift_stored(tmp_db):
         ).fetchone()
     assert row["sig_drift"] == 1
     assert row["sig_edge"]  == 0
+
+
+def test_log_signal_stores_base_rate(tmp_db):
+    """log_signal must persist base_rate into the signals table."""
+    logger.log_signal({
+        "ticker": "KXBR-01", "title": "BR Test", "market_price": 0.30,
+        "our_estimate": 0.50, "edge": 0.20, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "sig_edge": False, "sig_drift": False, "sig_br_none": False,
+        "base_rate": 0.55, "heuristic_direction": "YES",
+        "run_id": "r6",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT base_rate, heuristic_direction FROM signals WHERE ticker='KXBR-01'"
+        ).fetchone()
+    assert row["base_rate"]            == pytest.approx(0.55)
+    assert row["heuristic_direction"]  == "YES"
+
+
+def test_log_signal_stores_heuristic_direction_no(tmp_db):
+    """log_signal persists heuristic_direction='NO' correctly."""
+    logger.log_signal({
+        "ticker": "KXHD-NO", "title": "HD NO", "market_price": 0.70,
+        "our_estimate": 0.50, "edge": 0.20, "direction": "NO",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "sig_edge": False, "sig_drift": False, "sig_br_none": False,
+        "base_rate": 0.35, "heuristic_direction": "NO",
+        "run_id": "r7",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT base_rate, heuristic_direction FROM signals WHERE ticker='KXHD-NO'"
+        ).fetchone()
+    assert row["base_rate"]           == pytest.approx(0.35)
+    assert row["heuristic_direction"] == "NO"
+
+
+def test_log_signal_base_rate_none_when_absent(tmp_db):
+    """log_signal stores NULL for base_rate and heuristic_direction when not provided."""
+    logger.log_signal({
+        "ticker": "KXNO-BR", "title": "No BR", "market_price": 0.40,
+        "our_estimate": 0.50, "edge": 0.10, "direction": "YES",
+        "confidence": "LOW", "whale_detected": False, "whale_direction": "",
+        "flag_path": "DRIFT", "watchlist_signal": False,
+        "run_id": "r8",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT base_rate, heuristic_direction FROM signals WHERE ticker='KXNO-BR'"
+        ).fetchone()
+    assert row["base_rate"]           is None
+    assert row["heuristic_direction"] is None
 
 
 def _insert_with_flag_path(call_id, ticker, direction, market_price,

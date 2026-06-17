@@ -403,12 +403,13 @@ def main():
             "ext_consensus":   m.get("ext_consensus", {}),
             "smart_money":     m.get("smart_money", []),
             "watchlist_signal": m.get("watchlist_signal", False),
-            "flag_path":       m.get("flag_path"),
-            "base_rate":       m.get("base_rate"),
-            "sig_edge":        m.get("sig_edge", False),
-            "sig_drift":       m.get("sig_drift", False),
-            "sig_br_none":     m.get("sig_br_none", False),
-            "run_id":          run_id,
+            "flag_path":            m.get("flag_path"),
+            "base_rate":            m.get("base_rate"),
+            "heuristic_direction":  m.get("heuristic_direction"),
+            "sig_edge":             m.get("sig_edge", False),
+            "sig_drift":            m.get("sig_drift", False),
+            "sig_br_none":          m.get("sig_br_none", False),
+            "run_id":               run_id,
         }
 
         # HIGH confidence gate: downgrade to MED if edge is below minimum threshold.
@@ -456,13 +457,15 @@ def main():
                     "ext_markets":     m.get("ext_markets", []),
                     "ext_consensus":   m.get("ext_consensus", {}),
                     "smart_money":     m.get("smart_money", []),
-                    "watchlist_signal": m.get("watchlist_signal", False),
-                    "flag_path":       m.get("flag_path"),
-                    "sig_edge":        m.get("sig_edge", False),
-                    "sig_drift":       m.get("sig_drift", False),
-                    "sig_br_none":     m.get("sig_br_none", False),
-                    "run_id":          run_id,
-                    "second_pass":     True,
+                    "watchlist_signal":     m.get("watchlist_signal", False),
+                    "flag_path":            m.get("flag_path"),
+                    "base_rate":            m.get("base_rate"),
+                    "heuristic_direction":  m.get("heuristic_direction"),
+                    "sig_edge":             m.get("sig_edge", False),
+                    "sig_drift":            m.get("sig_drift", False),
+                    "sig_br_none":          m.get("sig_br_none", False),
+                    "run_id":               run_id,
+                    "second_pass":          True,
                 }
                 final_signals.append(signal)
         if final_signals:
