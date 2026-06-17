@@ -1118,6 +1118,21 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will the executive be found guilty of fraud charges?", 0.40),
     # False positive guard: "convicted" still returns 0.40
     ("Will the official be convicted before year end?", 0.40),
+    # Corporate layoffs / workforce reduction
+    ("Will Meta announce mass layoffs in Q2 2026?", 0.35),
+    ("Will the company reduce its workforce by 20%?", 0.35),
+    ("Will Apple announce job cuts before the earnings call?", 0.35),
+    # Housing market crash — tail event
+    ("Will the US housing market crash by Q4 2026?", 0.15),
+    ("Will there be a real estate crash in 2026?", 0.15),
+    # Housing prices — near 50/50 like price-level markets
+    ("Will median home prices rise in 2026?", 0.50),
+    ("Will housing prices fall by year end?", 0.50),
+    # Removed from role — extended "be removed" to cover non-positional forms
+    ("Will Elon Musk be removed from DOGE by January 2027?", 0.25),
+    ("Will the official be removed before the election?", 0.25),
+    # False positive guard: "removed from office" still hits impeachment block → 0.15
+    ("Will the president be removed from office by Congress?", 0.15),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
