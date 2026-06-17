@@ -188,13 +188,14 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-339 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+343 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|
 | `tests/test_logger.py` | Payoff math, schema migration, fill matching, stats separation |
 | `tests/test_scanner.py` | Filter gates, flag modes, drift thresholds, watchlist tagging |
 | `tests/test_whales.py` | Whale detection logic, scan_all_markets |
+| `tests/test_scorer.py` | build_prompt() signals, flag reason lines, calibration rules |
 | `tests/test_report.py` | Signal block formatting, flag path labels, heuristic base rate display |
 | `tests/test_research_probe.py` | Stratified sampling, probe logging, forward scoring |
 | `tests/test_smart_money.py` | Binary position filter, sports title filter, keyword gate, match scoring |

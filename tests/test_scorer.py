@@ -142,6 +142,31 @@ def test_base_rate_shown_when_set():
     assert "Base rate estimate: 35.0%" in prompt
 
 
+def test_flag_reason_heuristic_shown():
+    m = _base_market(flag_path="HEURISTIC", base_rate=0.55)
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON: HEURISTIC" in prompt
+    assert "55%" in prompt
+
+
+def test_flag_reason_drift_shown():
+    m = _base_market(flag_path="DRIFT")
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON: DRIFT" in prompt
+
+
+def test_flag_reason_watchlist_shown():
+    m = _base_market(flag_path="WATCHLIST")
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON: WATCHLIST" in prompt
+
+
+def test_flag_reason_absent_when_no_path():
+    m = _base_market(flag_path=None)
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON" not in prompt
+
+
 def test_empty_markets_returns_empty_prompt():
     prompt = scorer.build_prompt([])
     # Should not crash, just return the header
