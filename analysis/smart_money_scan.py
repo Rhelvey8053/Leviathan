@@ -203,8 +203,26 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
     return result
 
 
+def save_signals_cache(result: dict) -> None:
+    """
+    Write a lightweight signals cache to data/smart_money/latest_signals.json.
+    Contains only the Kalshi cross-reference tickers so main.py can boost them
+    in the scoring queue without parsing markdown.
+    """
+    cache_path = os.path.join(REPORT_DIR, "latest_signals.json")
+    os.makedirs(REPORT_DIR, exist_ok=True)
+    payload = {
+        "run_at":         result.get("run_at", ""),
+        "kalshi_tickers": list({s["kalshi_ticker"] for s in result.get("kalshi_signals", [])}),
+        "signal_count":   len(result.get("kalshi_signals", [])),
+    }
+    with open(cache_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
 def save_report(result: dict) -> str:
     """Write a dated markdown report to data/smart_money/YYYY-MM-DD.md. Returns the path."""
+    save_signals_cache(result)
     os.makedirs(REPORT_DIR, exist_ok=True)
     date_str  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     run_at    = result.get("run_at", datetime.now(timezone.utc).isoformat())

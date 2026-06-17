@@ -132,34 +132,20 @@ def main():
             filtered = scanner.dedup_by_event(filtered)
             print(f"      Dedup: {before_dedup} -> {len(filtered)} markets (removed {before_dedup - len(filtered)} lower-liquidity duplicates)")
 
-        # Load smart money watchlist cache to boost priority for matched markets
+        # Load smart money signals cache to boost priority for matched markets
         try:
-            _sm_cache_path = os.path.join(os.path.dirname(__file__), "data", "watchlist_cache.json")
-            if os.path.exists(_sm_cache_path):
+            _sig_cache = os.path.join(os.path.dirname(__file__),
+                                      "data", "smart_money", "latest_signals.json")
+            if os.path.exists(_sig_cache):
                 import json as _json
-                _sm_data = _json.load(open(_sm_cache_path, encoding="utf-8"))
-                _sm_tickers = {
-                    sig["kalshi_ticker"]
-                    for trader in _sm_data.get("data", {}).values()
-                    for p in trader.get("positions", [])
-                    for sig in []  # populated below via kalshi_signals in last run
-                }
-                # Also load Kalshi tickers from latest smart money report if available
-                import glob as _glob
-                _sm_reports = sorted(_glob.glob(os.path.join(
-                    os.path.dirname(__file__), "data", "smart_money", "*.md")))
-                if _sm_reports:
-                    import re as _re
-                    _latest_report = open(_sm_reports[-1], encoding="utf-8").read()
-                    # Extract Kalshi tickers from markdown table rows
-                    _sm_tickers = set(_re.findall(
-                        r'\|\s*(KXMAKE\S+|KXABR\S+|SENATE\S+|KXRTICKET\S+)[^|]*\|',
-                        _latest_report
-                    ))
+                _sig_data   = _json.load(open(_sig_cache, encoding="utf-8"))
+                _sm_tickers = set(_sig_data.get("kalshi_tickers", []))
                 scanner.tag_watchlist_overlap(filtered, _sm_tickers)
-                if _sm_tickers:
-                    n_boost = sum(1 for m in filtered if m.get("watchlist_signal"))
-                    print(f"      Smart money boost: {n_boost} markets matched watchlist tickers")
+                n_boost = sum(1 for m in filtered if m.get("watchlist_signal"))
+                if n_boost:
+                    print(f"      Smart money boost: {n_boost} market(s) matched watchlist tickers "
+                          f"(from {_sig_data.get('signal_count', 0)} X-refs, "
+                          f"run {_sig_data.get('run_at', '')[:10]})")
         except Exception as _e:
             print(f"      [warn] Smart money tag failed: {_e}")
 
