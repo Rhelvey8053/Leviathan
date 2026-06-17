@@ -28,18 +28,50 @@ Added new heuristic base rates and fixed several stale-threshold bugs across ana
 
 **New tests:** `tests/test_report.py` (8 tests) + 7 new parametrized base rate cases in `test_scanner.py` → 339 total (was 324).
 
+**`scorer.py` — calibration rules expanded:**
+- Added Rule 5 (IPO announcement): base rate ~25% per 3-6 month window; "confidentially filed" / "banks hired" are NOT evidence of imminent announcement — only public S-1 filing counts
+- Added Rule 6 (cabinet departure): base rate ~65% within first 20 months; market below 50% likely underpriced — weight historical turnover heavily
+- Added Rule 7 (sports debut): base rate ~35% for unconfirmed prospects; only active roster assignment + confirmed start date counts as strong evidence
+- Renumbered HIGH CONFIDENCE to Rule 9, EDGE REQUIREMENT to Rule 10
+
+**`scorer.py` `build_prompt()` — FLAG REASON line:**
+- Each market in the scored prompt now gets a line explaining why it was flagged:
+  `FLAG REASON: HEURISTIC base rate mismatch 65% vs market price`
+  `FLAG REASON: DRIFT — market price has moved significantly from last traded price`
+  `FLAG REASON: WATCHLIST — top Polymarket traders have open positions on this market`
+
+**`scorer.py` `build_prompt()` — SIGNAL CONFLICT detection:**
+- When `drift_flag=True` AND `base_rate` is set AND the two signals point in opposite directions, appends:
+  `SIGNAL CONFLICT: DRIFT suggests YES (mean revert) but BASE RATE (35%) suggests NO. Weight the base rate over drift for fundamental mispricing; use drift only as a secondary timing cue.`
+
+**`analysis/research_probe.py`:**
+- `PROBE_SYSTEM` synced with scorer.py rules 5 (IPO), 6 (cabinet), 7 (sports debut), 8 (HIGH CONFIDENCE), 9 (EDGE REQUIREMENT)
+
+**`analysis/drift_diagnosis.py` + `analysis/flag_mode_compare.py`:**
+- Both scripts now read `drift_min_abs`/`drift_min_pct` from config instead of hardcoded values
+- `flag_mode_compare.py` report now shows dynamic thresholds instead of stale "86%" / "0.0/0.05" text
+
+**`analysis/threshold_sweep.py`:**
+- `classify_flag_path()` refactored to read `m.get("flag_path")` directly (was re-running edge logic from scratch)
+- Removed stale `_edge_threshold` tagging loop
+
+**New tests:** `tests/test_report.py` (8 tests) + 7 new base rate cases in `test_scanner.py` + 8 new scorer tests → 347 total (was 324). Session 6 further added 5 SIGNAL CONFLICT tests → 352 total.
+
 ### Git commits this session
 
 1. `e625a1c` — Cabinet/senate base rates, filter_stats --snapshot, vol/price signals
 2. `0b05818` — flag_path in report header, heuristic base rate in signals, test_report
 3. `d08e304` — drift_diagnosis uses config thresholds and two-sided bid/ask fix
+4. `3b45bb2` — scorer calibration rules 5-7 (IPO/cabinet/sports debut), FLAG REASON line in prompts, 8 scorer tests (347 total)
+5. `4c680eb` — system prompt rule presence tests, test count to 347
+6. `3571d91` — DRIFT/HEURISTIC signal conflict warning + 5 unit tests (352 total)
 
 ### Open items (carried forward)
 
 1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01`) settles 2026-07-08 — run `resolve_outcomes` after that date.
 2. **Flag_path outcome data** — 0 resolved paper signals. Once 10+ markets resolve, `get_stats_by_flag_path()` shows signal path win rates.
 3. **KXMLBDEBUT-KANDERSON**: bid=0.55, ask=0.99, mid=0.77 — unusual 44-cent spread worth monitoring.
-4. **AGI market** (`KXAGICO-COMP-26Q3`): 1 unflagged market at 6.5%, no base rate, no drift. Correctly no signal.
+4. **Cross-market force-flag** — markets with significant Polymarket/Metaculus divergence but no heuristic or drift are not promoted. Requires architecture change: run ext_markets cross-ref on unflagged markets before flagging, or add a post-step-4 second-promotion pass.
 
 ---
 
