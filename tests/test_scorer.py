@@ -316,6 +316,16 @@ def test_system_prompt_has_reelection_rule():
     assert "52%" in scorer.SYSTEM_PROMPT
 
 
+def test_system_prompt_has_corporate_leadership_rule():
+    assert "CORPORATE LEADERSHIP" in scorer.SYSTEM_PROMPT
+    assert "8-K" in scorer.SYSTEM_PROMPT
+
+
+def test_system_prompt_has_unsc_rule():
+    assert "UN SECURITY COUNCIL" in scorer.SYSTEM_PROMPT
+    assert "15%" in scorer.SYSTEM_PROMPT
+
+
 # ─── Liquidity context ───────────────────────────────────────────────────────
 
 def test_liquidity_shown_when_volume_present():
