@@ -52,23 +52,18 @@ def load_latest_snapshot() -> tuple[list[dict], dict]:
 # ── Flag path classifier ──────────────────────────────────────────────────────
 
 def classify_flag_path(scored_market: dict) -> str | None:
-    """Returns the primary flag path that caused flag=True, or None if not flagged."""
+    """Returns the primary flag path that caused flag=True, or None if not flagged.
+
+    score_market() already sets flag_path directly; this reads it and maps HEURISTIC
+    to EDGE for backwards-compatible grid reporting (sweep uses passthrough mode).
+    """
     if not scored_market.get("flag"):
         return None
-
-    base_rate  = scored_market.get("base_rate")
-    raw_edge   = scored_market.get("raw_edge")
-    drift_flag = scored_market.get("drift_flag", False)
-    mid_price  = scored_market.get("mid_price")
-    edge_thr   = scored_market.get("_edge_threshold", 0.08)
-
-    # Priority: EDGE > BR_NONE > DRIFT  (mirrors flag = OR logic in score_market)
-    if raw_edge is not None and raw_edge > edge_thr:
+    fp = scored_market.get("flag_path")
+    if fp in ("EDGE", "HEURISTIC"):
         return "EDGE"
-    if base_rate is None and mid_price is not None:
-        return "BR_NONE"
-    if drift_flag:
-        return "DRIFT"
+    if fp in ("BR_NONE", "DRIFT"):
+        return fp
     return "OTHER"
 
 
@@ -140,11 +135,6 @@ def run_sweep(markets: list[dict], grid: list[dict]) -> list[dict]:
         scored   = scanner.score_markets(filtered, cfg)
 
         flagged = [m for m in scored if m.get("flag")]
-
-        # Tag each scored market with the edge threshold so classifier can use it
-        for m in scored:
-            m["_edge_threshold"] = cfg["edge_threshold"]
-
         path_counts = {"EDGE": 0, "BR_NONE": 0, "DRIFT": 0, "OTHER": 0}
         for m in flagged:
             path = classify_flag_path(m)
