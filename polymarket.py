@@ -131,25 +131,39 @@ def find_match(kalshi_title: str, index: list[dict], threshold: float = 0.50) ->
     return None
 
 
-def enrich_flagged(flagged_markets: list[dict], config: dict) -> dict[str, dict]:
+def fetch_and_build_index(config: dict) -> list[dict]:
     """
-    Main entry point called from main.py.
-    Fetches Polymarket data once, matches against all flagged Kalshi markets,
-    and returns a dict keyed by Kalshi ticker with Polymarket comparison data.
+    Fetches active Polymarket markets and returns a pre-built matching index.
+    Call once per run; pass the result to match_markets() to avoid double fetching.
+    """
+    cfg   = config.get("polymarket", {})
+    limit = cfg.get("max_fetch", 500)
+    return build_index(fetch_markets(limit))
+
+
+def match_markets(
+    markets: list[dict],
+    index: list[dict],
+    config: dict,
+    *,
+    min_gap: float | None = None,
+    min_match_score: float | None = None,
+) -> dict[str, dict]:
+    """
+    Matches a list of Kalshi markets against a pre-built Polymarket index.
+    Returns a dict keyed by Kalshi ticker.
+
+    min_gap and min_match_score override config values when provided.
 
     Result per ticker:
-      poly_question, poly_price, poly_slug, match_score, price_gap
+      poly_question, poly_price, poly_slug, condition_id, match_score, price_gap
     """
     cfg       = config.get("polymarket", {})
-    limit     = cfg.get("max_fetch", 500)
-    threshold = cfg.get("min_match_score", 0.50)
-    min_gap   = cfg.get("min_price_gap", 0.0)
-
-    poly_markets = fetch_markets(limit)
-    index        = build_index(poly_markets)
+    threshold = min_match_score if min_match_score is not None else cfg.get("min_match_score", 0.50)
+    gap_floor = min_gap         if min_gap         is not None else cfg.get("min_price_gap",   0.0)
 
     results = {}
-    for m in flagged_markets:
+    for m in markets:
         ticker = m.get("ticker", "")
         title  = m.get("title", "")
         if not title:
@@ -162,7 +176,7 @@ def enrich_flagged(flagged_markets: list[dict], config: dict) -> dict[str, dict]
         kalshi_mid = m.get("mid_price")
         price_gap  = (match["yes_price"] - kalshi_mid) if kalshi_mid is not None else None
 
-        if price_gap is not None and abs(price_gap) < min_gap:
+        if price_gap is not None and abs(price_gap) < gap_floor:
             continue
 
         results[ticker] = {
@@ -175,3 +189,13 @@ def enrich_flagged(flagged_markets: list[dict], config: dict) -> dict[str, dict]
         }
 
     return results
+
+
+def enrich_flagged(flagged_markets: list[dict], config: dict) -> dict[str, dict]:
+    """
+    Backward-compatible entry point called from main.py.
+    Fetches Polymarket data once and matches against all flagged Kalshi markets.
+    Prefer fetch_and_build_index() + match_markets() when you need to reuse the index.
+    """
+    index = fetch_and_build_index(config)
+    return match_markets(flagged_markets, index, config)
