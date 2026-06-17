@@ -771,6 +771,50 @@ def test_get_week_signals_excludes_old_rows(tmp_db):
     assert "KXOLDWEEK" not in tickers
 
 
+# ─── get_ticker_day_count ─────────────────────────────────────────────────────
+
+def test_get_ticker_day_count_returns_zero_for_missing(tmp_db):
+    """Unknown ticker returns 0."""
+    assert logger.get_ticker_day_count("KXNEVER", days=14) == 0
+
+
+def test_get_ticker_day_count_empty_ticker_returns_zero(tmp_db):
+    """Empty-string ticker short-circuits to 0."""
+    assert logger.get_ticker_day_count("", days=14) == 0
+
+
+def test_get_ticker_day_count_counts_distinct_days(tmp_db):
+    """Two signals on different days = count 2; same ticker repeated same day = count 1."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    day1 = (now - timedelta(days=2)).isoformat()
+    day2 = (now - timedelta(days=1)).isoformat()
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('d1a',?,'KXCOUNT','YES',0.30,'paper')", (day1,)
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('d1b',?,'KXCOUNT','YES',0.30,'paper')", (day1,)
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('d2a',?,'KXCOUNT','YES',0.30,'paper')", (day2,)
+        )
+    assert logger.get_ticker_day_count("KXCOUNT", days=14) == 2
+
+
+def test_get_ticker_day_count_ignores_old_entries(tmp_db):
+    """Entries older than days window are excluded from the count."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('old','2020-01-01T00:00:00+00:00','KXOLD2','YES',0.30,'paper')"
+        )
+    assert logger.get_ticker_day_count("KXOLD2", days=14) == 0
+
+
 # ─── log_run ─────────────────────────────────────────────────────────────────
 
 def test_log_run_writes_run_row(tmp_db):

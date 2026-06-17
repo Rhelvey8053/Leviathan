@@ -443,10 +443,13 @@ def main():
 
     run_meta["signals_generated"] = len(final_signals)
 
-    # Tag signals as new or repeat (seen in past 7 days)
+    # Tag signals as new or repeat (seen in past 7 days); annotate repeat count
     recent_tickers = logger.get_recent_tickers(days=7)
     for sig in final_signals:
-        sig["is_repeat"] = sig.get("ticker", "") in recent_tickers
+        ticker = sig.get("ticker", "")
+        sig["is_repeat"] = ticker in recent_tickers
+        if sig["is_repeat"]:
+            sig["repeat_count"] = logger.get_ticker_day_count(ticker, days=14)
     new_signals    = [s for s in final_signals if not s.get("is_repeat")]
     repeat_signals = [s for s in final_signals if s.get("is_repeat")]
 
