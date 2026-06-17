@@ -554,3 +554,23 @@ def test_horizon_weekly_note_in_prompt():
     m = _base_market(time_horizon="WEEKLY")
     prompt = scorer.build_prompt([m])
     assert "7 days" in prompt
+
+
+# ─── Calibration rules 21-22 ─────────────────────────────────────────────────
+
+def test_rule_21_geopolitical_keywords_in_system_prompt():
+    """Rule 21 covers geopolitical/military escalation with base rate anchors."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "21." in sp
+    assert "NATO Article 5" in sp
+    assert "Military invasion" in sp or "military invasion" in sp.lower()
+    assert "GEOPOLITICAL" in sp or "geopolitical" in sp.lower()
+
+
+def test_rule_22_natural_disaster_keywords_in_system_prompt():
+    """Rule 22 covers natural disaster / weather severity thresholds."""
+    sp = scorer.SYSTEM_PROMPT
+    assert "22." in sp
+    assert "Wildfire" in sp or "wildfire" in sp.lower()
+    assert "hurricane" in sp.lower()
+    assert "NATURAL DISASTER" in sp or "natural disaster" in sp.lower()
