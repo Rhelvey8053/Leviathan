@@ -492,6 +492,44 @@ def get_stats() -> dict:
     }
 
 
+def get_stats_by_sig() -> dict:
+    """
+    Win rate broken down by which mode-independent signal fired on each paper signal.
+    Returns a dict keyed by signal type: sig_edge / sig_drift / sig_br_none.
+    Only includes resolved paper signals.
+    """
+    result = {}
+    for sig_col in ("sig_edge", "sig_drift", "sig_br_none"):
+        try:
+            with _db() as conn:
+                row = conn.execute(
+                    f"""
+                    SELECT
+                        COUNT(*) AS total,
+                        SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) AS wins,
+                        AVG(edge) AS avg_edge,
+                        SUM(pnl_if_traded) AS total_pnl
+                    FROM signals
+                    WHERE ({_PAPER})
+                      AND outcome != '' AND outcome IS NOT NULL
+                      AND {sig_col} = 1
+                    """
+                ).fetchone()
+            total = row["total"] or 0
+            wins  = row["wins"] or 0
+            result[sig_col] = {
+                "total":     total,
+                "wins":      wins,
+                "win_rate":  round(wins / total * 100, 1) if total else None,
+                "avg_edge":  row["avg_edge"],
+                "total_pnl": row["total_pnl"],
+            }
+        except Exception:
+            result[sig_col] = {"total": 0, "wins": 0, "win_rate": None,
+                               "avg_edge": None, "total_pnl": None}
+    return result
+
+
 def get_stats_by_flag_path() -> list[dict]:
     """
     Win rate and P&L broken down by flag_path (EDGE / BR_NONE / DRIFT / HEURISTIC / WATCHLIST).

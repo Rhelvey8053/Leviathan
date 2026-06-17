@@ -172,6 +172,48 @@ def main(resolve: bool = True):
     print(_rule("-"))
     _print_section("real fills", fill_rows)
 
+    # ── Signal type breakdown ─────────────────────────────────────────────────
+    flag_stats = logger.get_stats_by_flag_path()
+    sig_stats  = logger.get_stats_by_sig()
+
+    if flag_stats or sig_stats:
+        print()
+        print(_rule("="))
+        print("SIGNAL TYPE ANALYSIS  (paper signals, resolved only)")
+        print(_rule("-"))
+
+        if flag_stats:
+            resolved_fp = [r for r in flag_stats if r.get("total", 0) > 0]
+            if resolved_fp:
+                print()
+                print("  By flag path:")
+                print(f"  {'Path':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}")
+                print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
+                for r in resolved_fp:
+                    wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+                    pnl_s = _fmt_pnl(r["total_pnl"]) if r["total_pnl"] is not None else "—"
+                    print(f"  {r['flag_path']:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
+
+        if sig_stats:
+            any_sig = any(v.get("total", 0) > 0 for v in sig_stats.values())
+            if any_sig:
+                print()
+                print("  By signal presence (markets can have multiple):")
+                print(f"  {'Signal':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}")
+                print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
+                labels = {
+                    "sig_edge":    "EDGE",
+                    "sig_drift":   "DRIFT",
+                    "sig_br_none": "BR_NONE",
+                }
+                for key, label in labels.items():
+                    r = sig_stats.get(key, {})
+                    if not r.get("total"):
+                        continue
+                    wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+                    pnl_s = _fmt_pnl(r["total_pnl"]) if r["total_pnl"] is not None else "—"
+                    print(f"  {label:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
+
     # ── Combined summary ──────────────────────────────────────────────────────
     all_resolved = [r for r in all_rows if r.get("outcome")]
     all_pnl      = sum(float(r["pnl_if_traded"] or 0) for r in all_resolved
