@@ -76,6 +76,34 @@ def test_price_midrange_kept():
 
 # ─── filter_markets: empty order book fallback ───────────────────────────────
 
+def test_one_sided_ask_only_uses_last_price():
+    """bid=0, ask=1.0 (stale settled leg) — mid should use last_price, not ask/2."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 1.0
+    m["last_price_dollars"] = "0.0150"  # 1.5% — below 5% floor
+    # Old code would compute mid = 1.0/2 = 0.50, keeping the market in
+    # New code: mid = last_price = 0.015 → dropped
+    assert scanner.filter_markets([m], BASE_CFG) == []
+
+def test_one_sided_ask_only_valid_last_price_kept():
+    """bid=0, ask=0.40, last=0.25 — mid should use last_price 0.25, which passes."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 0.40
+    m["last_price_dollars"] = "0.2500"
+    result = scanner.filter_markets([m], BASE_CFG)
+    assert len(result) == 1
+
+def test_score_market_one_sided_uses_last_price():
+    """score_market mid_price should be last_price when only ask is present."""
+    m = _market()
+    m["yes_bid"] = 0.0
+    m["yes_ask"] = 1.0
+    m["last_price_dollars"] = "0.0300"
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["mid_price"] == pytest.approx(0.03, abs=1e-6)
+
 def test_empty_orderbook_low_last_price_dropped():
     """Empty bid/ask + last_price_dollars below min → should be dropped."""
     m = _market()
