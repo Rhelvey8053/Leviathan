@@ -170,6 +170,23 @@ def test_match_markets_skips_empty_title():
     assert "KXTEST" not in result
 
 
+def test_match_markets_no_mid_price_excluded_when_gap_floor_set():
+    """Markets with None mid_price must be excluded when a gap floor is configured."""
+    idx = _idx("Will X happen?")
+    markets = [{"ticker": "KXTEST", "title": "Will X happen?", "mid_price": None}]
+    result = polymarket.match_markets(markets, idx, _CFG, min_gap=0.15)
+    assert "KXTEST" not in result
+
+
+def test_match_markets_no_mid_price_included_when_no_gap_floor():
+    """Markets with None mid_price are included when gap floor is 0 (enrich_flagged use case)."""
+    idx = _idx("Will X happen?")
+    markets = [{"ticker": "KXTEST", "title": "Will X happen?", "mid_price": None}]
+    result = polymarket.match_markets(markets, idx, _CFG, min_gap=0.0)
+    assert "KXTEST" in result
+    assert result["KXTEST"]["price_gap"] is None
+
+
 def test_match_markets_min_match_score_override():
     idx = _idx("Will the economy grow this year?")
     # Low similarity title — fails at 0.80 threshold
