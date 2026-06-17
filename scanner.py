@@ -213,7 +213,9 @@ def estimate_base_rate(market: dict) -> float | None:
         (["lawsuit", "settlement", "settle the lawsuit",
           "class action", "reaches settlement"], 0.40),
         # Fired / dismissed — higher rate than voluntary resignation
-        (["fired", "be fired", "get fired", "dismissed", "terminated",
+        # "fired" excluded (substring of "misfired", "backfired"); use space-bounded forms instead
+        (["be fired", "get fired", "was fired", "been fired", "gets fired",
+          " fired ", "dismissed", "terminated",
           "removed from his position", "removed from her position",
           "removed from the position"], 0.25),
         # Government shutdown / budget standoff — relatively rare per quarter
@@ -285,7 +287,11 @@ def estimate_base_rate(market: dict) -> float | None:
           "box office", "streaming", "in theaters", "in cinemas",
           "music video", "album drops", "album release",
           "episode", "documentary"], 0.25),
-        (["movie", "film", "season"], 0.25),
+        # "season" alone is too broad (matches wildfire season, flu season, etc.)
+        # Explicit numbered seasons + movie/film catch-all
+        (["season 2", "season 3", "season 4", "season 5",
+          "season 6", "season 7", "season 8", "season 9",
+          "movie", "film"], 0.25),
         # Space / aerospace — launch delays are the norm; SpaceX has better cadence than NASA
         (["starship", "falcon heavy", "falcon 9",
           "spacex launch", "rocket launch"], 0.40),    # SpaceX has high cadence
