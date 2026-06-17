@@ -1039,6 +1039,21 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # False positive guard — "summit" alone in unrelated context → no match from diplomatic block
     # (summit could be a mountain/location; diplomatic block requires "summit between/with" etc.)
     ("Will the tech summit produce a new AI governance framework?", None),  # no heuristic
+    # Nobel Prize — very low base rate (single winner from hundreds of candidates)
+    ("Will Elon Musk win the Nobel Prize in Physics in 2026?", 0.10),
+    ("Will the Nobel Peace Prize be awarded to a climate activist in 2026?", 0.10),
+    # UN Security Council — China/Russia veto risk keeps rate low
+    ("Will the UN Security Council pass a resolution on Gaza in 2026?", 0.15),
+    ("Will the United Nations Security Council vote to sanction Russia?", 0.15),
+    # SEC/regulatory approval
+    ("Will the SEC approve the Bitcoin spot ETF application in Q3 2026?", 0.40),
+    ("Will the FCC approve the merger of the two telecom companies?", 0.40),
+    # Corporate appointment / CEO change
+    ("Will Bob Iger become CEO of Disney again?", 0.35),
+    ("Will Tesla be named a new CEO to replace Musk by 2026?", 0.35),
+    # False positive guard — "Nobel" in unrelated context
+    # "Nobel conference" → no match (our patterns require "nobel prize"/"win the nobel"/"nobel laureate")
+    ("Will the Nobel conference attract more attendees in 2026?", None),  # no heuristic
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
