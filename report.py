@@ -398,6 +398,67 @@ def _smart_money_section(result: dict | None) -> list[str]:
     return out
 
 
+def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
+    """Compact executive summary of the top-N signals sorted by quality score."""
+    if not signals:
+        return []
+    ranked = sorted(signals, key=lambda s: (
+        CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2),
+        -_signal_strength(s),
+        -(abs(float(s.get("edge") or 0))),
+    ))[:n]
+
+    out = []
+    out.append(_rule("="))
+    out.append(f"TOP PICKS  (best {min(n, len(ranked))} signals by conviction + edge)")
+    out.append(_rule("-"))
+    for i, s in enumerate(ranked, 1):
+        conf      = s.get("confidence", "LOW")
+        direction = s.get("direction", "")
+        horizon   = HORIZON_LABEL.get(s.get("time_horizon", "MONTHLY"), s.get("time_horizon", ""))
+        fp        = s.get("flag_path", "")
+        strength  = _signal_strength(s)
+        str_l     = f"  ★×{strength}" if strength >= 2 else ""
+        fp_l      = f"  [{fp}]" if fp else ""
+
+        ticker    = s.get("ticker", "")
+        close_raw = s.get("close_time") or s.get("expiration_time", "")
+        close_fmt = ""
+        urgency   = ""
+        if close_raw:
+            try:
+                dt        = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
+                close_fmt = dt.strftime("Closes %b %d, %Y").replace(" 0", " ")
+                days_left = (dt - datetime.now(timezone.utc)).days
+                if days_left <= 0:
+                    urgency = "  [CLOSING TODAY/TOMORROW]"
+                elif days_left <= 3:
+                    urgency = f"  [CLOSING IN {days_left}d]"
+                elif days_left <= 7:
+                    urgency = f"  [closes in {days_left}d]"
+            except Exception:
+                close_fmt = close_raw[:10]
+
+        mkt_p   = _pct(s.get("market_price"))
+        est_p   = _pct(s.get("our_estimate"))
+        edge_v  = float(s.get("edge") or 0)
+        kelly   = _kelly_fraction(direction, s.get("market_price"), s.get("our_estimate"))
+        kelly_s = f"  Kelly(1/4): {kelly[1]*100:.1f}%" if kelly else ""
+
+        rep_cnt = s.get("repeat_count", 0) or 0
+        rep_l   = f"  [REPEAT x{rep_cnt}]" if rep_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
+
+        out.append(f"{i}. {CONF_LABEL[conf]} / BUY {direction}  /  {horizon}{fp_l}{str_l}")
+        ticker_close = f"{ticker}  ·  {close_fmt}{urgency}{rep_l}" if close_fmt else f"{ticker}{urgency}{rep_l}"
+        out.append(f"   {ticker_close}")
+        out.append(f"   Market: {mkt_p}  Est: {est_p}  Edge: {edge_v*100:+.1f} pp{kelly_s}")
+        if i < len(ranked):
+            out.append("")
+    out.append(_rule("="))
+    out.append("")
+    return out
+
+
 # ── Daily report ──────────────────────────────────────────────────────────────
 
 def compile_report(
@@ -433,6 +494,11 @@ def compile_report(
     out.append(f"  Markets Scanned:{n_mkt}")
     out.append(f"  Smart Money:    {sm_xref} Kalshi x-refs from top Polymarket traders")
     out.append("")
+
+    # ── Top picks executive summary ───────────────────────────────────────
+    all_q = _qualifying(signals, threshold_rank)
+    if all_q:
+        out.extend(_top_picks(all_q, n=3))
 
     # ── New signals ───────────────────────────────────────────────────────
     out.append(_rule("="))
