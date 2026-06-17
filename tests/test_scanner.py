@@ -945,6 +945,29 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Note: "Will the Supreme Court block deportation flights?" hits the "supreme court"
     # pattern (0.50) before the "deportation" pattern — SCOTUS ruling base rate is correct.
     ("Will ICE deport more than 50,000 people in June 2026?", 0.35),
+    # Fired / dismissed
+    ("Will the Treasury Secretary be fired before 2027?", 0.25),
+    ("Will Kash Patel be dismissed from his position before June 2027?", 0.25),
+    ("Will the White House Chief of Staff get fired before Q4 2026?", 0.25),
+    # Government shutdown
+    ("Will there be a government shutdown before October 2026?", 0.15),
+    ("Will Congress avoid a shutdown by the deadline?", 0.15),
+    ("Will a partial shutdown begin in September 2026?", 0.15),
+    # Debt ceiling
+    ("Will Congress raise the debt ceiling before August 2026?", 0.15),
+    ("Will the US hit the debt ceiling in 2026?", 0.15),
+    ("Will Democrats and Republicans reach a debt limit deal?", 0.15),
+    # Congressional spending / continuing resolution
+    ("Will Congress pass a continuing resolution before October 2026?", 0.40),
+    ("Will an omnibus bill be signed into law before end of 2026?", 0.40),
+    # Antitrust / FTC / DOJ
+    ("Will the FTC block the Microsoft-Activision deal?", 0.40),
+    ("Will the DOJ block the American Airlines merger?", 0.40),
+    ("Will the antitrust case against Google succeed?", 0.40),
+    # North Korea / DPRK
+    ("Will North Korea launch a missile test in Q3 2026?", 0.40),
+    ("Will DPRK conduct a nuclear test in 2026?", 0.40),
+    ("Will North Korea nuclear provocations escalate before end of 2026?", 0.40),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

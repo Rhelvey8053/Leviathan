@@ -155,6 +155,10 @@ def estimate_base_rate(market: dict) -> float | None:
         (["win the presidency", "win the white house"], 0.50),
         (["win the senate race", "win the house race", "win the gubernatorial",
           "win the mayoral", "mayor race", "win the governor"], 0.52),
+        # Congressional spending — continuing resolutions / omnibus bills (must come before
+        # generic "signed into law" because "omnibus bill" is a more specific match)
+        (["continuing resolution", "omnibus bill", "appropriations bill",
+          "government funding bill"], 0.40),
         # Legislative — most Kalshi bills have some momentum; passage ~35%
         (["pass the senate", "pass the house", "pass congress",
           "pass in the senate", "pass in the house",
@@ -208,6 +212,28 @@ def estimate_base_rate(market: dict) -> float | None:
         (["impeach", "impeachment", "removed from office"], 0.15),
         (["lawsuit", "settlement", "settle the lawsuit",
           "class action", "reaches settlement"], 0.40),
+        # Fired / dismissed — higher rate than voluntary resignation
+        (["fired", "be fired", "get fired", "dismissed", "terminated",
+          "removed from his position", "removed from her position",
+          "removed from the position"], 0.25),
+        # Government shutdown / budget standoff — relatively rare per quarter
+        (["government shutdown", "partial shutdown", "federal shutdown",
+          "avoid a shutdown", "avert a shutdown", "prevent a shutdown",
+          "shutdown begins", "shutdown ends"], 0.15),
+        # Debt ceiling / borrowing limit — usually resolved but cliff-hangers are common
+        (["debt ceiling", "debt limit", "hit the debt ceiling",
+          "debt ceiling deal", "raise the debt ceiling",
+          "lift the debt ceiling", "suspend the debt limit"], 0.15),
+        # Antitrust / regulatory block on mergers
+        (["antitrust", "ftc block", "doj block", "block the merger",
+          "block the acquisition", "reject the merger",
+          "challenge the merger", "challenge the acquisition"], 0.40),
+        # North Korea / DPRK — any NK market is likely a provocation/test market (fairly frequent)
+        # Placed before generic "nuclear deal" (0.20) to avoid DPRK test markets scoring too low.
+        (["north korea missile", "north korea nuclear", "north korea test",
+          "north korea launch", "north korea conduct",
+          "dprk missile", "dprk nuclear", "dprk test", "dprk launch",
+          "dprk conduct", "dprk provoc", " dprk "], 0.40),
         # Weather
         (["will it rain", "chance of rain", "precipitation"], 0.40),
         (["hurricane", "tropical storm", "tropical cyclone",
