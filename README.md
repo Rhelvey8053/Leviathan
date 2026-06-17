@@ -188,7 +188,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-474 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+513 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|
@@ -199,6 +199,7 @@ python -m pytest -q
 | `tests/test_report.py` | Signal block, _qualifying, compile_report, compile_weekly_digest, flag path labels |
 | `tests/test_research_probe.py` | Stratified sampling, probe logging, forward scoring |
 | `tests/test_smart_money.py` | Binary position filter, sports title filter, keyword gate, match scoring |
+| `tests/test_polymarket.py` | _yes_price, build_index, find_match, match_markets, fetch_and_build_index, cross-market promotion |
 
 ---
 

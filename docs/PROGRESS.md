@@ -2,6 +2,49 @@
 
 ---
 
+## Session 8 — 2026-06-17 (autonomous continuation)
+
+### Cross-market force-flag + polymarket test suite
+
+**Feature: CROSS_MARKET flag_path**
+
+Implemented cross-market promotion — unflagged markets with a significant
+Polymarket price divergence are now elevated into the scoring queue even if
+no heuristic, drift, or edge signal fired.
+
+Architecture:
+- `polymarket.fetch_and_build_index(config)` — fetches once, returns shared index
+- `polymarket.match_markets(markets, index, config, *, min_gap, min_match_score)` — matches any list
+- `polymarket.enrich_flagged()` — now a thin wrapper over the above (backward compat)
+- `main.py` step 3: collects `unflagged_markets` pool after scoring
+- `main.py` step 4: fetches Polymarket index once, enriches flagged markets, then
+  checks top-N unflagged by volume; promotes any with `abs(gap) ≥ cross_market_min_gap`
+  into `flagged_markets` with `flag_path = "CROSS_MARKET"`
+
+Config keys added to `polymarket` section:
+- `cross_market_promote` (bool, default true)
+- `cross_market_min_gap` (float, default 0.15)
+- `cross_market_max_candidates` (int, default 50)
+
+**New test file: `tests/test_polymarket.py` (24 tests)**
+- `_yes_price`: yes/true/fallback/missing/pre-parsed
+- `build_index`: valid, missing price, missing question, multiple
+- `find_match`: exact, below threshold, empty index, picks best
+- `match_markets`: match, no match, min_gap filter, min_gap passes,
+  no mid_price, empty title, min_match_score override
+- `fetch_and_build_index`: mock fetch call
+- `enrich_flagged`: backward compat
+- Cross-market promotion: gap passes, gap rejected
+
+489 → 513 tests total.
+
+### Git commits this session
+
+1. `(docs)` — PROGRESS.md + README housekeeping (489 count, Session 7 commit 9)
+2. `(feat)` — polymarket refactor + CROSS_MARKET promotion + 24 new tests (513)
+
+---
+
 ## Session 7 — 2026-06-17 (autonomous continuation)
 
 ### Testing + heuristic quality pass
@@ -9,7 +52,7 @@
 All work continued autonomously from Session 6. Focus: close coverage gaps in
 test suite and tighten heuristic base rate accuracy.
 
-**New tests added (383 → 474):**
+**New tests added (383 → 489):**
 - `test_logger.py` +11: `get_stats_by_sig()` (zero coverage before), `log_run`, `get_recent_tickers`, `get_week_signals`
 - `test_report.py` +14: `_qualifying()` (PASS-direction exclusion, threshold, second_pass bypass, sort order)
 - `test_report.py` +9: `_signal_block` additions (spread, whale, OB, watchlist, Polymarket, ext_markets, smart_money)
@@ -44,6 +87,7 @@ test suite and tighten heuristic base rate accuracy.
 6. `b5872ce` — 6 new heuristic categories + 25 test cases, README 380→474
 7. `14a67d4` — entertainment false positive fix (release/show)
 8. `04f12bf` — fired substring fix, season catch-all fix
+9. `5c3e1ed` — FOMC/unemployment/price/IPO/legislative/TikTok expansion (489 tests)
 
 ---
 
