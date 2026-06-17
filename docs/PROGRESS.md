@@ -90,6 +90,27 @@ TRACK RECORD section of the weekly email with label and n.
 
 24. `02af675` — Add Brier score calibration metric (684 tests): logger.get_brier_score(),
     backtest display, weekly digest integration, 7 new tests
+25. `c4875d9` — Major heuristic gap-fill pass: 11 new categories + 40 tests (714)
+    Minimum wage (25%), national emergency (25%), nuclear plant accident (5%),
+    nuclear weapons (5%), NATO Article 5 (5%), troop withdrawal (30%),
+    commodity/energy prices (40%), interest rate thresholds, retail/consumer (45%),
+    inflation thresholds (50%), wildfire (35%), tech product releases (55%), concert/tour (45%),
+    immigration legislation extension. BR_NONE on 20-title sample: 0%.
+26. `7edf3c9` — Calibration rules 21-22: geopolitical escalation + natural disaster severity (716)
+    Rule 21: invasion 15%, NATO Article 5 5%, military strike 15%, coup 10% — don't chase rhetoric
+    Rule 22: wildfire 35%, hurricane 45%, earthquake 30% — weather forecasts already priced
+27. `1568279` — Add confidence breakdown: get_stats_by_confidence() + backtest section (719)
+    logger.get_stats_by_confidence() groups win rate/PnL by HIGH/MED/LOW confidence level
+28. `fa99b2d` — Second BR_NONE gap-fill pass: 12 new categories + 36 tests (743)
+    "be acquired" / "be taken over", "go bankrupt", bank failure (15%), gun control (20%),
+    currency depreciation (40%), company valuation (35%), tech market competition (35%),
+    social media age restrictions (30%), corporate leadership retention (65%),
+    volcanic eruption (5%), common currency (10%), economic performance comparisons (50%)
+29. `65d81d6` — Third BR_NONE gap-fill pass: 13 new categories + 22 tests (765)
+    Student loan forgiveness (30%), healthcare reform (20%), rejoin international agreement (25%),
+    data leak / gov't hack, civil war (25%), political scandal (45%),
+    autonomous vehicle (25%), quantum computing (10%), Mars mission (15%),
+    renewable energy threshold (40%), housing market correction (20%)
 
 ---
 
