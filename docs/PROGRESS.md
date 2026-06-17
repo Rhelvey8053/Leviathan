@@ -449,3 +449,110 @@ Also added per-market time-horizon context to probe prompts (`closes within 7 da
 1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-27JUL01`) settles 2026-07-08 — run `resolve_outcomes({})` after that date to write the official result. Currently manually scored as LOSS.
 2. **Senate/Makerfield/Abraham Accords tickers** — these are 2027–2029 markets; they are now in the scoring queue via watchlist boost but will not resolve for months. Monitor for price drift as confirming signal.
 3. **`filter_pass` context in probe** — stratified sample showed 0 filter survivors in the 4am UTC snapshot. Consider sampling from a fresher snapshot or relaxing filter thresholds in the probe path.
+
+---
+
+## Session 4 — Signal quality hardening + flag_path analytics (2026-06-17)
+
+**Test count:** 231 → 286 (all passing)
+
+### Entity contradiction guard
+
+Remaining false positives from the Session 3 live scan (15 signals, 3 known FPs):
+
+| FP ticker | Mismatch type | Example |
+|---|---|---|
+| EUEXIT-30 | Org group | "leave OPEC" matched "leave EU" |
+| SENATEUT-28-R/D | US state | "Texas Senate" matched "Utah Senate" |
+| KXLONDONMAYOR | City | "LA Mayor" matched "London Mayor" |
+
+**Fix:** `_entity_contradiction(poly_title, kalshi_title)` in `analysis/smart_money_scan.py`:
+- **US state check**: extracts state words from both titles using a 46-word frozenset (omits Carolina/Dakota to avoid treating NC vs SC as contradictory). Padded matching (` texas ` not `texas`) prevents "jersey" from false-matching "New Jersey".
+- **City check**: 25 major world cities; both must name a city AND they must differ.
+- **Org check**: 6 exclusive organization groups (OPEC, EU/Brexit, NATO, IMF, WTO, ASEAN). Each group is a frozenset; titles that reference organizations from different groups are rejected.
+
+Called inside `_match_to_kalshi()` before computing score — no overhead if 2-keyword gate fails first.
+
+**Tests:** 18 new tests in `tests/test_smart_money.py` covering all three mismatch types and verifying legitimate matches are NOT rejected.
+
+### Signal grouping
+
+`_group_signals_by_ticker(signals)` added. Multiple traders pointing at the same Kalshi market produce one aggregated entry with:
+- `total_position_val`: sum of all trader positions
+- `trader_count`: unique traders (deduplicated by name)
+- `directions`: `{"YES": N, "NO": M}` vote tallies
+- `consensus_direction`: "YES" / "NO" / "MIXED" / "UNKNOWN"
+
+Grouped summary printed to console after the flat signal list. The `result` dict includes both `"kalshi_signals"` (flat per-trader list) and `"grouped_signals"` (aggregated by ticker).
+
+**Tests:** 7 new tests covering aggregation, direction voting, MIXED consensus, trader dedup, empty input, and UNKNOWN direction.
+
+### Expanded heuristic base rates (35 categories, was 18)
+
+Added 10 new market category groups to `scanner.estimate_base_rate()`:
+
+| Category | Base rate | Rationale |
+|---|---|---|
+| Legislative passage | 0.35 | Bills with Kalshi presence have some momentum but most don't pass |
+| Presidential veto | 0.20 | Vetoes are rarer than passage |
+| Executive orders | 0.45 | Fairly common executive action |
+| Senate confirmation | 0.55 | Most nominees confirmed historically |
+| Resign/step down | 0.20 | Rare for sitting officials |
+| Presidential pardon | 0.35 | Relatively common during administrations |
+| Lift sanctions | 0.20 | Harder to lift than impose (checked first in order) |
+| Impose sanctions | 0.45 | Fairly common US/EU action |
+| Nuclear deal/accord | 0.20 | Hard diplomatic outcomes |
+| Supreme Court / rulings | 0.50 | Genuinely uncertain |
+| Economic indicators (CPI/GDP/jobs) | 0.50 | 50/50 for specific threshold questions |
+| Crypto price markets | 0.50 | Symmetric around any given level |
+| Hurricanes / tropical storms | 0.45 | Uncertain once tracked |
+| Diplomatic recognition | 0.30 | Uncommon unilateral actions |
+| Lawsuit settlement | 0.40 | Moderate base rate |
+| NATO/EU accession | 0.25–0.35 | Hard but possible within 5-year horizons |
+
+**Order note:** "lift sanctions" checked before "impose sanctions" because "will the EU lift sanctions on Russia" contains "sanctions on" which would otherwise match the impose group. More-specific patterns always precede less-specific ones.
+
+**Tests:** 25 new tests in `tests/test_scanner.py` pinning each new category.
+
+**Impact:** More markets now get a `base_rate` in `strict_with_heuristic` mode, enabling the `HEURISTIC` flag_path for markets where Claude+websearch would find real edge. Previously these markets were dropped entirely in strict mode.
+
+### `flag_path` and `watchlist_signal` in logger
+
+Two new columns added via additive schema migration (safe on existing `leviathan.db`):
+- `flag_path TEXT` — EDGE / BR_NONE / DRIFT / HEURISTIC / WATCHLIST
+- `watchlist_signal INTEGER DEFAULT 0`
+
+`log_signal()` now persists both. Both signal dicts in `main.py` (primary and second-pass) forward `flag_path` from the market object.
+
+**New function:** `get_stats_by_flag_path()` — returns win rate, total calls, wins, and hypothetical P&L broken down by flag path. Only paper signals with a resolved outcome. Enables outcome segmentation once markets settle.
+
+**Tests:** 6 new tests covering column presence, flag_path persistence (three cases), and `get_stats_by_flag_path` (basic, resolved-only, excludes real fills).
+
+### Report: win rate by flag_path
+
+`compile_report()` and `compile_weekly_digest()` now accept `flag_path_stats` parameter and render a compact table in the track record section:
+
+```
+  Win Rate by Signal Path  (resolved only):
+    Path            Total  Wins    Win%       P&L
+    --------------  -----  ----  ------  --------
+    WATCHLIST           3     3    100%     $2.10
+    HEURISTIC           5     3     60%     $0.85
+    DRIFT               8     4     50%     $0.20
+    EDGE                2     1     50%     $0.40
+```
+
+`main.py` fetches and passes `logger.get_stats_by_flag_path()` in both normal and fallback report paths.
+
+### Git commits this session
+
+1. `461a7a5` — Entity contradiction guard + signal grouping + 24 new tests (255 total)
+2. `92fc8f5` — Expanded heuristic base rates, 25 new tests (280 total)
+3. `9d8bde0` — flag_path/watchlist_signal schema + get_stats_by_flag_path + 6 tests (286 total)
+4. `5f6fcc4` — Flag_path win-rate table in daily and weekly reports
+
+### Open items
+
+1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-27JUL01`) settles 2026-07-08 — unchanged.
+2. **Run a fresh daily scan** to verify entity contradiction guard eliminates the 3 FPs (EUEXIT/SENATEUT/KXLONDONMAYOR).
+3. **Flag_path outcome data** — currently 0 resolved paper signals. Once 10+ markets resolve, `get_stats_by_flag_path()` will show whether WATCHLIST or HEURISTIC has higher win rate than raw EDGE/DRIFT.
