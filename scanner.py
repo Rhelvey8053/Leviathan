@@ -67,12 +67,14 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
         # Price bounds — exclude near-certain and tail-probability contracts
         yes_bid = float(m.get("yes_bid_dollars") or m.get("yes_bid") or 0)
         yes_ask = float(m.get("yes_ask_dollars") or m.get("yes_ask") or 0)
-        mid = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
-        if mid is None:
-            # Empty order book — fall back to last traded price for price check
+        if yes_bid > 0 and yes_ask > 0:
+            # Two-sided market — use true mid
+            mid = (yes_bid + yes_ask) / 2
+        else:
+            # One-sided or empty book (often a settled leg with a stale ask) —
+            # use last traded price as the best available price estimate
             last_p = float(m.get("last_price_dollars") or 0)
-            if last_p > 0:
-                mid = last_p
+            mid = last_p if last_p > 0 else None
         if mid is not None and not (min_price <= mid <= max_price):
             continue
 
@@ -434,12 +436,12 @@ def score_market(market: dict, config: dict) -> dict:
     yes_bid = float(market.get("yes_bid_dollars") or market.get("yes_bid") or 0)
     yes_ask = float(market.get("yes_ask_dollars") or market.get("yes_ask") or 0)
 
-    mid_price = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) > 0 else None
-    if mid_price is None:
-        # Empty order book — use last traded price as best available mid estimate
+    if yes_bid > 0 and yes_ask > 0:
+        mid_price = (yes_bid + yes_ask) / 2
+    else:
+        # One-sided or empty book — use last traded price as best available estimate
         last_p = float(market.get("last_price_dollars") or 0)
-        if last_p > 0:
-            mid_price = last_p
+        mid_price = last_p if last_p > 0 else None
 
     base_rate = estimate_base_rate(market)
 
