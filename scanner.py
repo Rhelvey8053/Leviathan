@@ -257,6 +257,22 @@ def estimate_base_rate(market: dict) -> float | None:
           "appeals court", "circuit court"], 0.50),
         (["overturns", "upholds", "rules in favor",
           "strikes down", "court ruling", "court decision"], 0.50),
+        # Pardon / clemency — president has wide latitude; depends on political climate (~35%)
+        (["be pardoned", "receive a pardon", "presidential pardon", "pardon of",
+          "receive clemency", "clemency for",
+          "commute his sentence", "commute her sentence",
+          "commute the sentence", "commute their sentence", "commuted sentence",
+          "grant a pardon", "grant clemency"], 0.35),
+        # Plea deal — most criminal cases resolve via plea before trial (~45%)
+        # Place BEFORE "found guilty" to avoid first-match conflict on "plead guilty"
+        (["plead guilty", "plea deal", "plea agreement",
+          "enter a guilty plea", "no contest plea",
+          "accept a plea", "negotiate a plea"], 0.45),
+        # Acquittal / not guilty — for prediction market trials (contested, high-profile)
+        # Place BEFORE broad "found guilty" block; "not guilty" is substring-safe vs "found guilty"
+        (["be acquitted", "found not guilty", "not guilty verdict",
+          "acquitted of", "acquittal", "declared not guilty",
+          "ruled not guilty"], 0.35),
         # Criminal / legal — conviction base rates are moderate
         (["convicted", "found guilty", "indicted", "charged with"], 0.40),
         (["impeach", "impeachment", "removed from office"], 0.15),
