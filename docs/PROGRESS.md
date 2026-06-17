@@ -2,6 +2,51 @@
 
 ---
 
+## Session 7 — 2026-06-17 (autonomous continuation)
+
+### Testing + heuristic quality pass
+
+All work continued autonomously from Session 6. Focus: close coverage gaps in
+test suite and tighten heuristic base rate accuracy.
+
+**New tests added (383 → 474):**
+- `test_logger.py` +11: `get_stats_by_sig()` (zero coverage before), `log_run`, `get_recent_tickers`, `get_week_signals`
+- `test_report.py` +14: `_qualifying()` (PASS-direction exclusion, threshold, second_pass bypass, sort order)
+- `test_report.py` +9: `_signal_block` additions (spread, whale, OB, watchlist, Polymarket, ext_markets, smart_money)
+- `test_scorer.py` +24: liquidity context, CROSS-MARKET, POLYMARKET, WHALE ALERT, REVERSAL SIGNAL, ORDER BOOK, SPREAD SIGNAL, SMART MONEY, multi-market numbering, horizon notes, EDGE flag reason
+- `test_report.py` +10: `compile_weekly_digest()` (header, empty, direction counts, dedup, stats, flag_path table)
+- `test_report.py` +20: `compile_report()` (header, empty, new/repeat sections, whale, track record, probe stats, flag path, short-term watchlist, run stats, horizon grouping)
+- `test_scanner.py` +25: new heuristic categories (fired/dismissed, govt shutdown, debt ceiling, CR/omnibus, antitrust, DPRK)
+
+**New heuristic base rate categories in `scanner.py`:**
+- Fired/dismissed (0.25) — before "resign" (0.20); requires word-bounded " fired " to avoid "misfired"
+- Government shutdown (0.15) — government shutdown / partial shutdown / avert a shutdown
+- Debt ceiling (0.15) — debt ceiling / debt limit / raise the debt ceiling
+- Continuing resolution / omnibus (0.40) — placed BEFORE "signed into law" (0.35) to avoid ordering bug
+- Antitrust/FTC/DOJ blocking (0.40)
+- North Korea / DPRK (0.40) — placed BEFORE "nuclear deal" (0.20); uses " dprk " and explicit phrases
+
+**False positive fixes:**
+- "release" and "show" removed from entertainment catch-all — too broad (hit Fed minutes, data reports)
+- "season" bare match removed — was hitting "wildfire season", "flu season", etc.
+  Replaced with specific: "new season", "season premiere", "season finale", "season 2"..."season 9"
+- "fired" bare match replaced with " fired ", "be fired", "get fired", etc. (avoids "misfired")
+
+**Calibration:** all PROGRESS.md open items from Session 6 remain (Prison Break settlement, flag_path outcome data, KXMLBDEBUT-KANDERSON spread, cross-market force-flag architecture).
+
+### Git commits this session
+
+1. `92cb49c` — get_stats_by_sig, log_run, get_recent_tickers, get_week_signals tests (394)
+2. `4768a1b` — _qualifying and _signal_block coverage in test_report (408)
+3. `5969cf8` — build_prompt coverage for liquidity, ext_markets, poly, whale, OB, spread, smart money (432)
+4. `61cc019` — compile_weekly_digest tests (442)
+5. `cdae26f` — compile_report tests (457)
+6. `b5872ce` — 6 new heuristic categories + 25 test cases, README 380→474
+7. `14a67d4` — entertainment false positive fix (release/show)
+8. `04f12bf` — fired substring fix, season catch-all fix
+
+---
+
 ## Session 6 — 2026-06-17
 
 ### Signal coverage: flagged market count 9 → 15
