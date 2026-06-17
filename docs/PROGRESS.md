@@ -57,6 +57,14 @@ Config keys added to `polymarket` section:
 15. `c0c6b89` — 3 more heuristic categories + 7 tests: Pulitzer (0.10), extradition (0.35), primary challenge (0.30) (583)
 16. `68b9b11` — Major BR_NONE gap-fill pass: 10 new heuristic categories + 20 tests (599) — covers political withdrawal/ballot-disqualification year-injection bugs, divestiture, stock split, COVID variant, special election, constitutional amendment
 17. `0e3cf64` — Signal strength composite indicator (★×N in report header when N≥2 corroborating signals) + 9 tests (608)
+18. `2e4ed48` — Signal urgency markers (CLOSING IN Xd), repeat-count labels (REPEAT xN), strength-first sort in _qualifying() + 13 tests (621)
+19. `aa70ad0` — Kelly criterion position sizing in report: full + 1/4 Kelly per signal, formulas for YES and NO + 8 tests (628)
+20. `ab1dbe2` — 3 legal heuristic categories: pardon (35%), plea deal (45%), acquittal (35%) + 12 tests (640)
+21. `95116cf` — HIGH confidence edge gate in main.py: auto-downgrade to MED when abs(edge) < 10pp + 2 tests (642)
+22. `f03efba` — Quality-weighted pre-Claude sort: _pre_sort_score() replaces volume-only ordering in top-N selection
+23. `ec49a89` — TOP PICKS executive summary: top-3 signals by (confidence, strength, edge) in compact 3-line format at report top + 8 tests (649)
+
+## Session 9 begins here
 
 ---
 
