@@ -64,6 +64,40 @@ Config keys added to `polymarket` section:
 22. `f03efba` — Quality-weighted pre-Claude sort: _pre_sort_score() replaces volume-only ordering in top-N selection
 23. `ec49a89` — TOP PICKS executive summary: top-3 signals by (confidence, strength, edge) in compact 3-line format at report top + 8 tests (649)
 
+## Session 10 — 2026-06-17 (autonomous continuation)
+
+### Calibration rules 23-28, heuristic direction signaling, CLAUDE OVERRIDE
+
+**Calibration rules 23-28 added to `scorer.py` SYSTEM_PROMPT and `analysis/research_probe.py` PROBE_SYSTEM:**
+- Rule 23: AI Capability Milestones — exam passage ~40%, AGI <5%; corrects for training-data optimism bias
+- Rule 24: Bank Failure / Financial System Risk — named bank ~15%, systemic crisis ~10%; only FDIC action counts
+- Rule 25: Emerging Technology Readiness — L4/L5 AV ~25%, quantum RSA <5%, humanoid robots ~15%; timelines slip 2-5×
+- Rule 26: Climate / Environmental Records — hottest year ~40%; crowd already prices trend extrapolation
+- Rule 27: Cryptocurrency / Digital Asset Markets — Rule 13 applies strictly; deviate only if >25pp from 50%
+- Rule 28: Short-Horizon Edge Decay — INTRADAY/WEEKLY markets: require 15pp (not 10pp) + 72h evidence; heuristic base rates are long-run averages, not specific to 3-day closes
+
+**`score_market()` — new `heuristic_direction` field:**
+Added to scanner.py output: "YES" when `base_rate > mid_price + 5pp`, "NO" when below, "NEUTRAL" within buffer, None when no base rate.
+
+**`build_prompt()` — explicit lean annotation in flag reasons:**
+- Before: `"FLAG REASON: EDGE — significant gap between heuristic estimate and market price"`
+- After: `"FLAG REASON: EDGE — heuristic base rate 30% vs market price — leans NO"`
+Anchors Claude's prior before it begins web search; reduces over-confirmation of crowd consensus.
+
+**`report._signal_block()` — CLAUDE OVERRIDE indicator:**
+When Claude's direction opposes the scanner's base rate (>5pp gap), the report now shows:
+`[!] CLAUDE OVERRIDE: Base rate 20% leans NO but Claude called YES — requires strong independent evidence.`
+Human reviewer flag for signals where Claude overrode the conservative heuristic prior.
+
+### Git commits this session
+
+32. `4f8d1a7` — Calibration rules 23-27 + README fix (796 tests)
+33. `2e0f738` — heuristic_direction in score_market() + lean annotation in build_prompt + 8 tests (804)
+34. `55e0448` — Rule 28: short-horizon edge decay for INTRADAY/WEEKLY markets + 1 test (805)
+35. `b7f8ef0` — CLAUDE OVERRIDE indicator in report + 4 tests (809)
+
+---
+
 ## Session 9 — 2026-06-17 (autonomous continuation)
 
 ### Brier score calibration + digest integration
