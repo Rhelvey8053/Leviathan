@@ -1,6 +1,9 @@
 .env
 calls.csv
 runs.csv
+# Local planning exports
+*.html
+*_files/
 *.migrated
 winning_accounts.json
 data/watchlist_cache.json
