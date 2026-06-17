@@ -5,12 +5,15 @@
     "max_fetch": 1000,
     "max_events": 400,
     "edge_threshold": 0.08,
-    "drift_min_abs": 0.0,
-    "drift_min_pct": 0.05,
+    "drift_min_abs": 0.03,
+    "drift_min_pct": 0.07,
     "min_market_price": 0.05,
     "max_market_price": 0.95,
     "min_volume": 500,
-    "max_volume_filter": 150000,
+    "max_volume_filter": 75000,
+    "min_open_interest": 25,
+    "dedup_by_event": true,
+    "flag_mode": "strict_with_heuristic",
     "min_days_to_close": 0,
     "max_days_to_close": 180,
     "bucket_min_volume": {
@@ -22,7 +25,16 @@
     },
     "efficient_market_keywords": [
       "CPI", "Federal Reserve", "Fed rate", "nonfarm payroll",
-      "jobs report", "GDP", "inflation rate", "FOMC", "unemployment rate"
+      "jobs report", "GDP", "inflation rate", "FOMC", "unemployment rate",
+      "interest rate decision", "treasury yield", "10-year yield",
+      "S&P 500", "Dow Jones", "Nasdaq", "stock market close",
+      "Super Bowl winner", "NBA Finals winner", "World Series winner",
+      "presidential election", "presidential approval",
+      "Bitcoin price", "Ethereum price", "crypto price",
+      "oil price", "WTI crude", "brent crude", "gold price",
+      "trade deficit", "current account", "balance of payments",
+      "housing starts", "consumer confidence", "ISM manufacturing",
+      "quarterly earnings", "EPS beat", "revenue beat"
     ],
     "categories": []
   },

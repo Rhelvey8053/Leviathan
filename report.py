@@ -192,11 +192,75 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     return lines
 
 
+# ── Smart money section ───────────────────────────────────────────────────────
+
+def _smart_money_section(result: dict | None) -> list[str]:
+    out = []
+    out.append(_rule("="))
+    out.append("SMART MONEY WATCHLIST  (Top Polymarket Traders)")
+    out.append(_rule("="))
+    out.append("")
+
+    if not result:
+        out.append("  No smart money data available this run.")
+        out.append("")
+        return out
+
+    n_traders = result.get("traders_active", 0)
+    n_pos     = result.get("positions_total", 0)
+    signals   = result.get("kalshi_signals", [])
+    run_at    = result.get("run_at", "")[:19].replace("T", " ")
+
+    out.append(f"  Traders Active:     {n_traders}")
+    out.append(f"  Positions Tracked:  {n_pos}")
+    out.append(f"  Kalshi X-Refs:      {len(signals)}")
+    out.append(f"  Snapshot:           {run_at} UTC")
+    out.append("")
+
+    # Kalshi cross-references — most actionable signals
+    if signals:
+        out.append("  Kalshi Cross-References (smart money + Kalshi overlap):")
+        out.append(f"  {'Trader':<20}  {'Outcome':<5}  {'Poly Price':>10}  {'Position':>10}  {'Kalshi Ticker':<28}  Market")
+        out.append(f"  {'-'*20}  {'-'*5}  {'-'*10}  {'-'*10}  {'-'*28}  -----")
+        for s in sorted(signals, key=lambda x: -x["position_val"])[:10]:
+            trader  = s["trader"][:20]
+            outcome = s["poly_outcome"][:5]
+            price   = f"{s['poly_price']:.2f}"
+            val     = f"${s['position_val']:,.0f}"
+            ticker  = s["kalshi_ticker"][:28]
+            title   = s["poly_title"][:35]
+            out.append(f"  {trader:<20}  {outcome:<5}  {price:>10}  {val:>10}  {ticker:<28}  {title}")
+        out.append("")
+
+    # Top 10 positions across all traders by value
+    top_pos = []
+    for name, data in result.get("trader_data", {}).items():
+        for p in data.get("positions", []):
+            val = float(p.get("currentValue") or 0)
+            top_pos.append((name, p, val))
+    top_pos.sort(key=lambda x: -x[2])
+
+    if top_pos:
+        out.append("  Largest Open Positions:")
+        out.append(f"  {'Trader':<20}  {'Outcome':<20}  {'Value':>10}  {'Price':>6}  {'PnL':>7}  Market")
+        out.append(f"  {'-'*20}  {'-'*20}  {'-'*10}  {'-'*6}  {'-'*7}  -----")
+        for name, p, val in top_pos[:10]:
+            outcome = (p.get("outcome") or "?")[:20]
+            price   = float(p.get("curPrice") or p.get("avgPrice") or 0)
+            pnl     = float(p.get("percentPnl") or 0)
+            title   = (p.get("title") or "")[:38]
+            out.append(f"  {name:<20}  {outcome:<20}  ${val:>9,.0f}  {price:>6.2f}  {pnl:>+6.1f}%  {title}")
+        out.append("")
+
+    return out
+
+
 # ── Daily report ──────────────────────────────────────────────────────────────
 
 def compile_report(
     signals, whale_only, stats, run_meta, config,
-    all_filtered=None, new_signals=None, repeat_signals=None
+    all_filtered=None, new_signals=None, repeat_signals=None,
+    smart_money_result=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
@@ -306,6 +370,9 @@ def compile_report(
                 notes.append("wide spread")
             out.append(f"  {title:<28}  {bucket:<9}  {mid_s:>5}  {vol_s:>6}  {', '.join(notes)}")
     out.append("")
+
+    # ── Smart money watchlist ─────────────────────────────────────────────────
+    out.extend(_smart_money_section(smart_money_result))
 
     # ── Whale activity ────────────────────────────────────────────────────
     out.append(_rule("="))
