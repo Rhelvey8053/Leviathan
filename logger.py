@@ -379,12 +379,23 @@ def resolve_outcomes(config: dict) -> int:
     resolved_count = 0
     for i, row in enumerate(rows):
         if i > 0:
-            _time.sleep(0.25)  # 4 req/s — stay well under Kalshi rate limits
+            _time.sleep(0.3)  # ~3 req/s — stay well under Kalshi rate limits
         ticker = row["ticker"]
         if not ticker:
             continue
+        market = None
+        for attempt in range(3):
+            try:
+                market = _kalshi.fetch_market(config, ticker)
+                break
+            except Exception as e:
+                if attempt < 2:
+                    _time.sleep(1.5 * (2 ** attempt))  # 1.5s, 3.0s backoff
+                else:
+                    print(f"  [logger] resolve_outcomes: failed on {ticker} after 3 attempts: {e}")
+        if market is None:
+            continue
         try:
-            market = _kalshi.fetch_market(config, ticker)
             result = (market.get("result") or "").lower()
             if result not in ("yes", "no"):
                 continue

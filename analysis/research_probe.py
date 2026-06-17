@@ -50,7 +50,27 @@ VOLUME_TIERS = [
 PROBE_SYSTEM = (
     "You are a prediction market analyst. For each market, search for relevant "
     "recent information and estimate the true probability of the YES outcome. "
-    "Return ONLY valid JSON — no markdown, no extra text."
+    "Return ONLY valid JSON — no markdown, no extra text.\n\n"
+
+    "CALIBRATION RULES (follow strictly):\n"
+    "1. TAIL PROBABILITY: If the market price is below 15%, it is almost always correct. "
+    "The crowd has already discounted this. Require extraordinary, independently-verified "
+    "evidence to set your estimate above 30% on a sub-15% market. If in doubt, PASS.\n"
+    "2. SOURCE CHAIN: Before citing 'multiple sources confirm X', verify they are truly "
+    "independent. Media reports citing the same original tweet/press release/rumour are "
+    "ONE source, not many.\n"
+    "3. ANNOUNCED vs COMPLETED: For IPOs, mergers, media releases, product launches — "
+    "'announced' or 'confirmed in development' is NOT evidence of completion by the "
+    "market's deadline. Deals fall through. Release dates slip constantly.\n"
+    "4. ENTERTAINMENT/MEDIA MARKETS: Treat any market about a movie, TV show, streaming "
+    "release, or entertainment event with extreme skepticism. Even confirmed productions "
+    "routinely miss announced dates. Base rate for on-time delivery is ~25%.\n"
+    "5. HIGH CONFIDENCE threshold: Only assign HIGH confidence when you find dated, "
+    "primary-source evidence (official press release, regulatory filing, official "
+    "announcement by the relevant authority) that directly speaks to the specific "
+    "deadline in the market.\n"
+    "6. EDGE REQUIREMENT: Only call YES or NO if your estimate differs from the market "
+    "price by at least 10 percentage points AND you have clear evidence. Otherwise PASS."
 )
 
 PROBE_SCHEMA = """
@@ -188,19 +208,39 @@ def _find_claude() -> str:
 
 
 def _build_probe_prompt(market: dict) -> str:
+    from datetime import timedelta
     mid    = market.get("mid_price")
     ticker = market.get("ticker", "")
     title  = market.get("title", "")[:140]
     close  = market.get("close_time") or market.get("expiration_time", "")
     price_str = f"{mid * 100:.1f}%" if mid is not None else "unknown"
 
+    # Compute time horizon note for Claude context
+    horizon_note = ""
+    try:
+        close_dt = datetime.fromisoformat(close.replace("Z", "+00:00"))
+        days = (close_dt - datetime.now(timezone.utc)).days
+        if days <= 0:
+            horizon_note = "closes today — weight breaking news and current momentum only"
+        elif days <= 7:
+            horizon_note = "closes within 7 days — near-term catalysts most relevant"
+        elif days <= 30:
+            horizon_note = "closes within 30 days — balance recent news with base rates"
+        elif days <= 90:
+            horizon_note = "closes within 90 days — fundamentals and structural factors carry more weight"
+        else:
+            horizon_note = "closes 90+ days out — base rates and long-run trends dominate"
+    except Exception:
+        pass
+
     return (
         f"Research this Kalshi prediction market and estimate the probability of YES.\n\n"
         f"Ticker:         {ticker}\n"
         f"Title:          {title}\n"
         f"Market price:   {price_str}  (YES)\n"
-        f"Closes:         {close}\n\n"
-        f"{PROBE_SCHEMA}"
+        f"Closes:         {close}\n"
+        + (f"Time context:   {horizon_note}\n" if horizon_note else "") +
+        f"\n{PROBE_SCHEMA}"
     )
 
 
