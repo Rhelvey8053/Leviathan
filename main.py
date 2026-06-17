@@ -65,12 +65,13 @@ def main():
         "runtime_ms":        0,
     }
 
-    all_markets    = []
-    flagged_markets = []
-    whale_results  = {}
-    final_signals  = []
-    whale_only     = []
-    token_info     = {"input_tokens": 0, "output_tokens": 0}
+    all_markets       = []
+    flagged_markets   = []
+    unflagged_markets = []
+    whale_results     = {}
+    final_signals     = []
+    whale_only        = []
+    token_info        = {"input_tokens": 0, "output_tokens": 0}
 
     # Step 1 — Authenticate
     print("[1/8] Authenticating with Kalshi...")
@@ -170,6 +171,8 @@ def main():
             print(f"      Watchlist override: {len(wl_unflagged)} market(s) force-flagged by smart money signal")
         print(f"      {len(filtered)} markets passed filter (from {len(all_markets)})")
         print(f"      {len(flagged_markets)} markets flagged for edge")
+        # Collect unflagged pool for cross-market promotion in step 4
+        unflagged_markets = [m for m in scored_markets if not m.get("flag")]
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
@@ -180,13 +183,44 @@ def main():
     print("[4/8] Cross-referencing with Polymarket...")
     poly_data = {}
     try:
-        if flagged_markets and config.get("polymarket", {}).get("enabled", True):
-            poly_data = polymarket.enrich_flagged(flagged_markets, config)
-            matched   = sum(1 for v in poly_data.values() if v.get("price_gap") is not None)
-            gaps      = [v for v in poly_data.values() if v.get("price_gap") and abs(v["price_gap"]) >= 0.05]
-            print(f"      {matched} Polymarket matches found, {len(gaps)} with gap ≥5%")
+        if config.get("polymarket", {}).get("enabled", True):
+            poly_index = polymarket.fetch_and_build_index(config)
+
+            if flagged_markets:
+                poly_data = polymarket.match_markets(flagged_markets, poly_index, config)
+                matched   = sum(1 for v in poly_data.values() if v.get("price_gap") is not None)
+                gaps      = [v for v in poly_data.values() if v.get("price_gap") and abs(v["price_gap"]) >= 0.05]
+                print(f"      {matched} Polymarket matches found, {len(gaps)} with gap ≥5%")
+
+            # Cross-market promotion: unflagged markets with large Polymarket divergence
+            poly_cfg    = config.get("polymarket", {})
+            cross_on    = poly_cfg.get("cross_market_promote", True)
+            cross_gap   = poly_cfg.get("cross_market_min_gap", 0.15)
+            cross_max   = poly_cfg.get("cross_market_max_candidates", 50)
+            if cross_on and unflagged_markets and poly_index:
+                candidates = sorted(
+                    unflagged_markets,
+                    key=lambda m: -float(m.get("volume_fp") or m.get("volume") or 0),
+                )[:cross_max]
+                cross_matches = polymarket.match_markets(
+                    candidates, poly_index, config, min_gap=cross_gap
+                )
+                n_promoted = 0
+                for m in candidates:
+                    ticker = m.get("ticker", "")
+                    if ticker in cross_matches:
+                        cd             = cross_matches[ticker]
+                        m["flag"]      = True
+                        m["flag_path"] = "CROSS_MARKET"
+                        m["poly"]      = cd
+                        flagged_markets.append(m)
+                        poly_data[ticker] = cd
+                        n_promoted += 1
+                if n_promoted:
+                    print(f"      Cross-market: {n_promoted} unflagged market(s) promoted "
+                          f"(Polymarket gap ≥{cross_gap:.0%})")
         else:
-            print("      Skipped (disabled or no flagged markets)")
+            print("      Skipped (disabled)")
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
