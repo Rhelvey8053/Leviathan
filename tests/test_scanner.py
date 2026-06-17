@@ -1055,6 +1055,31 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # False positive guard — "Nobel" in unrelated context
     # "Nobel conference" → no match (our patterns require "nobel prize"/"win the nobel"/"nobel laureate")
     ("Will the Nobel conference attract more attendees in 2026?", None),  # no heuristic
+    # Political withdrawal (handles year insertion)
+    ("Will Biden withdraw from the 2024 race before September?", 0.30),
+    ("Will DeSantis suspend his campaign before the Iowa caucus?", 0.30),
+    ("Will the candidate drop out of the Democratic primary?", 0.30),
+    # Special election
+    ("Will there be a special election in Georgia before June 2026?", 0.45),
+    ("Will Congress call a special senate election to fill the vacancy?", 0.45),
+    # Constitutional amendment — very hard to pass
+    ("Will there be a constitutional amendment to abolish the Electoral College?", 0.05),
+    ("Will the Equal Rights Amendment be ratified in 2026?", 0.05),
+    # Ballot disqualification (handles year insertion)
+    ("Will Trump be disqualified from the 2024 ballot?", 0.20),
+    ("Will the candidate be kicked off the ballot by court order?", 0.20),
+    # Divestiture / forced sale
+    ("Will TikTok be sold by the deadline?", 0.35),
+    ("Will the company be forced to divest its media division?", 0.35),
+    # Stock split
+    ("Will Apple announce a stock split before year end?", 0.20),
+    ("Will Nvidia split its stock in 2026?", 0.20),
+    # FDA base form (missing 's')
+    ("Will the FDA approve semaglutide for weight loss in 2026?", 0.40),
+    # Moon landing — China case
+    ("Will China land astronauts on the Moon before 2028?", 0.30),
+    # COVID variant
+    ("Will a new COVID variant be declared a variant of concern in 2026?", 0.30),
     # Pulitzer Prize — small finalists field, single annual winner → ~10%
     ("Will Bob Woodward win the Pulitzer Prize in 2026?", 0.10),
     ("Will the newspaper win a Pulitzer for its investigative series?", 0.10),
