@@ -118,7 +118,15 @@ PROBE_SYSTEM = (
     "16. REELECTION MARKETS ('Will X win re-election?'): Treat like general election "
     "markets. Incumbents have a modest structural advantage (~52%), but current polling "
     "and economic conditions dominate near the election. Only HIGH confidence if dated "
-    "polling average shows >5pp sustained lead in likely-voter models within 30 days."
+    "polling average shows >5pp sustained lead in likely-voter models within 30 days.\n"
+    "17. CORPORATE LEADERSHIP MARKETS ('Will X become CEO/CFO/Chair of Y?'): Base rate "
+    "~35% for any specific appointment window. 'Board considering', 'rumored front-runner', "
+    "'headhunters hired', or 'activist pressure' are standard pre-steps that often don't "
+    "materialize. Only a confirmed board announcement or SEC 8-K filing is strong evidence.\n"
+    "18. UN SECURITY COUNCIL MARKETS ('Will the UNSC pass a resolution on X?'): Base "
+    "rate ~15% due to Chinese/Russian veto risk. 'Western support' or 'draft circulating' "
+    "is NOT evidence — Russia and China veto dozens of such drafts. Only a non-contested "
+    "procedural vote or documented unanimous agreement justifies >30%."
 )
 
 PROBE_SCHEMA = """
