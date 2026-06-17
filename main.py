@@ -418,7 +418,8 @@ def main():
         try:
             week_sigs = logger.get_week_signals(days=7)
             if week_sigs:
-                weekly_body = report.compile_weekly_digest(week_sigs, logger.get_stats(), config)
+                weekly_body = report.compile_weekly_digest(week_sigs, logger.get_stats(), config,
+                                                          flag_path_stats=logger.get_stats_by_flag_path())
                 report.send_report(weekly_body, [], 0, config,
                                    subject_override=f"Leviathan Weekly — {now_local.strftime('%b %d, %Y')}")
                 print("      Weekly digest sent")
@@ -440,14 +441,16 @@ def main():
     # Step 8 — Compile and email report
     print("[8/8] Sending report...")
     try:
-        stats       = logger.get_stats()
-        probe_stats = logger.get_stats_probe()
+        stats            = logger.get_stats()
+        probe_stats      = logger.get_stats_probe()
+        flag_path_stats  = logger.get_stats_by_flag_path()
         body  = report.compile_report(final_signals, whale_only, stats, run_meta, config,
                                       all_filtered=filtered,
                                       new_signals=new_signals,
                                       repeat_signals=repeat_signals,
                                       smart_money_result=smart_money_result,
-                                      probe_stats=probe_stats)
+                                      probe_stats=probe_stats,
+                                      flag_path_stats=flag_path_stats)
         report.send_report(body, final_signals, run_meta["whale_flags"], config)
     except Exception as e:
         print(f"      FAILED: {e}")
@@ -456,7 +459,8 @@ def main():
         try:
             body = report.compile_report(final_signals, whale_only, logger.get_stats(), run_meta, config,
                                          smart_money_result=smart_money_result,
-                                         probe_stats=logger.get_stats_probe())
+                                         probe_stats=logger.get_stats_probe(),
+                                         flag_path_stats=logger.get_stats_by_flag_path())
             print(body)
         except Exception:
             pass
