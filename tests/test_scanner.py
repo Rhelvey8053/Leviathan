@@ -893,6 +893,14 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Geopolitical
     ("Will US recognize Palestinian statehood before 2027?", 0.30),
     ("Will Saudi Arabia normalize relations with Israel?", 0.30),
+    # IPO announcement timing markets
+    ("When will Canva officially announce an IPO?", 0.25),
+    ("When will Fannie Mae officially announce an IPO?", 0.25),
+    ("When will Stripe going public be confirmed?", 0.25),
+    # Sports debut markets
+    ("Will Kade Anderson play in a game for any team in the MLB before Nov 1?", 0.35),
+    ("Will Scott Walcott play in a game for any MLB team before November 1?", 0.35),
+    ("Will the prospect make his MLB debut before August?", 0.35),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
