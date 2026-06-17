@@ -14,7 +14,7 @@ Prediction market intelligence system for Kalshi. Scans thousands of open market
 | **Smart money** | Tracks 20 top Polymarket traders by monthly PnL; cross-references their open positions to Kalshi markets by title similarity |
 | **Whale detection** | Flags unusually large trades and order-book imbalances |
 | **Cross-reference** | Prices the same question on Polymarket, Manifold, Metaculus, PredictIt, and The Odds API |
-| **Score** | Sends flagged markets to Claude (via Pro CLI — no API billing) with web search enabled |
+| **Score** | Sends flagged markets to Claude (via Pro CLI — no API billing) with web search; 11 calibration rules anchor estimates to base rates and cross-market evidence |
 | **Report** | Emails a plain-text daily report; tracks win rate and P&L over time |
 | **Research probe** | Stratified-sample experiment: Claude+websearch estimates probability on 10 markets per run, including markets the main filter rejects, to test for edge outside the funnel |
 
@@ -188,7 +188,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-347 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+380 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|
