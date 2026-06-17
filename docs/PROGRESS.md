@@ -2,6 +2,47 @@
 
 ---
 
+## Session 6 — 2026-06-17
+
+### Signal coverage: flagged market count 9 → 15
+
+Added new heuristic base rates and fixed several stale-threshold bugs across analysis scripts.
+
+**`scanner.py` — new base rate patterns:**
+- Cabinet departure: `"member of trump's cabinet"`, `"leave the cabinet"`, etc. → 0.65 (high historical turnover)
+- Congressional control: `"control the senate"`, `"senate majority"`, `"flip the house"`, etc. → 0.50 (election cycle coin-flip)
+
+**`analysis/filter_stats.py` — diagnostic improvements:**
+- Added `--snapshot` flag: reads from `data/snapshots/` instead of live API (~3s vs ~90s)
+- Added prompt-time signal counts: `vol_spike` (24h vol ≥20% of total) and `price_jump` (last vs prev ≥20%)
+- Fixed drop-reason price calculation to use two-sided bid/ask logic (same as scanner.py)
+
+**`report.py` + `main.py` — flag path surfacing:**
+- Signal block header now shows `[HEURISTIC]` / `[DRIFT]` tag so recipients know why a market was flagged
+- Fired signals list adds `"Heuristic Base Rate XX%"` when flag_path=HEURISTIC
+- `main.py` passes `base_rate` through to the signal dict
+
+**`analysis/drift_diagnosis.py` — correctness fixes:**
+- Applied two-sided bid/ask fix (bid>0 AND ask>0) to mid-price calculation; was generating spurious drift for one-sided markets
+- Part B `drift?` column and Part C baseline now read `drift_min_abs`/`drift_min_pct` from config instead of hardcoded 0.0/5%
+
+**New tests:** `tests/test_report.py` (8 tests) + 7 new parametrized base rate cases in `test_scanner.py` → 339 total (was 324).
+
+### Git commits this session
+
+1. `e625a1c` — Cabinet/senate base rates, filter_stats --snapshot, vol/price signals
+2. `0b05818` — flag_path in report header, heuristic base rate in signals, test_report
+3. `d08e304` — drift_diagnosis uses config thresholds and two-sided bid/ask fix
+
+### Open items (carried forward)
+
+1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01`) settles 2026-07-08 — run `resolve_outcomes` after that date.
+2. **Flag_path outcome data** — 0 resolved paper signals. Once 10+ markets resolve, `get_stats_by_flag_path()` shows signal path win rates.
+3. **KXMLBDEBUT-KANDERSON**: bid=0.55, ask=0.99, mid=0.77 — unusual 44-cent spread worth monitoring.
+4. **AGI market** (`KXAGICO-COMP-26Q3`): 1 unflagged market at 6.5%, no base rate, no drift. Correctly no signal.
+
+---
+
 ## Session 5 — 2026-06-17
 
 ### Watchlist pipeline direction enrichment
