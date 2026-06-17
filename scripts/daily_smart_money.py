@@ -14,6 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from analysis.smart_money_scan import load_config, run_smart_money_scan, save_report
+from analysis.snapshot_markets import fetch_snapshot, save_snapshot
 
 
 def git(args: list[str]) -> tuple[int, str]:
@@ -24,7 +25,18 @@ def git(args: list[str]) -> tuple[int, str]:
 def main():
     print(f"\n[daily_smart_money] {datetime.now(timezone.utc).isoformat()}")
 
-    cfg    = load_config()
+    cfg = load_config()
+
+    # Refresh Kalshi snapshot so cross-reference uses fresh market titles
+    try:
+        import kalshi as _kalshi
+        _kalshi.authenticate(cfg)
+        markets, event_count = fetch_snapshot(cfg)
+        snap_path = save_snapshot(markets, event_count, cfg)
+        print(f"  Snapshot refreshed: {len(markets)} markets → {snap_path}")
+    except Exception as e:
+        print(f"  [warn] Snapshot refresh failed: {e} — using cached snapshot")
+
     result = run_smart_money_scan(cfg, force_refresh=True)
     path   = save_report(result)
     print(f"Report saved: {path}")
