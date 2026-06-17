@@ -369,3 +369,190 @@ def test_weekly_digest_ticker_appears_in_markets_table():
     signals = [_week_row("KXUNIQUE-TEST")]
     digest = report.compile_weekly_digest(signals, _stats(), {})
     assert "KXUNIQUE-TEST" in digest
+
+
+# ─── compile_report ───────────────────────────────────────────────────────────
+
+def _run_meta(**kwargs):
+    base = {
+        "run_id":            "test-run-1",
+        "timestamp":         "2026-06-17T10:00:00Z",
+        "markets_scanned":   300,
+        "signals_generated": 2,
+        "whale_flags":       0,
+        "model_used":        "claude-sonnet-4-6",
+        "tokens_used":       8000,
+        "cost_usd":          0.0,
+        "runtime_ms":        45000,
+    }
+    base.update(kwargs)
+    return base
+
+
+def _sig(ticker="KXTST-01", direction="YES", confidence="MED", edge=0.15,
+         time_horizon="MONTHLY", market_price=0.30, our_estimate=0.45,
+         second_pass=False, **kwargs):
+    base = {
+        "ticker":          ticker,
+        "title":           f"Will {ticker} happen?",
+        "direction":       direction,
+        "confidence":      confidence,
+        "edge":            edge,
+        "time_horizon":    time_horizon,
+        "market_price":    market_price,
+        "our_estimate":    our_estimate,
+        "second_pass":     second_pass,
+        "flag_path":       None,
+        "drift_flag":      False,
+        "spread_wide":     False,
+        "ob_flag":         False,
+        "watchlist_signal": False,
+        "whale_reversal":  False,
+        "smart_money":     [],
+        "poly":            None,
+        "ext_markets":     [],
+        "ext_consensus":   {},
+        "base_rate":       None,
+    }
+    base.update(kwargs)
+    return base
+
+
+_EMPTY_STATS = {"total_calls": 0, "resolved": 0, "win_rate": None,
+                "avg_edge_captured": None, "total_hypothetical_pnl": None}
+_CFG = {"scoring": {"confidence_threshold": "MED"}, "environment": "demo"}
+
+
+def test_compile_report_header_present():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "LEVIATHAN" in body
+    assert "INTELLIGENCE REPORT" in body
+
+
+def test_compile_report_no_signals_shows_placeholder():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "No new signals this run" in body
+
+
+def test_compile_report_signal_appears_in_new_signals():
+    s = _sig(ticker="KXNEW-01", confidence="MED")
+    body = report.compile_report(
+        [s], [],
+        _EMPTY_STATS, _run_meta(),
+        _CFG,
+        new_signals=[s], repeat_signals=[],
+    )
+    assert "KXNEW-01" in body
+    assert "NEW SIGNALS" in body
+
+
+def test_compile_report_repeat_signals_section():
+    s = _sig(ticker="KXREPEAT-01", confidence="MED")
+    body = report.compile_report(
+        [s], [],
+        _EMPTY_STATS, _run_meta(),
+        _CFG,
+        new_signals=[], repeat_signals=[s],
+    )
+    assert "REPEAT SIGNALS" in body
+    assert "KXREPEAT-01" in body
+
+
+def test_compile_report_whale_activity_empty():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "WHALE ACTIVITY" in body
+    assert "No unusual whale activity" in body
+
+
+def test_compile_report_whale_activity_listed():
+    whale = {
+        "ticker": "KXWHALE", "title": "Whale Market",
+        "whale_direction": "YES", "max_trade_size": 3000, "avg_trade_size": 600.0,
+    }
+    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "KXWHALE" in body
+    assert "YES" in body
+
+
+def test_compile_report_track_record_section():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "TRACK RECORD" in body
+    assert "Total Calls" in body
+    assert "Win Rate" in body
+
+
+def test_compile_report_no_resolved_win_rate_placeholder():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "no resolved markets yet" in body.lower()
+
+
+def test_compile_report_with_win_rate():
+    stats = {**_EMPTY_STATS, "total_calls": 10, "resolved": 5,
+             "win_rate": 60.0, "avg_edge_captured": 0.12, "total_hypothetical_pnl": 0.95}
+    body = report.compile_report([], [], stats, _run_meta(), _CFG)
+    assert "60.0%" in body
+
+
+def test_compile_report_probe_stats_section():
+    probe_stats = {
+        "total_probes": 10, "resolved": 5, "hit_rate": 60.0,
+        "hi_div_total": 3, "hi_div_hit_rate": 66.7,
+        "verdict": "PARTIAL — 5/10 probes resolved. Full verdict pending.",
+    }
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  probe_stats=probe_stats)
+    assert "Research Probe" in body
+    assert "60.0%" in body
+
+
+def test_compile_report_probe_stats_absent_when_none():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  probe_stats=None)
+    assert "Research Probe" not in body
+
+
+def test_compile_report_flag_path_stats_section():
+    fp_stats = [
+        {"flag_path": "EDGE", "total": 4, "wins": 3, "win_rate": 75.0, "total_pnl": 1.20},
+    ]
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  flag_path_stats=fp_stats)
+    assert "Win Rate by Signal Path" in body
+    assert "EDGE" in body
+
+
+def test_compile_report_short_term_watchlist_section():
+    intraday_mkt = {
+        "ticker": "KXINTRA", "title": "Intraday special market",
+        "time_horizon": "INTRADAY",
+        "volume_fp": "5000",
+        "yes_bid_dollars": "0.45", "yes_ask_dollars": "0.47",
+        "drift_flag": False, "spread_wide": False,
+    }
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  all_filtered=[intraday_mkt])
+    assert "SHORT-TERM WATCHLIST" in body
+    # The table renders title (truncated to 28 chars), not ticker
+    assert "Intraday special market" in body or "1 market(s)" in body
+
+
+def test_compile_report_run_statistics_section():
+    body = report.compile_report([], [], _EMPTY_STATS,
+                                  _run_meta(markets_scanned=450), _CFG)
+    assert "RUN STATISTICS" in body
+    assert "450" in body
+
+
+def test_compile_report_signals_grouped_by_horizon():
+    """Signals with different horizons appear under their horizon label."""
+    monthly = _sig(ticker="KXMONTH", time_horizon="MONTHLY", confidence="MED")
+    weekly  = _sig(ticker="KXWEEK",  time_horizon="WEEKLY",  confidence="MED")
+    body = report.compile_report(
+        [monthly, weekly], [],
+        _EMPTY_STATS, _run_meta(), _CFG,
+        new_signals=[monthly, weekly], repeat_signals=[],
+    )
+    assert "Monthly" in body
+    assert "Weekly"  in body
+    assert "KXMONTH" in body
+    assert "KXWEEK"  in body
