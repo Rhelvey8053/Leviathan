@@ -167,6 +167,47 @@ def test_flag_reason_absent_when_no_path():
     assert "FLAG REASON" not in prompt
 
 
+# ─── DRIFT / HEURISTIC conflict warning ──────────────────────────────────────
+
+def test_signal_conflict_shown_when_drift_and_base_rate_disagree():
+    # mid=0.77, last price implied: drift_pct is negative means mid < last → drift says YES
+    # base_rate=0.35 < mid=0.77 → base rate says NO → CONFLICT
+    m = _base_market(drift_flag=True, price_drift=-0.08, mid_price=0.77, base_rate=0.35)
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL CONFLICT" in prompt
+    assert "YES" in prompt
+    assert "NO" in prompt
+    assert "35%" in prompt
+
+
+def test_signal_conflict_shows_correct_direction_for_upward_drift():
+    # drift_pct positive means mid > last → drift says NO (mean revert down)
+    # base_rate=0.80 > mid=0.25 → base rate says YES → CONFLICT
+    m = _base_market(drift_flag=True, price_drift=0.10, mid_price=0.25, base_rate=0.80)
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL CONFLICT" in prompt
+
+
+def test_no_conflict_when_drift_and_base_rate_agree():
+    # drift_pct negative → drift says YES (mean revert up)
+    # base_rate=0.80 > mid=0.20 → base rate also says YES → NO CONFLICT
+    m = _base_market(drift_flag=True, price_drift=-0.05, mid_price=0.20, base_rate=0.80)
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL CONFLICT" not in prompt
+
+
+def test_no_conflict_when_base_rate_absent():
+    m = _base_market(drift_flag=True, price_drift=-0.08, mid_price=0.77)
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL CONFLICT" not in prompt
+
+
+def test_no_conflict_when_drift_flag_false():
+    m = _base_market(drift_flag=False, mid_price=0.77, base_rate=0.35)
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL CONFLICT" not in prompt
+
+
 def test_empty_markets_returns_empty_prompt():
     prompt = scorer.build_prompt([])
     # Should not crash, just return the header

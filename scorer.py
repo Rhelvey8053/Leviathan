@@ -149,6 +149,19 @@ def build_prompt(markets: list[dict]) -> str:
                 f"   DRIFT SIGNAL: Order-book mid is {abs(drift_pct):.1f}% "
                 f"{'above' if drift_pct > 0 else 'below'} last traded price — mean reversion candidate."
             )
+            br = m.get("base_rate")
+            if br is not None and mid_price is not None:
+                drift_says_up   = drift_pct < 0   # mid < last → mean revert up → buy YES
+                heuristic_says_up = br > mid_price  # base_rate > mid → YES is underpriced → buy YES
+                if drift_says_up != heuristic_says_up:
+                    drift_call     = "YES" if drift_says_up     else "NO"
+                    heuristic_call = "YES" if heuristic_says_up else "NO"
+                    lines.append(
+                        f"   SIGNAL CONFLICT: DRIFT suggests {drift_call} (mean revert) but "
+                        f"BASE RATE ({br*100:.0f}%) suggests {heuristic_call}. "
+                        f"Weight the base rate over drift for fundamental mispricing; "
+                        f"use drift only as a secondary timing cue."
+                    )
 
         if m.get("spread_wide"):
             lines.append(
