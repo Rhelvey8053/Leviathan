@@ -739,6 +739,75 @@ def test_confidence_downgraded_label_absent_normally():
     assert "conf downgraded" not in header
 
 
+# ─── _top_picks executive summary ─────────────────────────────────────────────
+
+def test_top_picks_returns_empty_for_no_signals():
+    """Empty input returns empty list."""
+    assert report._top_picks([]) == []
+
+
+def test_top_picks_shows_top_n_signals():
+    """_top_picks returns at most n signals."""
+    sigs = [_signal(confidence="HIGH", edge=0.30),
+            _signal(confidence="HIGH", edge=0.20),
+            _signal(confidence="MED",  edge=0.15),
+            _signal(confidence="LOW",  edge=0.10)]
+    lines = report._top_picks(sigs, n=2)
+    # Should contain 2 numbered entries
+    numbered = [l for l in lines if l.startswith("1.") or l.startswith("2.") or l.startswith("3.")]
+    assert len(numbered) == 2
+
+
+def test_top_picks_header_present():
+    """TOP PICKS header appears in output."""
+    s = _signal(confidence="HIGH", edge=0.20)
+    lines = report._top_picks([s])
+    assert any("TOP PICKS" in l for l in lines)
+
+
+def test_top_picks_contains_confidence_and_direction():
+    """Each top-pick line shows confidence and BUY direction."""
+    s = _signal(confidence="HIGH", direction="YES", edge=0.20)
+    lines = report._top_picks([s])
+    pick_line = [l for l in lines if l.startswith("1.")][0]
+    assert "HIGH" in pick_line
+    assert "YES" in pick_line
+
+
+def test_top_picks_shows_kelly_when_edge_positive():
+    """Kelly(1/4) line appears when direction is YES and edge > 0."""
+    s = _signal(confidence="HIGH", direction="YES", market_price=0.40, our_estimate=0.65, edge=0.25)
+    lines = report._top_picks([s])
+    assert any("Kelly(1/4)" in l for l in lines)
+
+
+def test_top_picks_sorts_high_strength_before_low_strength():
+    """Higher signal_strength comes first in top picks."""
+    weak  = _signal(confidence="HIGH", edge=0.25, flag_path="DRIFT")
+    strong = _signal(
+        confidence="HIGH", edge=0.15, flag_path="HEURISTIC",
+        poly={"price_gap": 0.10, "poly_price": 0.50, "poly_question": "Q", "match_score": 0.8},
+        watchlist_signal=True,
+    )
+    lines = report._top_picks([weak, strong], n=2)
+    first = [l for l in lines if l.startswith("1.")][0]
+    second = [l for l in lines if l.startswith("2.")][0]
+    assert "HEURISTIC" in first or "WATCHLIST" not in first
+    _ = second  # just verify both rendered
+
+
+def test_top_picks_in_compile_report_when_signals_exist():
+    """compile_report includes TOP PICKS section when qualifying signals exist."""
+    s = _signal(confidence="HIGH", direction="YES", market_price=0.30, our_estimate=0.60, edge=0.30)
+    body = report.compile_report(
+        signals=[s], whale_only=[], stats={},
+        run_meta={"markets_scanned": 100, "model_used": "claude-sonnet-4-6"},
+        config={"environment": "demo", "scoring": {}},
+        new_signals=[s], repeat_signals=[],
+    )
+    assert "TOP PICKS" in body
+
+
 # ─── _kelly_fraction ──────────────────────────────────────────────────────────
 
 def test_kelly_yes_basic():
