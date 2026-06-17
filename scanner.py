@@ -275,6 +275,14 @@ def estimate_base_rate(market: dict) -> float | None:
           "nato accession"], 0.35),
         (["join the eu", "eu membership", "eu accession",
           "european union membership"], 0.25),
+        # Common/shared currency adoption — extremely rare monetary policy change → ~10%
+        (["common currency", "shared currency", "unified currency",
+          "adopt a currency", "currency union", "monetary union",
+          "replace the dollar", "replace the euro", "petrodollar"], 0.10),
+        # Economic performance comparisons — near 50/50 for "outperform/underperform" questions
+        (["outperform", "underperform", "outgrow", "grow faster than",
+          "perform better than", "exceed average", "below average growth",
+          "economic performance"], 0.50),
         # UN Security Council resolution — China/Russia veto risk keeps rate low
         (["un security council", "united nations security council",
           "security council resolution", "security council vote",
@@ -395,6 +403,10 @@ def estimate_base_rate(market: dict) -> float | None:
         (["hurricane", "tropical storm", "tropical cyclone",
           "category 4", "category 5"], 0.45),
         (["earthquake", "magnitude"], 0.30),
+        # Volcanic eruption — major eruptions are rare; supervolcano (Yellowstone) even rarer → ~5%
+        (["volcanic eruption", "volcano erupts", "eruption of",
+          "yellowstone", "supervolcano", "volcanic event",
+          "lava flow", "pyroclastic"], 0.05),
         # Wildfires — specific acreage or destruction thresholds are uncertain → ~35%
         (["wildfire", "wildfires", "wildfire burns", "wildfire destroys",
           "acres burned", "acres scorched", "million acres burned",
@@ -496,8 +508,9 @@ def estimate_base_rate(market: dict) -> float | None:
         (["make his mlb debut", "make her mlb debut",
           "play in a game for", "called up", "nhl debut",
           "nba debut", "make his debut", "make her debut"], 0.35),
-        (["merger", "acquisition", "acquired by", "take private",
-          "buyout", "takeover"], 0.35),
+        (["merger", "acquisition", "acquired by", "be acquired",
+          "get acquired", "was acquired", "take private",
+          "buyout", "takeover", "be taken over", "be bought out"], 0.35),
         # Divestiture / forced sale — regulatory or activist-driven → ~35%
         # Placed separately from "merger" to catch "sold by" / "forced to sell" framing
         (["be sold by", "forced to sell", "forced sale", "divest",
@@ -506,7 +519,46 @@ def estimate_base_rate(market: dict) -> float | None:
         # Stock split — corporate event, relatively rare in any given 3-6 month window → ~20%
         (["stock split", "share split", "reverse stock split",
           "forward stock split", "split its stock", "announce a split"], 0.20),
-        (["bankruptcy", "file for bankruptcy", "goes bankrupt"], 0.15),
+        (["bankruptcy", "file for bankruptcy", "goes bankrupt",
+          "go bankrupt", "declare bankruptcy", "seek bankruptcy"], 0.15),
+        # Bank failure / financial crisis — systemic bank failures are rare → ~15%
+        (["bank failure", "bank collapse", "banking crisis",
+          "bank run", "bank bailout", "bank insolvency",
+          "financial institution fail", "savings and loan"], 0.15),
+        # Gun control / firearms legislation — rare Congressional action → ~20%
+        (["gun control", "gun legislation", "firearms legislation",
+          "assault weapons ban", "red flag law", "background check legislation",
+          "firearms restriction", "gun safety legislation",
+          "ban assault weapons", "gun law", "gun reform"], 0.20),
+        # Currency / exchange rate markets — threshold questions → ~40%
+        # Placed BEFORE tech/regulation block and generic price blocks
+        (["exchange rate", "currency exchange", "depreciate", "depreciation",
+          "appreciate against", "appreciate versus", "currency falls",
+          "peso depreciate", "euro falls", "yen depreciate",
+          "dollar strengthen", "dollar weaken", "dollar index"], 0.40),
+        # Company valuation / market cap — similar to price-level markets (~35%)
+        # Covers "Will X be valued above $50B?" style questions without a bare $
+        (["be valued at", "be valued above", "valued above", "be worth",
+          "worth more than", "market cap above", "market cap exceed",
+          "market cap of", "valuation of", "valuation above",
+          "valued at $", "valuation at $"], 0.35),
+        # Tech competition / market position — new product vs incumbent → ~35%
+        (["surpass github", "surpass google", "surpass microsoft",
+          "surpass apple", "surpass amazon", "surpass meta",
+          "market share above", "market share exceed",
+          "beat google", "beat microsoft", "beat apple"], 0.35),
+        # Social media age restriction / digital regulation — growing likelihood → ~30%
+        (["age restriction", "age verification", "age limit for social media",
+          "restrict social media", "restricted for minors", "restricted to minors",
+          "social media age", "minors on social media",
+          "age gate", "online age verification", "social media for minors",
+          "ban for minors", "minors from social media"], 0.30),
+        # Corporate leadership retention — "Will X remain CEO?" (~65%)
+        # Contrast: fired/dismissed at 0.25 means staying is more likely
+        (["remain ceo", "remain as ceo", "stay as ceo", "continue as ceo",
+          "keep his job as", "keep her job as", "retain his position",
+          "retain her position", "remain in office", "remain in power",
+          "stay in power", "stay in office", "stay on as"], 0.65),
         # Tech / social media regulation — low base rate (regulation takes years)
         (["tiktok ban", "ban tiktok", "tiktok be banned", "ban on tiktok",
           "social media ban", "tech ban", "platform ban",
