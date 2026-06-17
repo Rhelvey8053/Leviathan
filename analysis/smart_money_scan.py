@@ -52,9 +52,60 @@ def _load_cache() -> dict:
     return json.load(open(CACHE_PATH, encoding="utf-8")).get("data", {})
 
 
+_BINARY_OUTCOMES = frozenset({"yes", "no"})
+
+_SPORTS_OUTCOME_PATTERNS = frozenset({
+    "over", "under", "draw", "spread", "o/u", "push", "tie",
+})
+
+# Substrings that identify a sports-game title (soccer win bets, match results, competitions)
+_SPORTS_TITLE_PATTERNS = (
+    " vs. ", " vs ",
+    "end in a draw",
+    "win on 202",      # dated soccer win bet e.g. "Will Germany win on 2026-06-25?"
+    "1st half", "2nd half",
+    " o/u ",
+    "spread:",
+    "over/under",
+    # Major sports competitions — world cup winner bets don't cross-reference to Kalshi political markets
+    "world cup", "fifa", "champions league",
+    "super bowl", "stanley cup", "world series",
+    " nfl ", " nba ", " mlb ", " nhl ", " mls ",
+    "olympic", "wimbledon",
+)
+
+
+def _is_binary_position(p: dict) -> bool:
+    """
+    Return True only for YES/NO binary outcome positions.
+    Excludes sports spreads, over/unders, team-name outcomes, etc.
+    These non-binary positions create noise in Kalshi cross-referencing.
+    """
+    outcome = (p.get("outcome") or "").lower().strip()
+    if outcome in _BINARY_OUTCOMES:
+        return True
+    # Reject if outcome is obviously a sports result
+    if any(pat in outcome for pat in _SPORTS_OUTCOME_PATTERNS):
+        return False
+    # Reject multi-word team-name outcomes like "Washington Nationals"
+    # or score lines like "Algeria (-1.5)" by checking for digits / parens
+    if any(c.isdigit() for c in outcome):
+        return False
+    # Short single-word outcomes that aren't yes/no are usually team names — skip
+    if len(outcome.split()) <= 2 and outcome not in _BINARY_OUTCOMES:
+        return False
+    return False  # default: exclude anything non-binary
+
+
+def _is_sports_title(title: str) -> bool:
+    """Return True if the market title looks like a sports game bet (not a political/macro event)."""
+    t = title.lower()
+    return any(pat in t for pat in _SPORTS_TITLE_PATTERNS)
+
+
 def fetch_watchlist_positions(config: dict, force: bool = False) -> dict[str, list[dict]]:
     """
-    Returns {trader_name: [open_position, ...]} for each watchlist entry.
+    Returns {trader_name: {address, monthly_pnl, positions}} for each watchlist entry.
     Uses a short TTL cache (default 4h) to avoid hammering the API.
     """
     cfg     = config.get("accounts", {})
@@ -100,22 +151,50 @@ def _load_kalshi_titles() -> dict[str, str]:
         return {}
 
 
+_STOP = frozenset({
+    "will", "the", "a", "an", "in", "on", "of", "to", "by", "vs", "vs.",
+    "at", "for", "and", "or", "is", "be", "win", "does", "that", "this",
+    "before", "after", "from", "with", "its", "their", "have", "has",
+    "any", "all", "are", "were", "been", "not", "no", "yes", "2026",
+    "2027", "2028", "2029", "2030",
+})
+
+
+def _normalize(title: str) -> set[str]:
+    import re
+    words = re.sub(r"[^a-z0-9\s]", "", title.lower()).split()
+    return {w for w in words if w not in _STOP and len(w) > 2}
+
+
 def _match_to_kalshi(pos_title: str, kalshi_titles: dict[str, str],
-                     min_score: float = 0.35) -> list[tuple[str, float]]:
-    """Simple keyword overlap score between a Polymarket title and Kalshi titles."""
-    words = set(pos_title.lower().split())
-    stop  = {"will", "the", "a", "an", "in", "on", "of", "to", "by", "vs",
-              "vs.", "at", "for", "and", "or", "is", "be", "win", "does"}
-    words -= stop
-    if not words:
+                     min_score: float = 0.30) -> list[tuple[str, float]]:
+    """
+    Combined Jaccard word-overlap + SequenceMatcher score.
+    Matches Polymarket position title against all Kalshi market titles.
+    Returns up to 3 matches above min_score, sorted by score desc.
+    """
+    from difflib import SequenceMatcher
+
+    poly_words = _normalize(pos_title)
+    if not poly_words:
         return []
 
     matches = []
     for ticker, title in kalshi_titles.items():
-        kwords  = set(title.lower().split()) - stop
-        overlap = len(words & kwords) / max(len(words | kwords), 1)
-        if overlap >= min_score:
-            matches.append((ticker, round(overlap, 3)))
+        kalshi_words = _normalize(title)
+        if not kalshi_words:
+            continue
+        common = poly_words & kalshi_words
+        # Require at least 2 shared keywords — prevents single-word or character-similarity false positives
+        if len(common) < 2:
+            continue
+        union   = poly_words | kalshi_words
+        jaccard = len(common) / len(union) if union else 0.0
+        seq     = SequenceMatcher(None, pos_title.lower(), title.lower()).ratio()
+        score   = max(jaccard, seq * 0.85)
+        if score >= min_score:
+            matches.append((ticker, round(score, 3)))
+
     matches.sort(key=lambda x: -x[1])
     return matches[:3]
 
@@ -156,7 +235,10 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
             pct_pnl = float(p.get("percentPnl") or 0)
             pnl_str = f"{pct_pnl:+.1f}%"
 
-            kalshi_matches = _match_to_kalshi(title, kalshi_titles)
+            kalshi_matches = (
+                _match_to_kalshi(title, kalshi_titles, min_score=0.50)
+                if _is_binary_position(p) and not _is_sports_title(title) else []
+            )
             match_str = ""
             if kalshi_matches:
                 match_str = f"  -> Kalshi: {kalshi_matches[0][0]} ({kalshi_matches[0][1]:.0%} match)"
