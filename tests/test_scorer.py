@@ -259,3 +259,220 @@ def test_system_prompt_has_cross_market_rule():
 def test_system_prompt_has_entertainment_rule():
     assert "ENTERTAINMENT" in scorer.SYSTEM_PROMPT
     assert "MUST be below 15%" in scorer.SYSTEM_PROMPT
+
+
+# ─── Liquidity context ───────────────────────────────────────────────────────
+
+def test_liquidity_shown_when_volume_present():
+    m = _base_market(volume_fp=5000)
+    prompt = scorer.build_prompt([m])
+    assert "Liquidity" in prompt
+    assert "5000" in prompt
+
+
+def test_liquidity_shows_oi_when_present():
+    m = _base_market(volume_fp=5000, open_interest_fp=2000)
+    prompt = scorer.build_prompt([m])
+    assert "OI 2000" in prompt
+
+
+def test_liquidity_omitted_when_no_volume():
+    m = _base_market()  # no volume_fp
+    prompt = scorer.build_prompt([m])
+    assert "Liquidity:" not in prompt
+
+
+def test_liquidity_omitted_when_volume_zero():
+    m = _base_market(volume_fp=0)
+    prompt = scorer.build_prompt([m])
+    assert "Liquidity:" not in prompt
+
+
+# ─── Cross-market (ext_markets) ──────────────────────────────────────────────
+
+def test_ext_markets_shown_in_cross_market_section():
+    m = _base_market(ext_markets=[
+        {"source": "Manifold", "probability": 0.60, "price_gap": 0.35, "match_score": 0.85},
+    ])
+    prompt = scorer.build_prompt([m])
+    assert "CROSS-MARKET:" in prompt
+    assert "Manifold" in prompt
+    assert "60.0%" in prompt
+
+
+def test_ext_markets_consensus_shown_when_present():
+    m = _base_market(
+        ext_markets=[
+            {"source": "Manifold",   "probability": 0.60, "price_gap": 0.35, "match_score": 0.85},
+            {"source": "Metaculus",  "probability": 0.65, "price_gap": 0.40, "match_score": 0.80},
+        ],
+        ext_consensus={
+            "consensus_dir": "YES", "sources_higher": 2, "sources_lower": 0,
+            "avg_ext_price": 0.625, "consensus_gap": 0.375,
+        },
+    )
+    prompt = scorer.build_prompt([m])
+    assert "Consensus" in prompt
+    assert "lean YES" in prompt
+
+
+def test_no_cross_market_when_no_ext_markets():
+    m = _base_market(ext_markets=[])
+    prompt = scorer.build_prompt([m])
+    assert "CROSS-MARKET:" not in prompt
+
+
+# ─── Polymarket signal ───────────────────────────────────────────────────────
+
+def test_polymarket_shown_when_poly_present():
+    m = _base_market(poly={
+        "poly_price": 0.50,
+        "price_gap": 0.25,
+        "poly_question": "Will the test happen?",
+        "match_score": 0.90,
+    })
+    prompt = scorer.build_prompt([m])
+    assert "POLYMARKET" in prompt
+    assert "50.0%" in prompt
+    assert "25.0% higher" in prompt
+
+
+def test_polymarket_lower_direction_shown():
+    m = _base_market(poly={
+        "poly_price": 0.10,
+        "price_gap": -0.15,
+        "poly_question": "Will the test happen?",
+        "match_score": 0.88,
+    })
+    prompt = scorer.build_prompt([m])
+    assert "lower" in prompt
+
+
+def test_no_polymarket_when_poly_none():
+    m = _base_market(poly=None)
+    prompt = scorer.build_prompt([m])
+    assert "POLYMARKET" not in prompt
+
+
+# ─── Whale alert ────────────────────────────────────────────────────────────
+
+def test_whale_alert_shown_when_detected():
+    m = _base_market(whale_data={
+        "whale_detected": True,
+        "whale_direction": "YES",
+        "max_trade_size": 2500,
+        "avg_trade_size": 1200.0,
+    })
+    prompt = scorer.build_prompt([m])
+    assert "WHALE ALERT" in prompt
+    assert "YES" in prompt
+    assert "2500" in prompt
+
+
+def test_whale_alert_not_shown_when_not_detected():
+    m = _base_market(whale_data={"whale_detected": False, "whale_direction": "YES",
+                                  "max_trade_size": 100, "avg_trade_size": 50.0})
+    prompt = scorer.build_prompt([m])
+    assert "WHALE ALERT" not in prompt
+
+
+def test_whale_reversal_shown():
+    m = _base_market(
+        whale_reversal=True,
+        whale_data={"whale_detected": True, "whale_direction": "NO",
+                    "max_trade_size": 2000, "avg_trade_size": 1000.0},
+    )
+    prompt = scorer.build_prompt([m])
+    assert "REVERSAL SIGNAL" in prompt
+
+
+# ─── Order book signal ───────────────────────────────────────────────────────
+
+def test_order_book_shown_when_ob_flag():
+    m = _base_market(ob_flag=True, ob_imbalance=0.75, ob_direction="YES")
+    prompt = scorer.build_prompt([m])
+    assert "ORDER BOOK" in prompt
+    assert "75%" in prompt
+    assert "YES" in prompt
+
+
+def test_order_book_not_shown_without_flag():
+    m = _base_market(ob_flag=False)
+    prompt = scorer.build_prompt([m])
+    assert "ORDER BOOK" not in prompt
+
+
+# ─── Spread signal ───────────────────────────────────────────────────────────
+
+def test_spread_signal_shown_when_spread_wide():
+    m = _base_market(spread_wide=True, spread_pct=0.20)
+    prompt = scorer.build_prompt([m])
+    assert "SPREAD SIGNAL" in prompt
+    assert "20.0%" in prompt
+
+
+def test_spread_signal_not_shown_when_not_wide():
+    m = _base_market(spread_wide=False)
+    prompt = scorer.build_prompt([m])
+    assert "SPREAD SIGNAL" not in prompt
+
+
+# ─── Smart money ────────────────────────────────────────────────────────────
+
+def test_smart_money_shown_in_prompt():
+    m = _base_market(smart_money=[
+        {"direction": "YES", "avg_pct_pnl": 85.0},
+        {"direction": "YES", "avg_pct_pnl": 60.0},
+    ])
+    prompt = scorer.build_prompt([m])
+    assert "SMART MONEY" in prompt
+    assert "2 winning wallet" in prompt
+    assert "YES" in prompt
+
+
+def test_smart_money_no_wallets_no_section():
+    m = _base_market(smart_money=[])
+    prompt = scorer.build_prompt([m])
+    assert "SMART MONEY" not in prompt
+
+
+# ─── EDGE flag reason ────────────────────────────────────────────────────────
+
+def test_flag_reason_edge_shown():
+    m = _base_market(flag_path="EDGE")
+    prompt = scorer.build_prompt([m])
+    assert "FLAG REASON: EDGE" in prompt
+
+
+# ─── Multiple markets in one prompt ──────────────────────────────────────────
+
+def test_multiple_markets_all_present_in_prompt():
+    m1 = _base_market(ticker="KXFIRST",  title="First market")
+    m2 = _base_market(ticker="KXSECOND", title="Second market")
+    m3 = _base_market(ticker="KXTHIRD",  title="Third market")
+    prompt = scorer.build_prompt([m1, m2, m3])
+    assert "KXFIRST"  in prompt
+    assert "KXSECOND" in prompt
+    assert "KXTHIRD"  in prompt
+
+
+def test_multiple_markets_numbered_sequentially():
+    m1 = _base_market(ticker="KXONE")
+    m2 = _base_market(ticker="KXTWO")
+    prompt = scorer.build_prompt([m1, m2])
+    assert "1. [KXONE]" in prompt
+    assert "2. [KXTWO]" in prompt
+
+
+# ─── Horizon notes ───────────────────────────────────────────────────────────
+
+def test_horizon_intraday_note_in_prompt():
+    m = _base_market(time_horizon="INTRADAY")
+    prompt = scorer.build_prompt([m])
+    assert "closes today" in prompt
+
+
+def test_horizon_weekly_note_in_prompt():
+    m = _base_market(time_horizon="WEEKLY")
+    prompt = scorer.build_prompt([m])
+    assert "7 days" in prompt
