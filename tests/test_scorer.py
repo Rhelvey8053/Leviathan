@@ -326,6 +326,19 @@ def test_system_prompt_has_unsc_rule():
     assert "15%" in scorer.SYSTEM_PROMPT
 
 
+def test_system_prompt_has_legal_proceedings_rule():
+    """Rule 19: legal/criminal proceedings (pardon 35%, plea deal 45%, acquittal 35%)."""
+    assert "LEGAL/CRIMINAL PROCEEDINGS" in scorer.SYSTEM_PROMPT
+    assert "45%" in scorer.SYSTEM_PROMPT   # plea deal base rate
+
+
+def test_system_prompt_has_government_funding_rule():
+    """Rule 20: government shutdown / debt ceiling with bifurcated base rates."""
+    assert "GOVERNMENT FUNDING" in scorer.SYSTEM_PROMPT
+    assert "85%" in scorer.SYSTEM_PROMPT   # shutdown averted rate
+    assert "70%" in scorer.SYSTEM_PROMPT   # debt ceiling raised rate
+
+
 # ─── Liquidity context ───────────────────────────────────────────────────────
 
 def test_liquidity_shown_when_volume_present():
