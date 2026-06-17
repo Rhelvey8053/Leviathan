@@ -277,8 +277,15 @@ def estimate_base_rate(market: dict) -> float | None:
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
         (["coup", "overthrow", "regime change"], 0.10),
         # Media / entertainment — very low: release dates often slip
-        (["release", "released", "premieres", "premiere by",
-          "season", "movie", "film", "show"], 0.25),
+        # "release" and "show" excluded — too broad (hits Fed minutes, data reports, etc.)
+        # "season" kept but specific entertainment-flavored phrases handle most cases
+        (["premieres", "premiere by", "movie release", "film release",
+          "tv show", "television show", "new season", "season finale",
+          "season premiere", "sequel", "spin-off",
+          "box office", "streaming", "in theaters", "in cinemas",
+          "music video", "album drops", "album release",
+          "episode", "documentary"], 0.25),
+        (["movie", "film", "season"], 0.25),
         # Space / aerospace — launch delays are the norm; SpaceX has better cadence than NASA
         (["starship", "falcon heavy", "falcon 9",
           "spacex launch", "rocket launch"], 0.40),    # SpaceX has high cadence
