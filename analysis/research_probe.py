@@ -77,11 +77,15 @@ PROBE_SYSTEM = (
     "Base rate is ~65% within the first 20 months of a Trump term based on historical "
     "turnover. A market priced below 50% is likely underpriced — weight the historical "
     "base rate heavily.\n"
-    "7. HIGH CONFIDENCE threshold: Only assign HIGH confidence when you find dated, "
+    "7. SPORTS DEBUT MARKETS ('Will X make his MLB/NBA/NHL debut by Y?'): Base rate for "
+    "an unconfirmed prospect is ~35% within a 6-month window. 'On the 40-man roster', "
+    "'expected to be called up', or 'in spring training' is still 35% base rate. Only "
+    "an active roster assignment with a confirmed start date is strong evidence.\n"
+    "8. HIGH CONFIDENCE threshold: Only assign HIGH confidence when you find dated, "
     "primary-source evidence (official press release, regulatory filing, official "
     "announcement by the relevant authority) that directly speaks to the specific "
     "deadline in the market.\n"
-    "8. EDGE REQUIREMENT: Only call YES or NO if your estimate differs from the market "
+    "9. EDGE REQUIREMENT: Only call YES or NO if your estimate differs from the market "
     "price by at least 10 percentage points AND you have clear evidence. Otherwise PASS."
 )
 
