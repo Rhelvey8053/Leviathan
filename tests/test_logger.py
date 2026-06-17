@@ -626,3 +626,186 @@ def test_get_stats_by_flag_path_excludes_real_fills(tmp_db):
     rows = logger.get_stats_by_flag_path()
     edge_row = next(r for r in rows if r["flag_path"] == "EDGE")
     assert edge_row["total"] == 1  # only the paper signal, not the real_fill
+
+
+# ─── get_stats_by_sig ────────────────────────────────────────────────────────
+
+def _insert_resolved_sig(call_id, ticker, direction, market_price, outcome, result, pnl,
+                          sig_edge=False, sig_drift=False, sig_br_none=False):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             edge, direction, confidence, whale_detected, whale_direction,
+             outcome, result, pnl_if_traded, run_id, source,
+             sig_edge, sig_drift, sig_br_none)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, "2026-06-17T10:00:00Z",
+            ticker, "Test", market_price, 0.50, 0.10,
+            direction, "MED", 0, "",
+            outcome, result, pnl,
+            "run-test", "paper",
+            1 if sig_edge    else 0,
+            1 if sig_drift   else 0,
+            1 if sig_br_none else 0,
+        ))
+
+
+def test_get_stats_by_sig_empty_db(tmp_db):
+    """Empty DB → all three sig types return total=0, win_rate=None."""
+    stats = logger.get_stats_by_sig()
+    for key in ("sig_edge", "sig_drift", "sig_br_none"):
+        assert stats[key]["total"]    == 0
+        assert stats[key]["win_rate"] is None
+
+
+def test_get_stats_by_sig_counts_sig_edge_wins(tmp_db):
+    """sig_edge wins and losses are counted independently of other sig types."""
+    _insert_resolved_sig("se1", "E1", "YES", 0.30, "YES", "WIN",  0.70, sig_edge=True)
+    _insert_resolved_sig("se2", "E2", "YES", 0.30, "NO",  "LOSS", -0.30, sig_edge=True)
+    _insert_resolved_sig("sd1", "D1", "YES", 0.30, "YES", "WIN",  0.70, sig_drift=True)
+
+    stats = logger.get_stats_by_sig()
+
+    assert stats["sig_edge"]["total"] == 2
+    assert stats["sig_edge"]["wins"]  == 1
+    assert stats["sig_edge"]["win_rate"] == pytest.approx(50.0)
+
+    assert stats["sig_drift"]["total"] == 1
+    assert stats["sig_drift"]["wins"]  == 1
+    assert stats["sig_drift"]["win_rate"] == pytest.approx(100.0)
+
+    assert stats["sig_br_none"]["total"] == 0
+
+
+def test_get_stats_by_sig_excludes_unresolved(tmp_db):
+    """Unresolved paper signals must not count toward win_rate."""
+    _insert_resolved_sig("se3", "E3", "YES", 0.30, "YES", "WIN", 0.70, sig_edge=True)
+    # Insert unresolved sig_edge row
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals (call_id, timestamp, ticker, direction, market_price,
+                                 outcome, result, source, sig_edge)
+            VALUES ('se4','2026-06-17T10:00:00Z','E4','YES',0.30,'','','paper',1)
+        """)
+
+    stats = logger.get_stats_by_sig()
+    # Only the resolved row should count
+    assert stats["sig_edge"]["total"] == 1
+    assert stats["sig_edge"]["wins"]  == 1
+
+
+def test_get_stats_by_sig_excludes_real_fills(tmp_db):
+    """Real fill rows must not contaminate sig stats even if sig_edge=1."""
+    _insert_resolved_sig("se5", "E5", "YES", 0.30, "YES", "WIN", 0.70, sig_edge=True)
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals (call_id, timestamp, ticker, direction, market_price,
+                                 outcome, result, pnl_if_traded, source, sig_edge)
+            VALUES ('rf2','2026-06-17T10:00:00Z','REALFILL','YES',0.30,
+                    'YES','WIN',0.70,'real_fill',1)
+        """)
+
+    stats = logger.get_stats_by_sig()
+    assert stats["sig_edge"]["total"] == 1  # real_fill row excluded
+
+
+def test_get_stats_by_sig_overlap_counted_separately(tmp_db):
+    """A signal with both sig_edge=1 and sig_drift=1 is counted in BOTH buckets."""
+    _insert_resolved_sig("both1", "B1", "YES", 0.30, "YES", "WIN", 0.70,
+                          sig_edge=True, sig_drift=True)
+
+    stats = logger.get_stats_by_sig()
+    assert stats["sig_edge"]["total"]  == 1
+    assert stats["sig_drift"]["total"] == 1
+
+
+# ─── get_recent_tickers / get_week_signals ────────────────────────────────────
+
+def test_get_recent_tickers_returns_recent(tmp_db):
+    """Tickers inserted now appear in get_recent_tickers(days=7)."""
+    logger.log_signal({
+        "ticker": "KXRECENT", "title": "T", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "r1",
+    })
+    tickers = logger.get_recent_tickers(days=7)
+    assert "KXRECENT" in tickers
+
+
+def test_get_recent_tickers_excludes_old(tmp_db):
+    """Tickers with old timestamps must not appear in get_recent_tickers."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source)
+            VALUES ('old1','2020-01-01T00:00:00+00:00','KXOLD','YES',0.30,'paper')
+        """)
+    tickers = logger.get_recent_tickers(days=7)
+    assert "KXOLD" not in tickers
+
+
+def test_get_week_signals_returns_recent_rows(tmp_db):
+    """get_week_signals returns rows timestamped within the last 7 days."""
+    logger.log_signal({
+        "ticker": "KXWEEK", "title": "T", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "r2",
+    })
+    rows = logger.get_week_signals(days=7)
+    tickers = [r["ticker"] for r in rows]
+    assert "KXWEEK" in tickers
+
+
+def test_get_week_signals_excludes_old_rows(tmp_db):
+    """Rows older than days window must not appear in get_week_signals."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source)
+            VALUES ('old2','2020-01-01T00:00:00+00:00','KXOLDWEEK','YES',0.30,'paper')
+        """)
+    rows = logger.get_week_signals(days=7)
+    tickers = [r["ticker"] for r in rows]
+    assert "KXOLDWEEK" not in tickers
+
+
+# ─── log_run ─────────────────────────────────────────────────────────────────
+
+def test_log_run_writes_run_row(tmp_db):
+    """log_run must insert a row into the runs table with correct fields."""
+    logger.log_run({
+        "run_id":            "run-unit-1",
+        "timestamp":         "2026-06-17T10:00:00Z",
+        "markets_scanned":   250,
+        "signals_generated": 5,
+        "whale_flags":       2,
+        "model_used":        "claude-sonnet-4-6",
+        "tokens_used":       12000,
+        "cost_usd":          0.0,
+        "runtime_ms":        45000,
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT * FROM runs WHERE run_id='run-unit-1'").fetchone()
+    assert row is not None
+    assert row["markets_scanned"]   == 250
+    assert row["signals_generated"] == 5
+    assert row["model_used"]        == "claude-sonnet-4-6"
+
+
+def test_log_run_idempotent_replace(tmp_db):
+    """Logging the same run_id twice replaces the row (INSERT OR REPLACE)."""
+    logger.log_run({"run_id": "run-idem", "timestamp": "2026-06-17T00:00:00Z",
+                    "markets_scanned": 100, "signals_generated": 2,
+                    "whale_flags": 0, "model_used": "m1",
+                    "tokens_used": 5000, "cost_usd": 0.0, "runtime_ms": 10000})
+    logger.log_run({"run_id": "run-idem", "timestamp": "2026-06-17T01:00:00Z",
+                    "markets_scanned": 200, "signals_generated": 4,
+                    "whale_flags": 1, "model_used": "m2",
+                    "tokens_used": 8000, "cost_usd": 0.0, "runtime_ms": 20000})
+
+    with logger._db() as conn:
+        rows = conn.execute("SELECT * FROM runs WHERE run_id='run-idem'").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["markets_scanned"] == 200  # second write wins
