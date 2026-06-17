@@ -130,6 +130,22 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     if fired:
         lines.append(f"  Signals:      {' · '.join(fired)}")
 
+    # Flag conflict warning — DRIFT and HEURISTIC pointing in opposite directions
+    drift_pct_val = s.get("price_drift") or 0
+    mid_p         = float(s.get("market_price") or 0)
+    br            = s.get("base_rate")
+    if s.get("drift_flag") and br is not None and mid_p > 0:
+        drift_says_up     = drift_pct_val < 0
+        heuristic_says_up = br > mid_p
+        if drift_says_up != heuristic_says_up:
+            drift_call     = "YES" if drift_says_up     else "NO"
+            heuristic_call = "YES" if heuristic_says_up else "NO"
+            lines.append(
+                f"  [!] SIGNAL CONFLICT: Drift -> {drift_call} | "
+                f"Base rate {br*100:.0f}% -> {heuristic_call} "
+                f"(Claude was instructed to weight base rate)"
+            )
+
     # Cross-market
     poly = s.get("poly")
     ext  = s.get("ext_markets") or []
