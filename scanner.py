@@ -222,7 +222,7 @@ def estimate_base_rate(market: dict) -> float | None:
         # Congressional spending — continuing resolutions / omnibus bills (must come before
         # generic "signed into law" because "omnibus bill" is a more specific match)
         (["continuing resolution", "omnibus bill", "appropriations bill",
-          "government funding bill",
+          "government funding bill", "spending bill",
           "federal budget", "budget resolution", "budget deal", "budget agreement",
           "pass the budget", "budget bill", "budget deadline"], 0.40),
         # Legislative — most Kalshi bills have some momentum; passage ~35%
@@ -475,7 +475,9 @@ def estimate_base_rate(market: dict) -> float | None:
         (["inflation rate", "cpi", "pce", "consumer price index",
           "core inflation"], 0.50),
         (["gdp growth", "gdp contraction", "gdp shrinks",
-          "economic growth", "economic contraction"], 0.50),
+          "gdp exceed", "gdp above", "gdp below", "gdp surpass",
+          "economic growth", "economic contraction",
+          "grow at", "growth rate", "growth of"], 0.50),
         # Stock index / financial index price levels — 50/50 by construction (like crypto)
         # Placed BEFORE generic "above $" / "below $" to avoid the 0.35 price-level pattern
         (["s&p 500 above", "s&p 500 below", "s&p 500 exceed", "s&p 500 reach",
@@ -530,8 +532,19 @@ def estimate_base_rate(market: dict) -> float | None:
           "play in a game for", "called up", "nhl debut",
           "nba debut", "make his debut", "make her debut"], 0.35),
         (["merger", "acquisition", "acquired by", "be acquired",
-          "get acquired", "was acquired", "take private",
+          "get acquired", "was acquired", "will acquire", "acquire a",
+          "acquire the company", "acquire an", "take private",
           "buyout", "takeover", "be taken over", "be bought out"], 0.35),
+        # Corporate market entry / expansion — entering a new business vertical → ~35%
+        (["enter the market", "enter the healthcare", "enter the insurance",
+          "enter the banking", "enter the auto", "enter the space",
+          "launch a new business", "expand into",
+          "new market entry", "move into the"], 0.35),
+        # Production / delivery milestone — volume targets are uncertain → ~40%
+        (["vehicle deliveries", "delivery target", "delivery milestone",
+          "production target", "production milestone",
+          "units delivered", "cars delivered", "deliveries in",
+          "million deliveries", "million units"], 0.40),
         # Divestiture / forced sale — regulatory or activist-driven → ~35%
         # Placed separately from "merger" to catch "sold by" / "forced to sell" framing
         (["be sold by", "forced to sell", "forced sale", "divest",
@@ -590,6 +603,17 @@ def estimate_base_rate(market: dict) -> float | None:
           "article 5 be invoked", "invoke nato's article 5",
           "nato's collective defense", "collective defense clause",
           "mutual defense clause", "article v of the nato"], 0.05),
+        # Military territorial recapture / advance — active war campaigns have uncertain outcome → ~30%
+        # Placed BEFORE "declare war" to avoid first-match with low base rate
+        (["recapture", "retake", "reclaim territory", "liberate",
+          "advance on", "military offensive", "push into",
+          "counteroffensive", "seize territory", "capture the city",
+          "take back", "overrun"], 0.30),
+        # Independence referendum / self-determination vote — rare political events → ~15%
+        (["referendum on independence", "independence referendum",
+          "vote on independence", "vote on secession",
+          "self-determination vote", "plebiscite on",
+          "hold a referendum", "independence vote"], 0.15),
         # Military troop withdrawal / drawdown — planned withdrawals often delayed → ~30%
         # Placed BEFORE "declare war"/"invade" to avoid geopolitical catch-all
         (["troop withdrawal", "withdraw troops", "pull out troops",
@@ -661,6 +685,8 @@ def estimate_base_rate(market: dict) -> float | None:
           "apple announces", "apple reveal",
           "samsung galaxy", "new galaxy", "galaxy s", "galaxy flagship",
           "pixel phone", "new pixel",
+          "ar glasses", "ar headset", "vr headset", "smart glasses",
+          "mixed reality headset", "vision pro", "next-gen headset",
           "product announcement", "product reveal", "announce a new"], 0.55),
         # Media / entertainment — very low: release dates often slip
         # "release" and "show" excluded — too broad (hits Fed minutes, data reports, etc.)
@@ -697,6 +723,12 @@ def estimate_base_rate(market: dict) -> float | None:
         (["die before", "die by", "pass away before", "pass away by",
           "survive until", "still alive by", "alive by",
           "death before", "death by date"], 0.15),
+        # Climate records / temperature anomalies — warming trend makes record years frequent → ~40%
+        (["hottest year", "warmest year", "record temperature",
+          "temperature record", "record heat", "record warming",
+          "coldest year", "coldest winter", "record cold",
+          "climate record", "record rainfall", "record drought",
+          "record snowfall", "all-time record"], 0.40),
         # Climate / renewable energy policy
         (["carbon tax", "carbon credit", "net zero",
           "emissions target", "paris agreement",
@@ -709,6 +741,19 @@ def estimate_base_rate(market: dict) -> float | None:
           "llama 4", "llama-4", "llm release", "ai model release",
           "release a new model", "release their next model",
           "agi by", "artificial general intelligence by"], 0.25),
+        # AI capability milestones — AI passing high-stakes tests is increasingly common → ~40%
+        (["ai pass", "ai passes", "ai score", "ai scores",
+          "ai outperform", "ai beat", "ai beats",
+          "ai achieve", "artificial intelligence pass",
+          "llm pass", "language model pass",
+          "ai take the bar", "ai take the mcat", "ai pass the",
+          "machine learning achieve"], 0.40),
+        # AI regulation / governance — growing legislative push → ~30%
+        (["ai regulation", "regulate ai", "ban ai", "ai ban",
+          "ai law", "ai legislation", "ai governance",
+          "artificial intelligence regulation",
+          "autonomous weapons ban", "lethal autonomous weapons",
+          "ai safety law", "ai liability"], 0.30),
         # Trade / tariffs — politically uncertain, executive action somewhat common
         (["tariff on", "tariffs on", "tariff rate", "impose a tariff",
           "tariff increase", "tariff reduction", "trade war",
