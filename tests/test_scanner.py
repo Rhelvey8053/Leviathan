@@ -968,6 +968,27 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will North Korea launch a missile test in Q3 2026?", 0.40),
     ("Will DPRK conduct a nuclear test in 2026?", 0.40),
     ("Will North Korea nuclear provocations escalate before end of 2026?", 0.40),
+    # Fed / FOMC — "raise rates" word ordering
+    ("Will the FOMC raise rates at the March 2026 meeting?", 0.50),
+    ("Will the Fed cut rates by 25bps in June?", 0.50),
+    ("Will the Fed hike rates before year end?", 0.50),
+    ("Will the FOMC lower interest rates in Q3 2026?", 0.50),
+    # Unemployment without "rate" suffix
+    ("Will unemployment be above 4.5% in June 2026?", 0.50),
+    ("Will unemployment rise above 5% before Q4?", 0.50),
+    # Price levels — "hit $" form
+    ('Will Nvidia stock hit $200 before year end?', 0.35),
+    ('Will gold top $3,000 in 2026?', 0.35),
+    # IPO — "go public" form
+    ("Will OpenAI go public before end of 2026?", 0.25),
+    # Legislative — senate/house pass reversed ordering
+    ("Will the Senate pass the budget before October?", 0.35),
+    ("Will the House approve the tax bill in Q3 2026?", 0.35),
+    ("Will the Senate vote on the tax bill before December?", 0.35),
+    # Tech / social media ban
+    ("Will TikTok be banned in the US by August 2026?", 0.20),
+    ("Will the US ban TikTok before end of 2026?", 0.20),
+    ("Will Trump sign a TikTok ban into law?", 0.20),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

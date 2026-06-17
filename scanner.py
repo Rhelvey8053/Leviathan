@@ -160,11 +160,14 @@ def estimate_base_rate(market: dict) -> float | None:
         (["continuing resolution", "omnibus bill", "appropriations bill",
           "government funding bill"], 0.40),
         # Legislative — most Kalshi bills have some momentum; passage ~35%
+        # Includes both "pass the senate" AND "senate pass" word orderings
         (["pass the senate", "pass the house", "pass congress",
           "pass in the senate", "pass in the house",
           "pass into law", "signed into law", "sign into law",
           "pass the bill", "passes the bill", "pass legislation",
-          "become law", "enacted into law"], 0.35),
+          "become law", "enacted into law",
+          "senate pass", "house pass", "senate approve", "house approve",
+          "senate vote on", "house vote on"], 0.35),
         (["veto", "presidential veto", "veto the bill",
           "pocket veto"], 0.20),
         # Executive / political appointments
@@ -242,12 +245,14 @@ def estimate_base_rate(market: dict) -> float | None:
           "category 4", "category 5"], 0.45),
         (["earthquake", "magnitude"], 0.30),
         # Macroeconomic — cuts/hikes depend on market pricing already
-        (["rate cut", "rate hike", "interest rate cut", "interest rate hike"], 0.50),
+        (["rate cut", "rate hike", "interest rate cut", "interest rate hike",
+          "raise rates", "raise interest rates", "lower rates", "lower interest rates",
+          "cut rates", "hike rates", "fomc", "fed funds rate"], 0.50),
         (["recession", "in recession", "enters recession"], 0.25),
         (["default", "debt default", "sovereign default"], 0.10),
         # Economic indicators — near 50/50 for specific threshold questions
-        (["unemployment rate", "jobless rate", "nonfarm payroll",
-          "jobs report", "labor market"], 0.50),
+        (["unemployment rate", "unemployment", "jobless rate", "nonfarm payroll",
+          "jobs report", "labor market", "labor force"], 0.50),
         (["inflation rate", "cpi", "pce", "consumer price index",
           "core inflation"], 0.50),
         (["gdp growth", "gdp contraction", "gdp shrinks",
@@ -259,14 +264,14 @@ def estimate_base_rate(market: dict) -> float | None:
         (["bitcoin etf", "crypto etf", "ethereum etf",
           "spot etf", "etf approval"], 0.50),
         # Price / market levels — mean-reversion roughly 50/50 near current levels
-        (["reach $", "hits $", "exceed $", "above $",
-          "surpass $", "cross $", "break $"], 0.35),
+        (["reach $", "hits $", "hit $", "exceed $", "above $",
+          "surpass $", "cross $", "break $", "top $"], 0.35),
         (["below $", "under $", "fall below", "drop below",
           "dip below", "dip to $"], 0.35),
         # Corporate events — low base rate, most announcements don't complete
         # IPO announcement timing markets: "when will X announce an IPO?"
         (["announce an ipo", "officially announce an ipo",
-          "ipo announcement", "going public"], 0.25),
+          "ipo announcement", "going public", "go public"], 0.25),
         (["ipo by", "ipo before", "initial public offering"], 0.30),
         # Sports debut/call-up markets: "will X make his MLB debut by Y?"
         (["make his mlb debut", "make her mlb debut",
@@ -275,6 +280,10 @@ def estimate_base_rate(market: dict) -> float | None:
         (["merger", "acquisition", "acquired by", "take private",
           "buyout", "takeover"], 0.35),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt"], 0.15),
+        # Tech / social media regulation — low base rate (regulation takes years)
+        (["tiktok ban", "ban tiktok", "tiktok be banned", "ban on tiktok",
+          "social media ban", "tech ban", "platform ban",
+          "block tiktok", "ban chinese apps"], 0.20),
         # Geopolitical — low base rate for dramatic events
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
         (["coup", "overthrow", "regime change"], 0.10),
