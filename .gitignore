@@ -3,6 +3,7 @@ calls.csv
 runs.csv
 *.migrated
 winning_accounts.json
+data/watchlist_cache.json
 leviathan.db
 leviathan.db.bak*
 subscribers.json
