@@ -158,7 +158,15 @@ def main():
             print(f"      [warn] Smart money tag failed: {_e}")
 
         scored_markets  = scanner.score_markets(filtered, config)
+        # Include flagged markets + any watchlist-tagged markets not already flagged
         flagged_markets = [m for m in scored_markets if m.get("flag")]
+        wl_unflagged    = [m for m in scored_markets if m.get("watchlist_signal") and not m.get("flag")]
+        if wl_unflagged:
+            for m in wl_unflagged:
+                m["flag"]      = True
+                m["flag_path"] = "WATCHLIST"
+            flagged_markets = wl_unflagged + flagged_markets  # watchlist first
+            print(f"      Watchlist override: {len(wl_unflagged)} market(s) force-flagged by smart money signal")
         print(f"      {len(filtered)} markets passed filter (from {len(all_markets)})")
         print(f"      {len(flagged_markets)} markets flagged for edge")
     except Exception as e:
@@ -336,6 +344,7 @@ def main():
             "ext_markets":     m.get("ext_markets", []),
             "ext_consensus":   m.get("ext_consensus", {}),
             "smart_money":     m.get("smart_money", []),
+            "watchlist_signal": m.get("watchlist_signal", False),
             "run_id":          run_id,
         }
 
@@ -372,6 +381,7 @@ def main():
                     "ext_markets":     m.get("ext_markets", []),
                     "ext_consensus":   m.get("ext_consensus", {}),
                     "smart_money":     m.get("smart_money", []),
+                    "watchlist_signal": m.get("watchlist_signal", False),
                     "run_id":          run_id,
                     "second_pass":     True,
                 }
@@ -428,12 +438,14 @@ def main():
     # Step 8 — Compile and email report
     print("[8/8] Sending report...")
     try:
-        stats = logger.get_stats()
+        stats       = logger.get_stats()
+        probe_stats = logger.get_stats_probe()
         body  = report.compile_report(final_signals, whale_only, stats, run_meta, config,
                                       all_filtered=filtered,
                                       new_signals=new_signals,
                                       repeat_signals=repeat_signals,
-                                      smart_money_result=smart_money_result)
+                                      smart_money_result=smart_money_result,
+                                      probe_stats=probe_stats)
         report.send_report(body, final_signals, run_meta["whale_flags"], config)
     except Exception as e:
         print(f"      FAILED: {e}")
@@ -441,7 +453,8 @@ def main():
         print("\n--- REPORT (unsent) ---")
         try:
             body = report.compile_report(final_signals, whale_only, logger.get_stats(), run_meta, config,
-                                         smart_money_result=smart_money_result)
+                                         smart_money_result=smart_money_result,
+                                         probe_stats=logger.get_stats_probe())
             print(body)
         except Exception:
             pass

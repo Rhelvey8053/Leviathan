@@ -246,6 +246,7 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
             print(f"    {outcome:<4}  ${val:>9,.0f}  {price:.2f}  {pnl_str:>7}  {title[:55]}{match_str}")
 
             if kalshi_matches:
+                best_ticker = kalshi_matches[0][0]
                 all_signals.append({
                     "trader":        name,
                     "monthly_pnl":   monthly,
@@ -255,7 +256,8 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
                     "position_val":  val,
                     "pct_pnl":       pct_pnl,
                     "poly_url":      f"https://polymarket.com/event/{slug}",
-                    "kalshi_ticker": kalshi_matches[0][0],
+                    "kalshi_ticker": best_ticker,
+                    "kalshi_title":  kalshi_titles.get(best_ticker, ""),
                     "match_score":   kalshi_matches[0][1],
                 })
 
@@ -324,14 +326,17 @@ def save_report(result: dict) -> str:
         lines += [
             f"## Kalshi Cross-References ({len(signals)})",
             f"",
-            f"| Trader | Outcome | Market | Poly Price | Position | Kalshi Ticker | Match |",
-            f"|--------|---------|--------|-----------|----------|--------------|-------|",
+            f"| Trader | Out | Poly Market | Kalshi Market | Ticker | Price | Position | Match |",
+            f"|--------|-----|-------------|---------------|--------|-------|----------|-------|",
         ]
-        for s in sorted(signals, key=lambda x: -x["position_val"]):
+        ranked = sorted(signals, key=lambda x: -(x["match_score"] * x["position_val"]))
+        for s in ranked:
+            kalshi_t = s.get("kalshi_title", s["kalshi_ticker"])[:50]
             lines.append(
                 f"| {s['trader']} | {s['poly_outcome']} | {s['poly_title'][:45]} "
+                f"| {kalshi_t} | {s['kalshi_ticker']} "
                 f"| {s['poly_price']:.2f} | ${s['position_val']:,.0f} "
-                f"| {s['kalshi_ticker']} | {s['match_score']:.0%} |"
+                f"| {s['match_score']:.0%} |"
             )
         lines.append("")
     else:

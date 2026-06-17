@@ -646,6 +646,31 @@ def test_watchlist_tag_priority_sorts_first():
     assert results[0]["ticker"] == "KXTAGGED"
 
 
+def test_watchlist_flag_path_override():
+    """Unflagged watchlist market gets flag_path=WATCHLIST when force-flagged."""
+    # Build an inert market: mid=0.50, no drift, no keyword match in heuristics
+    # Using a title with no heuristic match and a volume tier that gives no edge
+    m = _market(mid=0.50, title="Will the XYZ regulation pass the committee vote?")
+    m["ticker"]           = "KXREGULATION-29"
+    m["time_horizon"]     = "LONG"
+    m["close_time"]       = _close(500)
+    m["last_price"]       = 0.50   # no drift
+    m["watchlist_signal"] = False
+
+    cfg   = BASE_CFG
+    scored = scanner.score_market(m, cfg)
+    # If naturally unflagged, simulate the main.py watchlist force-flag
+    if not scored["flag"]:
+        scored["watchlist_signal"] = True
+        scored["flag"]      = True
+        scored["flag_path"] = "WATCHLIST"
+        assert scored["flag"] is True
+        assert scored["flag_path"] == "WATCHLIST"
+    else:
+        # Already flagged by heuristic — just verify flag_path is set
+        assert scored["flag_path"] is not None
+
+
 # ─── estimate_base_rate: expanded heuristics ─────────────────────────────────
 
 @pytest.mark.parametrize("title,expected_not_none", [

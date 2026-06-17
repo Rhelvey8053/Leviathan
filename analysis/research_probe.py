@@ -332,30 +332,72 @@ def load_config() -> dict:
         return json.load(f)
 
 
+def _load_watchlist_tickers() -> set[str]:
+    """Load smart money cross-referenced Kalshi tickers from latest_signals cache."""
+    cache = os.path.join(ROOT, "data", "smart_money", "latest_signals.json")
+    if not os.path.exists(cache):
+        return set()
+    try:
+        import json as _json
+        with open(cache, encoding="utf-8") as f:
+            data = _json.load(f)
+        return set(data.get("kalshi_tickers", []))
+    except Exception:
+        return set()
+
+
 def run_probe(config: dict | None = None) -> dict:
     """
     Full probe run:
       1. Load snapshot and build stratified sample.
-      2. Probe up to max_probe_markets markets with Claude+websearch.
-      3. Log results via logger.log_probe().
-      4. Print divergence table and call count.
+      2. Force-include smart money watchlist tickers (probed first).
+      3. Probe up to max_probe_markets markets with Claude+websearch.
+      4. Log results via logger.log_probe().
+      5. Print divergence table and call count.
     Returns summary dict.
     """
     if config is None:
         config = load_config()
 
-    max_probe        = config.get("scoring", {}).get("max_probe_markets", 10)
+    max_probe         = config.get("scoring", {}).get("max_probe_markets", 10)
     max_days_to_close = config.get("scoring", {}).get("max_probe_days_to_close", None)
-    markets, header  = load_snapshot()
+    markets, header   = load_snapshot()
 
     print(f"Snapshot: {header.get('fetched_at')} ({header.get('market_count')} markets)")
+
+    # Index markets by ticker for watchlist lookup
+    by_ticker = {m.get("ticker", ""): m for m in markets}
+
+    # Force-include smart money watchlist tickers — probe these first
+    watchlist_tickers = _load_watchlist_tickers()
+    priority: list[dict] = []
+    if watchlist_tickers:
+        for t in sorted(watchlist_tickers):
+            m = by_ticker.get(t)
+            if m:
+                mid = _mid(m)
+                m   = dict(m)
+                m["mid_price"]   = mid
+                m["filter_pass"] = True  # watchlist tickers are pre-vetted
+                m["vol_tier"]    = "watchlist"
+                m["watchlist"]   = True
+                priority.append(m)
+        print(f"  [probe] watchlist: {len(priority)}/{len(watchlist_tickers)} tickers found in snapshot")
 
     sample = stratified_sample(markets, target_n=50, filter_cfg=config,
                                max_days_to_close=max_days_to_close)
     print_strata(sample)
 
-    to_probe = sample[:max_probe]
-    print(f"Probing {len(to_probe)} markets (max_probe_markets={max_probe})...\n")
+    # Merge: watchlist first, then stratified (dedup by ticker)
+    seen: set[str] = {m.get("ticker", "") for m in priority}
+    combined = list(priority)
+    for m in sample:
+        if m.get("ticker", "") not in seen:
+            combined.append(m)
+
+    to_probe = combined[:max_probe]
+    n_wl     = sum(1 for m in to_probe if m.get("watchlist"))
+    print(f"Probing {len(to_probe)} markets ({n_wl} watchlist priority, max_probe_markets={max_probe})...\n")
 
     results      = []
     total_calls  = 0
@@ -382,6 +424,9 @@ def run_probe(config: dict | None = None) -> dict:
             errors += 1
             print(f"ERROR: {e}")
 
+    # Build watchlist set for table annotation
+    wl_set = _load_watchlist_tickers()
+
     # Divergence table
     print(f"\n{'='*90}")
     print(f"  {'Ticker':<44} {'Mid':>6}  {'Est':>6}  {'Div':>7}  {'Dir':<5}  {'Conf':<5}  Filter")
@@ -389,6 +434,7 @@ def run_probe(config: dict | None = None) -> dict:
     for r in sorted(results, key=lambda x: -abs(x["divergence"])):
         sign = "+" if r["divergence"] >= 0 else ""
         fp   = "PASS" if r.get("filter_pass") else "REJECT"
+        wl   = " [WL]" if r.get("ticker") in wl_set else ""
         print(
             f"  {r['ticker']:<44} "
             f"{r['market_price_at_probe']:>6.3f}  "
@@ -396,7 +442,7 @@ def run_probe(config: dict | None = None) -> dict:
             f"{sign}{r['divergence']:>6.3f}  "
             f"{r['predicted_direction']:<5}  "
             f"{r['confidence']:<5}  "
-            f"{fp}"
+            f"{fp}{wl}"
         )
 
     print(f"\n{'='*90}")
