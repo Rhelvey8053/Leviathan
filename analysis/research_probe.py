@@ -126,7 +126,13 @@ PROBE_SYSTEM = (
     "18. UN SECURITY COUNCIL MARKETS ('Will the UNSC pass a resolution on X?'): Base "
     "rate ~15% due to Chinese/Russian veto risk. 'Western support' or 'draft circulating' "
     "is NOT evidence — Russia and China veto dozens of such drafts. Only a non-contested "
-    "procedural vote or documented unanimous agreement justifies >30%."
+    "procedural vote or documented unanimous agreement justifies >30%.\n"
+    "19. LEGAL/CRIMINAL PROCEEDINGS: Pardon/clemency ~35% — 'under consideration' is not "
+    "a pardon; Plea deal ~45% for high-profile contested cases; Acquittal ~35% for "
+    "prediction-market trials. Only imminent agreement or jury outcome is HIGH confidence.\n"
+    "20. GOVERNMENT FUNDING/DEBT CEILING: Shutdown averted ~85%; Shutdown begins ~15%; "
+    "Debt ceiling raised ~70%; generic debt ceiling ~65%. CRITICAL: distinguish "
+    "averted/raised (high base rate) from starts/default (low base rate)."
 )
 
 PROBE_SCHEMA = """
