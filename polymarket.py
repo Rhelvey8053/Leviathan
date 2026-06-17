@@ -176,6 +176,9 @@ def match_markets(
         kalshi_mid = m.get("mid_price")
         price_gap  = (match["yes_price"] - kalshi_mid) if kalshi_mid is not None else None
 
+        # When a gap floor is set, we need a measurable gap — skip if unknown
+        if gap_floor > 0 and price_gap is None:
+            continue
         if price_gap is not None and abs(price_gap) < gap_floor:
             continue
 
