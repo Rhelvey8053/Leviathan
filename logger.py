@@ -351,6 +351,23 @@ def get_recent_tickers(days: int = 7) -> set[str]:
         return set()
 
 
+def get_ticker_day_count(ticker: str, days: int = 14) -> int:
+    """Return how many distinct calendar days this ticker was flagged in the last N days."""
+    if not ticker:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT date(timestamp)) as cnt FROM signals "
+                "WHERE ticker = ? AND timestamp >= ?",
+                (ticker, cutoff),
+            ).fetchone()
+        return row["cnt"] if row else 0
+    except Exception:
+        return 0
+
+
 def get_week_signals(days: int = 7) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     try:

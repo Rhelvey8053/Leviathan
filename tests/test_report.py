@@ -624,3 +624,98 @@ def test_signal_strength_not_shown_in_header_when_one():
     lines = report._signal_block(s, index=1)
     header = lines[0]
     assert "★" not in header
+
+
+# ─── qualifying sort includes signal_strength tiebreaker ──────────────────────
+
+def test_qualifying_sorts_higher_signal_strength_first_within_tier():
+    """Within the same confidence tier, higher signal_strength comes first."""
+    low_str  = _signal(confidence="HIGH", edge=0.20, flag_path="DRIFT")
+    high_str = _signal(
+        confidence="HIGH", edge=0.15, flag_path="HEURISTIC",
+        poly={"price_gap": 0.10, "poly_price": 0.50, "poly_question": "Q", "match_score": 0.8},
+        watchlist_signal=True,
+    )
+    result = report._qualifying([low_str, high_str], threshold_rank=0)
+    assert result[0] is high_str   # strength=3 beats strength=1 even at lower edge
+
+
+def test_qualifying_falls_back_to_edge_when_strength_equal():
+    """When signal_strength is tied, larger edge wins."""
+    s1 = _signal(confidence="HIGH", edge=0.25, flag_path="HEURISTIC")
+    s2 = _signal(confidence="HIGH", edge=0.10, flag_path="HEURISTIC")
+    result = report._qualifying([s2, s1], threshold_rank=0)
+    assert result[0] is s1   # higher edge first when strength equal
+
+
+# ─── urgency marker ───────────────────────────────────────────────────────────
+
+def test_urgency_closing_today_shown_when_days_left_zero():
+    """Markets expiring ≤0 days away show CLOSING TODAY/TOMORROW."""
+    from datetime import datetime, timezone, timedelta
+    tomorrow = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    s = _signal(close_time=tomorrow)
+    lines = report._signal_block(s)
+    ticker_line = lines[1]
+    assert "CLOSING TODAY/TOMORROW" in ticker_line or "CLOSING IN" in ticker_line
+
+
+def test_urgency_closing_in_two_days():
+    """Markets closing in ~2 days show CLOSING IN Nd (1 ≤ N ≤ 3)."""
+    from datetime import datetime, timezone, timedelta
+    # Add 23h buffer so floor truncation doesn't drop below expected band
+    close_dt  = datetime.now(timezone.utc) + timedelta(days=2, hours=12)
+    days_left = (close_dt - datetime.now(timezone.utc)).days
+    close = close_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    s = _signal(close_time=close)
+    lines = report._signal_block(s)
+    ticker_line = lines[1]
+    assert f"CLOSING IN {days_left}d" in ticker_line
+
+
+def test_urgency_closing_in_six_days():
+    """Markets closing in ~6 days show soft close notice 'closes in Nd'."""
+    from datetime import datetime, timezone, timedelta
+    close_dt  = datetime.now(timezone.utc) + timedelta(days=6, hours=12)
+    days_left = (close_dt - datetime.now(timezone.utc)).days
+    close = close_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    s = _signal(close_time=close)
+    lines = report._signal_block(s)
+    ticker_line = lines[1]
+    assert f"closes in {days_left}d" in ticker_line
+
+
+def test_urgency_absent_when_far_future():
+    """Markets closing in 30+ days show no urgency marker."""
+    from datetime import datetime, timezone, timedelta
+    close = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    s = _signal(close_time=close)
+    lines = report._signal_block(s)
+    ticker_line = lines[1]
+    assert "closes in" not in ticker_line and "CLOSING IN" not in ticker_line
+
+
+# ─── repeat count marker ──────────────────────────────────────────────────────
+
+def test_repeat_count_shown_when_two_or_more():
+    """[REPEAT x3] appears in ticker line when repeat_count >= 2."""
+    s = _signal(is_repeat=True, repeat_count=3)
+    lines = report._signal_block(s)
+    ticker_line = lines[1]
+    assert "[REPEAT x3]" in ticker_line
+
+
+def test_repeat_label_shown_when_repeat_count_one():
+    """[REPEAT] (no count) shown when is_repeat but repeat_count < 2."""
+    s = _signal(is_repeat=True, repeat_count=1)
+    lines = report._signal_block(s)
+    ticker_line = lines[1]
+    assert "[REPEAT]" in ticker_line
+
+
+def test_repeat_absent_for_new_signal():
+    """No REPEAT label for new (non-repeat) signals."""
+    s = _signal(is_repeat=False)
+    lines = report._signal_block(s)
+    ticker_line = lines[1]
+    assert "REPEAT" not in ticker_line

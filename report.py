@@ -91,6 +91,7 @@ def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
     ]
     out.sort(key=lambda s: (
         CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2),
+        -_signal_strength(s),
         -(abs(float(s.get("edge") or 0)))
     ))
     return out
@@ -107,11 +108,19 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     ticker    = s.get("ticker", "")
     title     = s.get("title", "")
     close_raw = s.get("close_time") or s.get("expiration_time", "")
-    close_fmt = ""
+    close_fmt  = ""
+    urgency    = ""
     if close_raw:
         try:
-            dt = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
+            dt        = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
             close_fmt = dt.strftime("Closes %b %d, %Y").replace(" 0", " ")
+            days_left = (dt - datetime.now(timezone.utc)).days
+            if days_left <= 0:
+                urgency = "  [CLOSING TODAY/TOMORROW]"
+            elif days_left <= 3:
+                urgency = f"  [CLOSING IN {days_left}d]"
+            elif days_left <= 7:
+                urgency = f"  [closes in {days_left}d]"
         except Exception:
             close_fmt = close_raw[:10]
 
@@ -126,8 +135,10 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     fp_label   = f"  [{s.get('flag_path')}]" if s.get("flag_path") else ""
     strength   = _signal_strength(s)
     str_label  = f"  ★×{strength}" if strength >= 2 else ""
+    repeat_cnt  = s.get("repeat_count", 0) or 0
+    rep_label   = f"  [REPEAT x{repeat_cnt}]" if repeat_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
     lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{fp_label}{str_label}")
-    lines.append(f"{ticker}  ·  {close_fmt}" if close_fmt else ticker)
+    lines.append(f"{ticker}  ·  {close_fmt}{urgency}{rep_label}" if close_fmt else f"{ticker}{urgency}{rep_label}")
     lines.append("")
 
     # Title

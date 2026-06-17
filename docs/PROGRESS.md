@@ -52,6 +52,11 @@ Config keys added to `polymarket` section:
 10. `11f0980` — Calibration rules 14-16: earnings (50%), diplomatic summit (40%), reelection (52%) + probe sync (557)
 11. `b7afbf5` — 4 new heuristics + 9 tests: Nobel (10%), UNSC (15%), SEC/FCC approval (40%), CEO appointment (35%) (566)
 12. `83930be` — Calibration rules 17-18: corporate leadership (35%, 8-K evidence required) + UNSC (15%, veto risk) + probe sync (568)
+13. `3919208` — 3 heuristic gap fills + 8 tests: Fed pause/hold (0.50), federal budget (0.40), 25th Amendment (0.05) (576)
+14. `0ca995e` — Update PROGRESS.md with Session 8 commit list (commits 9-12)
+15. `c0c6b89` — 3 more heuristic categories + 7 tests: Pulitzer (0.10), extradition (0.35), primary challenge (0.30) (583)
+16. `68b9b11` — Major BR_NONE gap-fill pass: 10 new heuristic categories + 20 tests (599) — covers political withdrawal/ballot-disqualification year-injection bugs, divestiture, stock split, COVID variant, special election, constitutional amendment
+17. `0e3cf64` — Signal strength composite indicator (★×N in report header when N≥2 corroborating signals) + 9 tests (608)
 
 ---
 
