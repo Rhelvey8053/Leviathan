@@ -251,6 +251,21 @@ def main(use_snapshot: bool = False):
         if cnt:
             print(f"    {h:<12}  {cnt:>4}")
 
+    # Heuristic base rate distribution across all scored markets
+    br_dist: dict[str, int] = {"None (BR_NONE)": 0}
+    for m in scored:
+        br = m.get("base_rate")
+        if br is None:
+            br_dist["None (BR_NONE)"] += 1
+        else:
+            key = f"{br:.2f}"
+            br_dist[key] = br_dist.get(key, 0) + 1
+
+    print()
+    print("  Base rate distribution (scored markets):")
+    for br_key in sorted(br_dist, key=lambda k: br_dist[k], reverse=True):
+        print(f"    {br_key:<20}  {br_dist[br_key]:>4}")
+
     # Top flagged by edge
     top_flagged = sorted(
         [m for m in flagged if m.get("raw_edge") is not None],
