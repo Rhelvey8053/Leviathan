@@ -253,6 +253,20 @@ def estimate_base_rate(market: dict) -> float | None:
         # Media / entertainment — very low: release dates often slip
         (["release", "released", "premieres", "premiere by",
           "season", "movie", "film", "show"], 0.25),
+        # Space / aerospace — launch delays are the norm; SpaceX has better cadence than NASA
+        (["starship", "falcon heavy", "falcon 9",
+          "spacex launch", "rocket launch"], 0.40),    # SpaceX has high cadence
+        (["nasa", "moon landing", "lunar gateway", "artemis",
+          "space station", " iss ", "james webb"], 0.30),  # NASA missions often delayed
+        # Health / pandemic / drug trials
+        (["phase 3", "clinical trial", "phase 2",
+          "drug trial", "clinical study"], 0.35),      # Phase 3 trials ~35-50% success
+        (["pandemic", "epidemic", "outbreak",
+          "public health emergency"], 0.25),           # Low base rate for declared emergencies
+        # Climate / renewable energy policy
+        (["carbon tax", "carbon credit", "net zero",
+          "emissions target", "paris agreement",
+          "clean energy", "renewable energy mandate"], 0.35),
         # AI / technology model release timing — similar to entertainment: announced ≠ shipped
         # "will OpenAI release GPT-5 by Q3?" — base rate ~25% for any given 3-month window
         (["gpt-5", "gpt-6", "gpt 5", "gpt 6",

@@ -910,6 +910,15 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Which party will have a senate majority after November 2026?", 0.50),
     ("Will Republicans flip the House in 2026?", 0.50),
     ("Senate control 2026 election outcome", 0.50),
+    # Space / aerospace
+    ("Will SpaceX Starship complete an orbital flight in Q3 2026?", 0.40),
+    ("Will NASA's Artemis mission launch before end of 2026?", 0.30),
+    # Health / clinical trials
+    ("Will the Phase 3 trial for X drug succeed by Q2 2026?", 0.35),
+    ("Will a pandemic be declared by the WHO in 2026?", 0.25),
+    # Climate / energy policy
+    ("Will Congress pass a carbon tax before 2027?", 0.35),
+    ("Will the EU reach its net zero emissions target by 2030?", 0.35),
     # AI model release timing markets
     ("Will OpenAI release GPT-5 by end of Q3 2026?", 0.25),
     ("Will GPT-6 be released before December 2026?", 0.25),

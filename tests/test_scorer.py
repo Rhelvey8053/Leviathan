@@ -251,6 +251,11 @@ def test_system_prompt_has_ai_release_rule():
     assert "announced" in scorer.SYSTEM_PROMPT.lower()
 
 
+def test_system_prompt_has_cross_market_rule():
+    assert "CROSS-MARKET DIVERGENCE" in scorer.SYSTEM_PROMPT
+    assert "Polymarket" in scorer.SYSTEM_PROMPT
+
+
 def test_system_prompt_has_entertainment_rule():
     assert "ENTERTAINMENT" in scorer.SYSTEM_PROMPT
     assert "MUST be below 15%" in scorer.SYSTEM_PROMPT
