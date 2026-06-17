@@ -22,8 +22,9 @@ import accounts
 import polymarket
 
 CONFIG_PATH  = os.path.join(ROOT, "config.json")
-SNAPSHOT_DIR = os.path.join(ROOT, "data", "snapshots")
-CACHE_PATH   = os.path.join(ROOT, "data", "watchlist_cache.json")
+SNAPSHOT_DIR   = os.path.join(ROOT, "data", "snapshots")
+CACHE_PATH     = os.path.join(ROOT, "data", "watchlist_cache.json")
+REPORT_DIR     = os.path.join(ROOT, "data", "smart_money")
 
 
 def load_config() -> dict:
@@ -191,15 +192,79 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
         print("\n  No Kalshi cross-references found in this snapshot.")
 
     print()
-    return {
-        "traders_active": total_traders,
+
+    result = {
+        "traders_active":  total_traders,
         "positions_total": total_pos,
         "kalshi_signals":  all_signals,
+        "trader_data":     trader_data,
+        "run_at":          datetime.now(timezone.utc).isoformat(),
     }
+    return result
+
+
+def save_report(result: dict) -> str:
+    """Write a dated markdown report to data/smart_money/YYYY-MM-DD.md. Returns the path."""
+    os.makedirs(REPORT_DIR, exist_ok=True)
+    date_str  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_at    = result.get("run_at", datetime.now(timezone.utc).isoformat())
+    out_path  = os.path.join(REPORT_DIR, f"{date_str}.md")
+
+    lines = [
+        f"# Smart Money Watchlist — {date_str}",
+        f"",
+        f"**Run at:** {run_at}",
+        f"**Traders active:** {result['traders_active']}  "
+        f"**Positions tracked:** {result['positions_total']}",
+        f"",
+    ]
+
+    signals = result.get("kalshi_signals", [])
+    if signals:
+        lines += [
+            f"## Kalshi Cross-References ({len(signals)})",
+            f"",
+            f"| Trader | Outcome | Market | Poly Price | Position | Kalshi Ticker | Match |",
+            f"|--------|---------|--------|-----------|----------|--------------|-------|",
+        ]
+        for s in sorted(signals, key=lambda x: -x["position_val"]):
+            lines.append(
+                f"| {s['trader']} | {s['poly_outcome']} | {s['poly_title'][:45]} "
+                f"| {s['poly_price']:.2f} | ${s['position_val']:,.0f} "
+                f"| {s['kalshi_ticker']} | {s['match_score']:.0%} |"
+            )
+        lines.append("")
+    else:
+        lines += ["## Kalshi Cross-References", "", "None found in this snapshot.", ""]
+
+    lines += ["## All Open Positions", ""]
+    for name, data in result.get("trader_data", {}).items():
+        positions = data.get("positions", [])
+        if not positions:
+            continue
+        monthly = data.get("monthly_pnl", 0)
+        lines.append(f"### {name}  (${monthly/1e6:.1f}M/mo)")
+        lines.append("")
+        lines.append("| Outcome | Value | Price | PnL | Market |")
+        lines.append("|---------|-------|-------|-----|--------|")
+        for p in positions:
+            val     = float(p.get("currentValue") or 0)
+            price   = float(p.get("curPrice") or p.get("avgPrice") or 0)
+            outcome = p.get("outcome", "?")
+            title   = p.get("title", "")[:55]
+            pct_pnl = float(p.get("percentPnl") or 0)
+            lines.append(f"| {outcome} | ${val:,.0f} | {price:.2f} | {pct_pnl:+.1f}% | {title} |")
+        lines.append("")
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    return out_path
 
 
 if __name__ == "__main__":
-    import sys
     force = "--refresh" in sys.argv
     cfg   = load_config()
-    run_smart_money_scan(cfg, force_refresh=force)
+    result = run_smart_money_scan(cfg, force_refresh=force)
+    path   = save_report(result)
+    print(f"Report saved: {path}")
