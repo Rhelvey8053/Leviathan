@@ -40,8 +40,18 @@ Config keys added to `polymarket` section:
 
 ### Git commits this session
 
-1. `(docs)` — PROGRESS.md + README housekeeping (489 count, Session 7 commit 9)
-2. `(feat)` — polymarket refactor + CROSS_MARKET promotion + 24 new tests (513)
+1. `67e8a94` — PROGRESS.md + README housekeeping (489 count, Session 7 commit 9)
+2. `6155573` — polymarket refactor + CROSS_MARKET promotion + 24 new tests (513)
+3. `469604f` — CROSS_MARKET flag reason in scorer prompt + 2 scorer tests (515)
+4. `fa3deb5` — 5 new heuristic categories + 13 tests: arrested, testimony, approval, strikes, awards (528)
+5. `81a91cb` — Fix match_markets gap-floor bug: None-price excluded when gap floor > 0 (530)
+6. `454305b` — cross_market_min_match_score guard (0.65) for loose-title false positives (531)
+7. `2756d38` — Calibration rules 12-13: legislative (~35%) + price-level (50/50) (533)
+8. `e70627b` — Recalibrate shutdown/debt-ceiling heuristics (shutdown avoid→0.85, begins→0.15; ceiling raise→0.70, generic→0.65) (537)
+9. `fee5fad` — 5 new heuristics + 17 tests: reelection, diplomatic summits, earnings, stock indices, mortality (554)
+10. `11f0980` — Calibration rules 14-16: earnings (50%), diplomatic summit (40%), reelection (52%) + probe sync (557)
+11. `b7afbf5` — 4 new heuristics + 9 tests: Nobel (10%), UNSC (15%), SEC/FCC approval (40%), CEO appointment (35%) (566)
+12. `83930be` — Calibration rules 17-18: corporate leadership (35%, 8-K evidence required) + UNSC (15%, veto risk) + probe sync (568)
 
 ---
 
