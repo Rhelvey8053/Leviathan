@@ -297,6 +297,19 @@ def estimate_base_rate(market: dict) -> float | None:
         (["minimum wage", "raise the minimum wage", "increase the minimum wage",
           "minimum wage increase", "minimum wage hike", "minimum wage legislation",
           "federal minimum wage", "minimum wage to $", "minimum wage bill"], 0.25),
+        # Veto — must come BEFORE the tax block so "veto the tax reform bill" → 0.20, not 0.35
+        (["veto", "presidential veto", "veto the bill",
+          "pocket veto"], 0.20),
+        # Tax legislation — income tax, corporate tax, capital gains tax, tax reform → ~35%
+        # Distinct from minimum wage (0.25) and healthcare (0.20); same rate as generic legislative
+        # block but more specific trigger. Placed BEFORE generic legislative to capture tax-focused
+        # titles that don't use "pass the senate" / "signed into law" phrasing.
+        (["income tax", "corporate tax", "capital gains tax",
+          "estate tax", "tax cut", "tax hike",
+          "tax increase", "tax decrease", "tax reduction",
+          "tax reform bill", "tax legislation",
+          "tax bill", "federal tax", "individual tax",
+          "tax overhaul", "tcja extension", "tax code reform"], 0.35),
         # Congressional spending — continuing resolutions / omnibus bills (must come before
         # generic "signed into law" because "omnibus bill" is a more specific match)
         (["continuing resolution", "omnibus bill", "appropriations bill",
@@ -312,8 +325,6 @@ def estimate_base_rate(market: dict) -> float | None:
           "become law", "enacted into law",
           "senate pass", "house pass", "senate approve", "house approve",
           "senate vote on", "house vote on"], 0.35),
-        (["veto", "presidential veto", "veto the bill",
-          "pocket veto"], 0.20),
         # National emergency declaration — executive action used for crises; any single
         # trigger is uncertain (~25%); placed before executive_order (0.45)
         (["national emergency", "declare a national emergency",
@@ -610,6 +621,13 @@ def estimate_base_rate(market: dict) -> float | None:
           "end qe", "begin qe", "restart qe",
           "end qt", "begin qt", "resume qe",
           "purchase treasuries", "purchase mortgage-backed"], 0.40),
+        # Supply chain / logistics disruption — specific disruption thresholds are uncertain → ~30%
+        # Placed BEFORE recession (0.25) to catch supply-chain framing separately from macro contractions
+        (["supply chain", "port strike", "port congestion",
+          "shipping delay", "shipping backlog", "freight disruption",
+          "container shortage", "supply chain crisis", "logistics crisis",
+          "port closure", "supply chain disruption", "supply chain bottleneck",
+          "shipping blockage", "supply disruption", "freight crisis"], 0.30),
         (["recession", "in recession", "enters recession"], 0.25),
         # Housing market crash / real estate bust — tail event; ~15% in any given year
         # Placed BEFORE generic "fall below" / price-level patterns
@@ -752,6 +770,13 @@ def estimate_base_rate(market: dict) -> float | None:
           "enter the banking", "enter the auto", "enter the space",
           "launch a new business", "expand into",
           "new market entry", "move into the"], 0.35),
+        # Electric vehicle (EV) adoption / sales milestones — growing market, thresholds often met → ~45%
+        # Placed BEFORE generic "vehicle deliveries" (0.40) which catches all vehicle delivery questions
+        (["ev sales", "electric vehicle sales", "ev market share",
+          "electric vehicle market share", "ev adoption", "ev penetration",
+          "electric car sales", "battery electric vehicle sales",
+          "bev sales", "electric vehicle adoption", "ev registrations",
+          "ev market penetration", "electric vehicle market penetration"], 0.45),
         # Production / delivery milestone — volume targets are uncertain → ~40%
         (["vehicle deliveries", "delivery target", "delivery milestone",
           "production target", "production milestone",
@@ -762,6 +787,14 @@ def estimate_base_rate(market: dict) -> float | None:
         (["be sold by", "forced to sell", "forced sale", "divest",
           "divestiture", "forced divestiture", "sell off",
           "spin off its", "spin out"], 0.35),
+        # Bond / debt issuance — planned sovereign or corporate bond offerings almost always complete → ~65%
+        # Routine treasury auction → ~90%; shelf registration active → ~80%; exploring/considering → ~45%
+        # Base rate of 65% reflects the typical mix of confirmed and exploratory issuance market questions
+        (["issue bonds", "bond issuance", "bond offering",
+          "bond sale", "bond auction", "treasury auction",
+          "debt offering", "sovereign bond", "issue new bonds",
+          "bond deal", "bond placement", "bond raise",
+          "issue debt", "complete a bond", "price a bond"], 0.65),
         # Stock split — corporate event, relatively rare in any given 3-6 month window → ~20%
         (["stock split", "share split", "reverse stock split",
           "forward stock split", "split its stock", "announce a split"], 0.20),
@@ -1116,6 +1149,15 @@ def estimate_base_rate(market: dict) -> float | None:
         # Approval ratings — market already prices current polling; near 50/50
         (["approval rating", "job approval", "favorability rating",
           "approve of the", "disapprove of the", "net approval"], 0.50),
+        # Unionization / NLRB election — union election outcomes are uncertain; ~40% overall
+        # Formal NLRB vote date set → ~55-65%; pre-election authorization drive → ~35%
+        # Placed BEFORE labor strike (0.30); union VOTE ≠ STRIKE action
+        (["union election", "union vote", "vote to unionize",
+          "unionize the", "labor union vote", "form a union",
+          "nlrb election", "union drive", "union campaign",
+          "union organizing", "right to organize", "vote on unionization",
+          "union certification", "union authorization",
+          "organize a union", "unionization vote"], 0.40),
         # Labor strikes / work stoppages
         (["go on strike", "labor strike", "workers strike", "union strike",
           "strike action", "work stoppage", "walkout"], 0.30),
@@ -1145,6 +1187,524 @@ def estimate_base_rate(market: dict) -> float | None:
         if any(s in title for s in signals):
             return rate
 
+    return None
+
+
+def get_heuristic_label(market: dict) -> str | None:
+    """
+    Returns a short human-readable category label for the matched heuristic.
+    Mirrors the ordering of estimate_base_rate() — most specific patterns first.
+    Used in build_prompt() so Claude sees the category name alongside the base rate,
+    enabling it to apply category-specific calibration rules (e.g., Rule 31 for PDUFA
+    dates, Rule 37 for crypto upgrades, Rule 39 for OPEC decisions).
+    Returns None when estimate_base_rate() would also return None.
+    """
+    title = (market.get("title") or "").lower()
+    _rules: list[tuple[str, str]] = [
+        # Sports
+        ("win the world series",      "sports championship"),
+        ("win the championship",      "sports championship"),
+        ("win the super bowl",        "sports championship"),
+        ("win the nba",               "sports championship"),
+        ("win the world cup",         "sports championship"),
+        ("win the election",          "election"),
+        ("win the primary",           "election"),
+        ("win reelection",            "reelection"),
+        ("win re-election",           "reelection"),
+        ("be reelected",              "reelection"),
+        ("primary challenge",         "primary challenge"),
+        ("withdraw from the paris",   "treaty withdrawal"),
+        ("withdraw from nato",        "treaty withdrawal"),
+        ("withdraw from the treaty",  "treaty withdrawal"),
+        ("suspend his campaign",      "candidate withdrawal"),
+        ("suspend her campaign",      "candidate withdrawal"),
+        ("drop out of the",           "candidate withdrawal"),
+        ("special election",          "special election"),
+        ("constitutional amendment",  "constitutional amendment"),
+        ("abolish the electoral",     "constitutional amendment"),
+        ("recall election",           "recall election"),
+        ("recall the governor",       "recall election"),
+        ("recall vote",               "recall election"),
+        ("snap election",             "snap election"),
+        ("early election",            "snap election"),
+        ("not seek a second term",    "candidate withdrawal"),
+        ("announce his candidacy",    "candidacy announcement"),
+        ("announce her candidacy",    "candidacy announcement"),
+        ("ballot disqualification",   "ballot disqualification"),
+        ("disqualified from the",     "ballot disqualification"),
+        ("student loan forgiveness",  "student loan forgiveness"),
+        ("student debt cancellation", "student loan forgiveness"),
+        ("healthcare reform",         "healthcare reform"),
+        ("medicare for all",          "healthcare reform"),
+        ("universal healthcare",      "healthcare reform"),
+        ("minimum wage",              "minimum wage legislation"),
+        # Tax legislation — before generic legislative
+        ("income tax",                "tax legislation"),
+        ("corporate tax",             "tax legislation"),
+        ("capital gains tax",         "tax legislation"),
+        ("estate tax",                "tax legislation"),
+        ("tax cut",                   "tax legislation"),
+        ("tax hike",                  "tax legislation"),
+        ("tax reform",                "tax legislation"),
+        ("tax legislation",           "tax legislation"),
+        ("tax bill",                  "tax legislation"),
+        ("tcja extension",            "tax legislation"),
+        ("continuing resolution",     "budget/spending legislation"),
+        ("omnibus bill",              "budget/spending legislation"),
+        ("pass the senate",           "legislative passage"),
+        ("pass the house",            "legislative passage"),
+        ("become law",                "legislative passage"),
+        ("signed into law",           "legislative passage"),
+        ("veto",                      "presidential veto"),
+        ("national emergency",        "national emergency"),
+        ("executive order",           "executive order"),
+        ("senate confirmation",       "senate confirmation"),
+        ("member of trump's cabinet", "cabinet departure"),
+        ("leave the cabinet",         "cabinet departure"),
+        ("announce his retirement",   "athlete retirement"),
+        ("announce her retirement",   "athlete retirement"),
+        ("retire from the",           "athlete retirement"),
+        ("be pardoned",               "presidential clemency"),
+        ("receive a pardon",          "presidential clemency"),
+        ("grant a pardon",            "presidential clemency"),
+        ("grant clemency",            "presidential clemency"),
+        ("control the senate",        "congressional control"),
+        ("control the house",         "congressional control"),
+        ("senate majority",           "congressional control"),
+        ("lift sanctions",            "sanctions removal"),
+        ("remove sanctions",          "sanctions removal"),
+        ("impose sanctions",          "sanctions imposition"),
+        ("nuclear power plant",       "nuclear accident"),
+        ("nuclear reactor",           "nuclear accident"),
+        ("develop a nuclear weapon",  "nuclear proliferation"),
+        ("nuclear weapons program",   "nuclear proliferation"),
+        ("nuclear deal",              "nuclear deal"),
+        ("nuclear agreement",         "nuclear deal"),
+        ("end enrichment",            "uranium enrichment"),
+        ("halt enrichment",           "uranium enrichment"),
+        ("martial law",               "martial law"),
+        ("regime fall",               "regime collapse"),
+        ("government falls",          "regime collapse"),
+        ("ceasefire",                 "ceasefire or peace deal"),
+        ("peace deal",                "ceasefire or peace deal"),
+        ("peace agreement",           "ceasefire or peace deal"),
+        ("abraham accords",           "Abraham Accords"),
+        ("normalization with israel", "Abraham Accords"),
+        ("join nato",                 "NATO accession"),
+        ("nato membership",           "NATO accession"),
+        ("join brics",                "BRICS expansion"),
+        ("brics membership",          "BRICS expansion"),
+        ("rejoin the paris",          "international agreement rejoin"),
+        ("join the eu",               "EU accession"),
+        ("eu membership",             "EU accession"),
+        ("common currency",           "currency union"),
+        ("currency union",            "currency union"),
+        ("central bank digital currency", "CBDC adoption"),
+        ("cbdc",                      "CBDC adoption"),
+        ("digital dollar",            "CBDC adoption"),
+        ("digital euro",              "CBDC adoption"),
+        ("outperform",                "economic performance comparison"),
+        ("un security council",       "UN Security Council"),
+        ("bilateral summit",          "diplomatic summit"),
+        ("diplomatic summit",         "diplomatic summit"),
+        ("peace summit",              "diplomatic summit"),
+        ("supreme court",             "supreme court ruling"),
+        ("scotus",                    "supreme court ruling"),
+        ("plead guilty",              "plea deal"),
+        ("plea deal",                 "plea deal"),
+        ("be acquitted",              "acquittal"),
+        ("not guilty verdict",        "acquittal"),
+        ("convicted",                 "criminal conviction"),
+        ("found guilty",              "criminal conviction"),
+        ("indicted",                  "criminal conviction"),
+        ("impeach",                   "impeachment"),
+        ("25th amendment",            "25th Amendment"),
+        ("face trial",                "criminal trial"),
+        ("stand trial",               "criminal trial"),
+        ("be fined by",               "regulatory fine"),
+        ("eu fine",                   "regulatory fine"),
+        ("cyberattack",               "cyberattack"),
+        ("data breach",               "cyberattack"),
+        ("ransomware",                "cyberattack"),
+        ("be arrested",               "arrest"),
+        ("taken into custody",        "arrest"),
+        ("be extradited",             "extradition"),
+        ("extradited to",             "extradition"),
+        ("testify before congress",   "congressional testimony"),
+        ("testify before the senate", "congressional testimony"),
+        ("be fired",                  "employment termination"),
+        ("dismissed",                 "employment termination"),
+        ("be removed",                "employment termination"),
+        ("mass layoffs",              "mass layoffs"),
+        ("workforce reduction",       "mass layoffs"),
+        ("avoid a shutdown",          "government shutdown avoided"),
+        ("avert a shutdown",          "government shutdown avoided"),
+        ("government shutdown",       "government shutdown"),
+        ("partial shutdown",          "government shutdown"),
+        ("raise the debt ceiling",    "debt ceiling resolution"),
+        ("debt ceiling deal",         "debt ceiling resolution"),
+        ("debt ceiling",              "debt ceiling"),
+        ("debt limit",                "debt ceiling"),
+        ("antitrust",                 "antitrust action"),
+        ("ftc block",                 "antitrust action"),
+        ("doj block",                 "antitrust action"),
+        ("north korea missile",       "North Korea provocation"),
+        ("north korea nuclear",       "North Korea provocation"),
+        ("dprk",                      "North Korea provocation"),
+        ("water crisis",              "water crisis"),
+        ("water shortage",            "water crisis"),
+        ("lake mead",                 "water crisis"),
+        ("drought conditions",        "water crisis"),
+        ("hurricane",                 "hurricane"),
+        ("tropical storm",            "hurricane"),
+        ("earthquake",                "earthquake"),
+        ("volcanic eruption",         "volcanic eruption"),
+        ("wildfire",                  "wildfire"),
+        # Fed rate decision — before supply chain to avoid "rate cut" false match
+        ("rate cut",                  "Fed rate decision"),
+        ("rate hike",                 "Fed rate decision"),
+        ("fomc",                      "Fed rate decision"),
+        ("interest rate cut",         "Fed rate decision"),
+        ("opec",                      "OPEC production decision"),
+        ("oil production cut",        "OPEC production decision"),
+        ("chip export",               "chip export restriction"),
+        ("semiconductor export",      "chip export restriction"),
+        ("export ban list",           "chip export restriction"),
+        ("quantitative easing",       "central bank balance sheet"),
+        ("quantitative tightening",   "central bank balance sheet"),
+        # Supply chain
+        ("supply chain",              "supply chain disruption"),
+        ("port strike",               "supply chain disruption"),
+        ("port congestion",           "supply chain disruption"),
+        ("shipping delay",            "supply chain disruption"),
+        ("container shortage",        "supply chain disruption"),
+        ("recession",                 "recession"),
+        ("housing market crash",      "housing market crash"),
+        ("housing crash",             "housing market crash"),
+        ("real estate crash",         "housing market crash"),
+        ("housing prices",            "housing price level"),
+        ("home prices",               "housing price level"),
+        ("median home price",         "housing price level"),
+        ("default",                   "sovereign/corporate default"),
+        ("trade deficit",             "trade balance"),
+        ("trade surplus",             "trade balance"),
+        ("treasury yield",            "bond yield level"),
+        ("10-year yield",             "bond yield level"),
+        ("bond yield",                "bond yield level"),
+        ("housing permits",           "housing permits data"),
+        ("housing starts",            "housing permits data"),
+        ("building permits",          "housing permits data"),
+        ("unemployment rate",         "employment data"),
+        ("nonfarm payroll",           "employment data"),
+        ("jobs report",               "employment data"),
+        ("retail sales",              "retail sales data"),
+        ("consumer confidence",       "consumer confidence data"),
+        ("consumer sentiment",        "consumer confidence data"),
+        ("inflation exceed",          "inflation threshold"),
+        ("inflation rate",            "CPI/inflation data"),
+        ("cpi",                       "CPI/inflation data"),
+        ("gdp growth",                "GDP data"),
+        ("economic growth",           "GDP data"),
+        ("s&p 500 above",             "equity index level"),
+        ("s&p above",                 "equity index level"),
+        ("nasdaq above",              "equity index level"),
+        ("vix above",                 "equity index level"),
+        ("dow jones above",           "equity index level"),
+        ("beat earnings",             "earnings beat/miss"),
+        ("miss earnings",             "earnings beat/miss"),
+        ("earnings beat",             "earnings beat/miss"),
+        ("eps above",                 "earnings beat/miss"),
+        # FDA / drug — PDUFA first (most specific)
+        ("pdufa",                     "PDUFA date"),
+        ("clinical hold",             "FDA clinical hold"),
+        ("complete response letter",  "FDA complete response letter"),
+        ("fda advisory",              "FDA advisory committee"),
+        ("adcom",                     "FDA advisory committee"),
+        ("fda approve",               "FDA approval"),
+        ("fda clears",                "FDA approval"),
+        ("sec approve",               "regulatory approval"),
+        ("fcc approve",               "regulatory approval"),
+        ("regulatory approval",       "regulatory approval"),
+        # Crypto — protocol upgrade before generic price level
+        ("network upgrade",           "crypto protocol upgrade"),
+        ("protocol upgrade",          "crypto protocol upgrade"),
+        ("hard fork",                 "crypto protocol upgrade"),
+        ("blockchain upgrade",        "crypto protocol upgrade"),
+        ("chain upgrade",             "crypto protocol upgrade"),
+        ("scheduled upgrade",         "crypto protocol upgrade"),
+        ("mainnet upgrade",           "crypto protocol upgrade"),
+        ("pectra",                    "crypto protocol upgrade"),
+        ("shapella",                  "crypto protocol upgrade"),
+        ("eip-",                      "crypto protocol upgrade"),
+        ("bip-",                      "crypto protocol upgrade"),
+        ("bitcoin etf",               "crypto ETF"),
+        ("spot etf",                  "crypto ETF"),
+        ("bitcoin",                   "crypto price level"),
+        ("ethereum",                  "crypto price level"),
+        ("crypto",                    "crypto price level"),
+        # Commodity
+        ("gold price",                "commodity price level"),
+        ("gold above",                "commodity price level"),
+        ("crude oil",                 "commodity price level"),
+        ("oil price",                 "commodity price level"),
+        ("natural gas price",         "commodity price level"),
+        # Secondary equity offering — before IPO
+        ("secondary offering",        "secondary equity offering"),
+        ("follow-on offering",        "secondary equity offering"),
+        ("shelf registration",        "secondary equity offering"),
+        ("at-the-market offering",    "secondary equity offering"),
+        # IPO
+        ("announce an ipo",           "IPO announcement"),
+        ("going public",              "IPO announcement"),
+        ("initial public offering",   "IPO timing"),
+        ("ipo by",                    "IPO timing"),
+        # Sports debut — before merger block
+        ("make his mlb debut",        "sports debut"),
+        ("play in a game for",        "sports debut"),
+        ("called up",                 "sports debut"),
+        # Merger / acquisition
+        ("merger",                    "merger or acquisition"),
+        ("acquisition",               "merger or acquisition"),
+        ("be acquired",               "merger or acquisition"),
+        ("take private",              "merger or acquisition"),
+        # EV adoption — before generic vehicle delivery
+        ("ev sales",                  "EV adoption milestone"),
+        ("electric vehicle sales",    "EV adoption milestone"),
+        ("ev market share",           "EV adoption milestone"),
+        ("ev adoption",               "EV adoption milestone"),
+        ("ev penetration",            "EV adoption milestone"),
+        # Bond/debt issuance — before stock split
+        ("issue bonds",               "bond/debt issuance"),
+        ("bond issuance",             "bond/debt issuance"),
+        ("bond offering",             "bond/debt issuance"),
+        ("bond sale",                 "bond/debt issuance"),
+        ("bond auction",              "bond/debt issuance"),
+        ("treasury auction",          "bond/debt issuance"),
+        ("debt offering",             "bond/debt issuance"),
+        # Divestiture
+        ("forced to sell",            "corporate divestiture"),
+        ("divest",                    "corporate divestiture"),
+        ("spin off",                  "corporate divestiture"),
+        # Stock split
+        ("stock split",               "stock split"),
+        ("share split",               "stock split"),
+        # Municipal bankruptcy — before corporate bankruptcy
+        ("municipal bankruptcy",      "municipal bankruptcy"),
+        ("city bankruptcy",           "municipal bankruptcy"),
+        ("chapter 9 bankruptcy",      "municipal bankruptcy"),
+        # Corporate bankruptcy
+        ("bankruptcy",                "corporate bankruptcy"),
+        # Credit rating change
+        ("credit rating downgrade",   "credit rating change"),
+        ("credit rating upgrade",     "credit rating change"),
+        ("downgraded by moody",       "credit rating change"),
+        ("downgraded by s&p",         "credit rating change"),
+        ("upgraded by moody",         "credit rating change"),
+        ("upgraded by s&p",           "credit rating change"),
+        ("moody's downgrade",         "credit rating change"),
+        ("s&p downgrade",             "credit rating change"),
+        # Short seller report
+        ("hindenburg research",       "short seller report"),
+        ("muddy waters",              "short seller report"),
+        ("short seller report",       "short seller report"),
+        ("short report on",           "short seller report"),
+        # Bank failure
+        ("bank failure",              "bank failure"),
+        ("bank collapse",             "bank failure"),
+        ("banking crisis",            "bank failure"),
+        # Filibuster reform
+        ("filibuster reform",         "filibuster reform"),
+        ("end the filibuster",        "filibuster reform"),
+        ("eliminate the filibuster",  "filibuster reform"),
+        ("abolish the filibuster",    "filibuster reform"),
+        ("filibuster rule",           "filibuster reform"),
+        ("nuclear option",            "filibuster reform"),
+        # Gun control
+        ("gun control",               "gun legislation"),
+        ("assault weapons ban",       "gun legislation"),
+        # Exchange rate
+        ("exchange rate",             "exchange rate"),
+        ("depreciate",                "exchange rate"),
+        ("appreciate against",        "exchange rate"),
+        # Remain CEO
+        ("remain ceo",                "CEO retention"),
+        ("stay as ceo",               "CEO retention"),
+        # Tech platform ban
+        ("tiktok ban",                "tech platform ban"),
+        ("ban tiktok",                "tech platform ban"),
+        # NATO Article 5
+        ("invoke article 5",          "NATO Article 5"),
+        ("article 5 of nato",         "NATO Article 5"),
+        # Military
+        ("recapture",                 "military offensive"),
+        ("counteroffensive",          "military offensive"),
+        ("independence referendum",   "independence referendum"),
+        ("troop withdrawal",          "military withdrawal"),
+        ("withdraw troops",           "military withdrawal"),
+        ("civil war",                 "civil conflict"),
+        ("declare war",               "military conflict"),
+        ("invade",                    "military conflict"),
+        ("military strike",           "military conflict"),
+        ("coup",                      "political coup"),
+        # Legalization
+        ("legalize cannabis",         "legalization"),
+        ("sports betting",            "legalization"),
+        ("gambling",                  "legalization"),
+        # Event cancellation
+        ("be cancelled",              "event cancellation"),
+        ("be postponed",              "event cancellation"),
+        # Records
+        ("break the record",          "athletic record"),
+        ("world record",              "athletic record"),
+        # Wealth tax
+        ("wealth tax",                "wealth tax"),
+        ("billionaire tax",           "wealth tax"),
+        # Product recall
+        ("product recall",            "product/drug recall"),
+        ("drug recall",               "product/drug recall"),
+        # Prizes
+        ("nobel prize",               "Nobel Prize"),
+        ("pulitzer",                  "Pulitzer Prize"),
+        # Entertainment awards
+        ("grammy",                    "entertainment award"),
+        ("oscar",                     "entertainment award"),
+        ("academy award",             "entertainment award"),
+        # Renewable energy
+        ("renewable energy",          "renewable energy"),
+        ("clean energy",              "renewable energy"),
+        # Political scandal
+        ("political scandal",         "political scandal"),
+        ("bribery scandal",           "political scandal"),
+        ("corruption scandal",        "political scandal"),
+        # Housing correction
+        ("housing correction",        "housing price correction"),
+        ("housing downturn",          "housing price correction"),
+        # Autonomous vehicle
+        ("autonomous vehicle",        "autonomous vehicle deployment"),
+        ("self-driving",              "autonomous vehicle deployment"),
+        ("robotaxi",                  "autonomous vehicle deployment"),
+        # Quantum computing
+        ("quantum computing",         "quantum computing"),
+        ("quantum supremacy",         "quantum computing"),
+        # Space
+        ("mars mission",              "deep space mission"),
+        ("crewed mars",               "deep space mission"),
+        ("starship",                  "SpaceX launch"),
+        ("spacex",                    "SpaceX launch"),
+        ("nasa",                      "NASA mission"),
+        ("moon landing",              "NASA mission"),
+        ("artemis",                   "NASA mission"),
+        # Clinical / health
+        ("phase 3",                   "clinical trial"),
+        ("clinical trial",            "clinical trial"),
+        ("pandemic",                  "pandemic/epidemic"),
+        ("variant of concern",        "COVID variant"),
+        ("covid variant",             "COVID variant"),
+        ("die before",                "health/mortality"),
+        ("survive until",             "health/mortality"),
+        # Climate
+        ("hottest year",              "climate record"),
+        ("record temperature",        "climate record"),
+        ("carbon tax",                "climate/energy policy"),
+        ("net zero",                  "climate/energy policy"),
+        ("paris agreement",           "climate/energy policy"),
+        # AI
+        ("gpt-5",                     "AI model release"),
+        ("llm release",               "AI model release"),
+        ("agi by",                    "AI model release"),
+        ("ai regulation",             "AI regulation"),
+        ("ai law",                    "AI regulation"),
+        ("ai pass",                   "AI capability milestone"),
+        ("ai beats",                  "AI capability milestone"),
+        # Trade
+        ("tariff on",                 "trade tariffs"),
+        ("tariffs on",                "trade tariffs"),
+        ("trade deal",                "trade tariffs"),
+        # Immigration
+        ("deportation",               "immigration policy"),
+        ("immigration reform",        "immigration policy"),
+        ("immigration ban",           "immigration policy"),
+        # Approval ratings
+        ("approval rating",           "approval rating"),
+        ("job approval",              "approval rating"),
+        # Unionization — before labor strike
+        ("union election",            "unionization vote"),
+        ("union vote",                "unionization vote"),
+        ("vote to unionize",          "unionization vote"),
+        ("unionize the",              "unionization vote"),
+        ("nlrb election",             "unionization vote"),
+        # Labor strike
+        ("go on strike",              "labor strike"),
+        ("labor strike",              "labor strike"),
+        ("work stoppage",             "labor strike"),
+        # Sports awards
+        ("mvp",                       "sports award"),
+        ("cy young",                  "sports award"),
+        ("heisman",                   "sports award"),
+        # Sports qualification
+        ("make the playoffs",         "sports qualification"),
+        ("qualify for",               "sports qualification"),
+        # Sports transactions
+        ("get traded",                "sports transaction"),
+        ("free agent signing",        "sports transaction"),
+        # Corporate appointments
+        ("become ceo",                "corporate leadership appointment"),
+        ("be named ceo",              "corporate leadership appointment"),
+        # Social media post
+        ("tweet about",               "social media post"),
+        ("post on twitter",           "social media post"),
+        ("post on x ",                "social media post"),
+        # Concert
+        ("concert tour",              "concert tour"),
+        ("world tour",                "concert tour"),
+        # Tech product
+        ("new iphone",                "tech product announcement"),
+        ("samsung galaxy",            "tech product announcement"),
+        ("ar glasses",                "tech product announcement"),
+        ("vision pro",                "tech product announcement"),
+        # Media / entertainment
+        ("box office",                "media/entertainment release"),
+        ("streaming",                 "media/entertainment release"),
+        ("movie release",             "media/entertainment release"),
+        ("album release",             "media/entertainment release"),
+        # Event attendance
+        ("will attend",               "event attendance"),
+        ("will speak at",             "event attendance"),
+        # Facility announcement
+        ("open a new factory",        "facility announcement"),
+        ("build a data center",       "facility announcement"),
+        # Share buyback
+        ("stock buyback",             "share buyback"),
+        ("share repurchase",          "share buyback"),
+        # Dividend
+        ("dividend increase",         "dividend announcement"),
+        ("declare a dividend",        "dividend announcement"),
+        ("special dividend",          "dividend announcement"),
+        # Index inclusion
+        ("added to the s&p",          "index inclusion"),
+        ("s&p 500 inclusion",         "index inclusion"),
+        # Production/delivery
+        ("vehicle deliveries",        "production/delivery milestone"),
+        ("delivery target",           "production/delivery milestone"),
+        # Corporate partnership
+        ("announce a partnership",    "corporate partnership"),
+        ("licensing agreement",       "corporate partnership"),
+        ("strategic partnership",     "corporate partnership"),
+        # Corporate market entry
+        ("enter the market",          "corporate market entry"),
+        ("expand into",               "corporate market entry"),
+        # Company valuation
+        ("market cap above",          "company valuation"),
+        ("valued above",              "company valuation"),
+        ("valuation above",           "company valuation"),
+        # Generic launch
+        ("launch",                    "product launch"),
+        # Competition win (most general — must be last)
+        (" win ",                     "competition win"),
+    ]
+    for pattern, label in _rules:
+        if pattern in title:
+            return label
     return None
 
 
@@ -1350,7 +1910,8 @@ def score_market(market: dict, config: dict) -> dict:
         last_p = float(market.get("last_price_dollars") or 0)
         mid_price = last_p if last_p > 0 else None
 
-    base_rate = estimate_base_rate(market)
+    base_rate       = estimate_base_rate(market)
+    heuristic_label = get_heuristic_label(market)
 
     if mid_price is not None and base_rate is not None:
         raw_edge = abs(base_rate - mid_price)
@@ -1424,6 +1985,7 @@ def score_market(market: dict, config: dict) -> dict:
         **market,
         "mid_price":           mid_price,
         "base_rate":           base_rate,
+        "heuristic_label":     heuristic_label,
         "raw_edge":            raw_edge,
         "net_edge":            net_edge,
         "heuristic_direction": heuristic_direction,

@@ -389,7 +389,49 @@ SYSTEM_PROMPT = (
     "Negative (S&P) or review for downgrade (Moody's) has ~70% probability of action "
     "within 90 days. 'Concerns raised', 'leverage is elevated', or 'analysts warn of "
     "downgrade risk' without formal outlook change is background noise — treat as 40% "
-    "base rate. Only the formal outlook/watch designation raises the estimate meaningfully."
+    "base rate. Only the formal outlook/watch designation raises the estimate meaningfully.\n"
+    "40. UNIONIZATION / NLRB ELECTION MARKETS ('Will [Company] workers vote to unionize?', "
+    "'Will the NLRB election at [facility] result in a union win?'): Base rate ~40% overall. "
+    "Calibrate based on procedural stage: (a) Authorization card drive only (no election "
+    "scheduled): ~35% — many drives stall before reaching the election threshold. (b) NLRB "
+    "election officially scheduled (election notice posted, date set): ~55-65% — workers who "
+    "voted in cards typically follow through. (c) Employer-filed election petition (not union-"
+    "filed): ~30% — employer-filed elections often occur when the union is not yet at majority. "
+    "CRITICAL: 'Workers filing cards', 'union organizing drive underway', and 'workers vote to "
+    "seek election' are PRE-election steps that occur before any binding vote — do NOT treat "
+    "these as evidence of a YES outcome. Only an NLRB-certified election date with confirmed "
+    "majority support should move the estimate meaningfully above 55%. For Amazon/Starbucks "
+    "campaigns at multiple sites simultaneously: use 40% per site unless the specific site has "
+    "a confirmed election date.\n"
+    "41. TAX LEGISLATION MARKETS ('Will Congress pass a tax cut?', 'Will income taxes be "
+    "reduced by [date]?', 'Will capital gains taxes increase in 2026?'): Base rate ~35% for "
+    "any specific tax change within a 6-12 month window. Calibrate based on political context: "
+    "(a) Budget reconciliation with unified government (same party controls House + Senate + "
+    "White House): ~60-65% — reconciliation requires only 51 votes; this is how TCJA passed. "
+    "(b) TCJA provisions sunsetting (existing tax cuts expiring): ~55-60% — Congress strongly "
+    "prefers extension over allowing statutory rate increases. (c) Bipartisan-required tax "
+    "bill (divided government, filibuster intact): ~25-30% — gridlock is the modal outcome. "
+    "(d) Net tax increase under Republican majority: ~10-15% — structural political constraint. "
+    "CRITICAL: Apply Rule 3 (announced ≠ enacted). 'Proposed tax reform', 'administration "
+    "releases tax plan', 'committee markup scheduled', and 'White House briefing on tax "
+    "cuts' are standard policy-process steps — not evidence of passage. Only a signed bill "
+    "with a presidential signature constitutes completion. Check the current control of "
+    "Congress and whether reconciliation is available before deviating far from the base rate.\n"
+    "42. BOND / DEBT ISSUANCE MARKETS ('Will [Country/Company] issue bonds by [date]?', "
+    "'Will the Treasury complete its [month] bond auction?'): Base rate ~65% overall, but "
+    "varies significantly by issuer type and stage: (a) Routine sovereign bond auction "
+    "(pre-announced by Treasury/central bank, normal market conditions): ~90-95% — sovereign "
+    "bond auctions almost always complete; only a sudden market dislocation (credit event, "
+    "trading halt) would prevent settlement. (b) Corporate bond offering with active shelf "
+    "registration (S-3 filed, books building): ~80% — the offering is effectively priced. "
+    "(c) New corporate bond issuance (board approved, banks mandated, roadshow complete): "
+    "~75% — nearly all mandated corporate offerings close unless markets dislocate. "
+    "(d) 'Considering' or 'exploring' issuance language: ~45% — many explored offerings "
+    "are delayed or abandoned. (e) Distressed sovereign (credit-impaired nation like "
+    "Argentina, Pakistan, Egypt seeking market access): ~40% — market access is genuinely "
+    "uncertain for distressed issuers. CRITICAL: Distinguish between 'the auction will "
+    "happen' (near-certain for scheduled auctions) and 'the auction will clear at above "
+    "a specific yield threshold' (50/50 threshold question, treat like bond yield markets)."
 )
 
 RESPONSE_SCHEMA = """
@@ -529,9 +571,11 @@ def build_prompt(markets: list[dict]) -> str:
         if fp == "HEURISTIC":
             br     = m.get("base_rate")
             hd     = m.get("heuristic_direction")
+            hl     = m.get("heuristic_label")
             br_str = f"base rate {br*100:.0f}%" if br is not None else "base rate unknown"
+            lbl    = f" [{hl}]" if hl else ""
             lean   = f" — leans {hd}" if hd and hd != "NEUTRAL" else ""
-            lines.append(f"   FLAG REASON: HEURISTIC — {br_str} vs market price{lean}")
+            lines.append(f"   FLAG REASON: HEURISTIC — {br_str}{lbl} vs market price{lean}")
         elif fp == "DRIFT":
             lines.append(f"   FLAG REASON: DRIFT — market price has moved significantly from last traded price")
         elif fp == "WATCHLIST":
@@ -539,9 +583,11 @@ def build_prompt(markets: list[dict]) -> str:
         elif fp == "EDGE":
             br     = m.get("base_rate")
             hd     = m.get("heuristic_direction")
+            hl     = m.get("heuristic_label")
             br_str = f"base rate {br*100:.0f}%" if br is not None else "base rate unknown"
+            lbl    = f" [{hl}]" if hl else ""
             lean   = f" — leans {hd}" if hd and hd != "NEUTRAL" else ""
-            lines.append(f"   FLAG REASON: EDGE — heuristic {br_str} vs market price{lean}")
+            lines.append(f"   FLAG REASON: EDGE — heuristic {br_str}{lbl} vs market price{lean}")
         elif fp == "CROSS_MARKET":
             poly = m.get("poly") or {}
             gap_pct = abs((poly.get("price_gap") or 0) * 100)
