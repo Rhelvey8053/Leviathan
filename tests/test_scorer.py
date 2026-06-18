@@ -900,3 +900,60 @@ def test_signal_summary_single_platform_adds_one_vote():
     prompt = scorer.build_prompt([m])
     # heuristic=YES (1) + 1 platform=YES (1) = 2 total → SIGNAL SUMMARY fires
     assert "SIGNAL SUMMARY" in prompt
+
+
+# ─── Cross-market conflict warnings ───────────────────────────────────────────
+
+def test_heuristic_poly_conflict_shown():
+    """[!] HEURISTIC vs POLYMARKET CONFLICT shown when heuristic and Polymarket disagree."""
+    m = _base_market(
+        heuristic_direction="YES",  # base rate says YES is cheap
+    )
+    # Polymarket says NO (price_gap < 0 means Kalshi YES is expensive vs Poly)
+    m["poly"] = {
+        "price_gap": -0.10,   # Poly NO direction
+        "poly_price": 0.25,
+        "poly_question": "Test question",
+        "match_score": 0.8,
+    }
+    prompt = scorer.build_prompt([m])
+    assert "HEURISTIC vs POLYMARKET CONFLICT" in prompt
+
+
+def test_heuristic_poly_agree_no_conflict():
+    """No conflict warning when heuristic and Polymarket agree on direction."""
+    m = _base_market(heuristic_direction="YES")
+    m["poly"] = {
+        "price_gap": 0.10,    # Poly also YES direction
+        "poly_price": 0.45,
+        "poly_question": "Test question",
+        "match_score": 0.8,
+    }
+    prompt = scorer.build_prompt([m])
+    assert "HEURISTIC vs POLYMARKET CONFLICT" not in prompt
+
+
+def test_heuristic_consensus_conflict_shown_when_two_platforms():
+    """Consensus conflict shown when >=2 external platforms disagree with heuristic."""
+    m = _base_market(heuristic_direction="YES")
+    m["ext_consensus"] = {
+        "consensus_gap": -0.10,  # external says NO
+        "consensus_dir": "NO",
+        "sources_higher": 0,
+        "sources_lower": 2,  # 2 platforms say lower → conflict with YES heuristic
+    }
+    prompt = scorer.build_prompt([m])
+    assert "HEURISTIC vs CONSENSUS CONFLICT" in prompt
+
+
+def test_heuristic_consensus_conflict_not_shown_for_single_platform():
+    """Consensus conflict not shown when only 1 external platform disagrees."""
+    m = _base_market(heuristic_direction="YES")
+    m["ext_consensus"] = {
+        "consensus_gap": -0.10,
+        "consensus_dir": "NO",
+        "sources_higher": 0,
+        "sources_lower": 1,  # only 1 platform — below 2-platform threshold
+    }
+    prompt = scorer.build_prompt([m])
+    assert "HEURISTIC vs CONSENSUS CONFLICT" not in prompt

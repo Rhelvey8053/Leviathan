@@ -77,6 +77,15 @@ def _signal_strength(s: dict) -> int:
     # Cross-market promotion (was flagged purely by Polymarket divergence)
     if s.get("flag_path") == "CROSS_MARKET":
         score += 1
+    # Recent activity: volume spike or price jump suggests fresh information
+    vol_total = float(s.get("volume_fp") or s.get("volume") or 0)
+    vol_24h   = float(s.get("volume_24h_fp") or 0)
+    if vol_total > 0 and vol_24h > 0 and (vol_24h / vol_total) >= 0.20:
+        score += 1
+    prev_p = float(s.get("previous_price_dollars") or 0)
+    last_p = float(s.get("last_price_dollars") or 0)
+    if prev_p > 0 and last_p > 0 and abs((last_p - prev_p) / prev_p) >= 0.20:
+        score += 1
     return score
 
 
@@ -128,6 +137,8 @@ def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
     out.sort(key=lambda s: (
         CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2),
         -_signal_strength(s),
+        # Positive net_edge (tradeable) ranks above zero/negative (spread consumes edge)
+        0 if (s.get("net_edge") or 0) > 0 else 1,
         -(abs(float(s.get("edge") or 0)))
     ))
     return out
