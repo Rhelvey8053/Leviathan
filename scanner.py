@@ -35,21 +35,24 @@ def filter_markets(markets: list[dict], config: dict) -> list[dict]:
       4. Title contains efficient market keyword
       5. Closing outside [min_days_to_close, max_days_to_close]
       6. Mid price outside [min_market_price, max_market_price]
+      7. Closing within min_hours_to_close (not actionable by report delivery time)
     """
     cfg          = config.get("markets", {})
     global_min_vol  = cfg.get("min_volume", 500)
     max_vol         = cfg.get("max_volume_filter", 75000)
     min_days        = cfg.get("min_days_to_close", 0)
     max_days        = cfg.get("max_days_to_close", 180)
+    min_hours       = cfg.get("min_hours_to_close", 6)
     min_price       = cfg.get("min_market_price", 0.05)
     max_price       = cfg.get("max_market_price", 0.95)
     min_oi          = cfg.get("min_open_interest", 0)
     bucket_vol      = cfg.get("bucket_min_volume", {})
     keywords        = [k.lower() for k in cfg.get("efficient_market_keywords", [])]
 
-    now       = datetime.now(timezone.utc)
-    min_close = now + timedelta(days=min_days)
-    max_close = now + timedelta(days=max_days)
+    now        = datetime.now(timezone.utc)
+    min_close  = now + timedelta(days=min_days)
+    min_close  = max(min_close, now + timedelta(hours=min_hours))
+    max_close  = now + timedelta(days=max_days)
 
     filtered = []
     for m in markets:
@@ -211,8 +214,21 @@ def estimate_base_rate(market: dict) -> float | None:
           "challenge in the primary", "defeated in the primary",
           "lose the primary", "lost the primary",
           "primary opponent"], 0.30),
+        # Treaty / international agreement withdrawal — countries rarely exit signed treaties → ~20%
+        # Must come BEFORE political withdrawal to prevent "withdraw from the" false-matching
+        (["withdraw from the paris", "withdraw from the iran",
+          "withdraw from the jcpoa", "withdraw from the npt",
+          "withdraw from the wto", "withdraw from the who",
+          "withdraw from the un ", "withdraw from the nato",
+          "withdraw from the treaty", "withdraw from the agreement",
+          "withdraw from the accord", "withdraw from the convention",
+          "withdraw from nato", "leave the eu", "exit the eu", "leave nato",
+          "pull out of the treaty", "pull out of the agreement",
+          "exit the agreement", "exit the accord",
+          "exit the treaty", "renounce the treaty"], 0.20),
         # Political withdrawal — candidate dropping out of a race → ~30%
-        # "withdraw from the" shorter fragment handles year-insertion ("from the 2024 race")
+        # Treaty-specific patterns come before this block so "withdraw from the paris/iran/etc."
+        # is already caught at 0.20; remaining "withdraw from the" hits election races.
         (["suspend his campaign", "suspend her campaign",
           "end his campaign", "end her campaign",
           "withdraw his candidacy", "withdraw her candidacy",
@@ -240,6 +256,16 @@ def estimate_base_rate(market: dict) -> float | None:
           "will not run for", "choose not to run", "choosing not to run",
           "decided not to run", "decide not to run",
           "not stand for reelection", "not stand for re-election"], 0.30),
+        # Formal candidacy announcement — politicians often explore without committing → ~35%
+        # Specific to political context only — "officially announce" alone is too broad (hits IPOs)
+        (["announce his candidacy", "announce her candidacy", "announce their candidacy",
+          "declare his candidacy", "declare her candidacy",
+          "launch his campaign", "launch her campaign",
+          "enter the race", "join the race", "file to run",
+          "announce a run for", "announce a bid for",
+          "officially enter the race", "formally enter the race",
+          "announce a presidential bid", "announce a senate bid",
+          "announce a gubernatorial bid"], 0.35),
         # Ballot disqualification — courts rarely disqualify candidates → ~20%
         # "disqualified from the" handles year insertion ("from the 2024 ballot")
         (["ballot disqualification", "ineligible for the ballot",
@@ -344,6 +370,11 @@ def estimate_base_rate(market: dict) -> float | None:
           "surrender enriched uranium", "uranium stockpile",
           "agrees to end uranium", "uranium enrichment deal",
           "uranium enrichment agreement"], 0.20),
+        # Martial law / emergency powers declaration — used very rarely in modern democracies → ~5%
+        # Placed BEFORE regime fall to prevent "fall of the government" + "martial law" conflict
+        (["martial law", "declare martial law", "impose martial law",
+          "invoke martial law", "martial law declared",
+          "state of martial law"], 0.05),
         # Regime fall / government collapse — extremely rare for entrenched authoritarian regimes
         # Iran regime ~5%/year, other autocracies roughly similar → ~8% for any given window
         (["regime fall", "regime falls", "regime collapse", "government falls",
@@ -647,6 +678,18 @@ def estimate_base_rate(market: dict) -> float | None:
           "forward stock split", "split its stock", "announce a split"], 0.20),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt",
           "go bankrupt", "declare bankruptcy", "seek bankruptcy"], 0.15),
+        # Stock buyback / share repurchase — common corporate capital allocation action → ~40%
+        # Placed BEFORE bankruptcy; companies with cash return it fairly regularly
+        (["stock buyback", "share buyback", "share repurchase", "buyback program",
+          "repurchase program", "buyback announcement", "announce a buyback",
+          "announce a repurchase", "repurchase shares", "repurchase its shares",
+          "buyback plan", "buyback authorization"], 0.40),
+        # Dividend announcement / increase — common for profitable companies → ~40%
+        # Placed near buyback; they share the capital-return thesis
+        (["dividend increase", "increase its dividend", "raise its dividend",
+          "dividend cut", "cut its dividend", "suspend its dividend",
+          "dividend announcement", "declare a dividend", "special dividend",
+          "dividend payment", "announce a dividend"], 0.40),
         # Bank failure / financial crisis — systemic bank failures are rare → ~15%
         (["bank failure", "bank collapse", "banking crisis",
           "bank run", "bank bailout", "bank insolvency",
@@ -764,6 +807,16 @@ def estimate_base_rate(market: dict) -> float | None:
         (["mars mission", "mission to mars", "manned mars", "crewed mars",
           "human mission to mars", "mars landing", "mars orbit",
           "mars colony", "deep space mission", "interplanetary"], 0.15),
+        # Social media post / tweet markets — if a person is active, posting is nearly certain → ~75%
+        # "tweet about", "post about", "mention on twitter/x" are the common framings
+        # Placed BEFORE generic entertainment block (0.25) to capture this distinct category
+        (["tweet about", "tweet on", "tweets about", "tweets on",
+          "post about", "post on twitter", "post on x ", "post on instagram",
+          "mention on twitter", "mention on x", "mention on social",
+          "post to twitter", "post to x ", "share on twitter", "share on x ",
+          "elon tweet", "trump tweet", "post to social media",
+          "social media post about", "on twitter about", "on x about",
+          "twitter post about", "x post about"], 0.75),
         # Concert / live music — artists tour regularly; if market is open, tour is likely → ~45%
         # Placed BEFORE generic entertainment (0.25) because tours materialize more reliably
         (["concert tour", "world tour", "go on tour", "announce a tour",

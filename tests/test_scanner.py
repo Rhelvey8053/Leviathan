@@ -1748,3 +1748,135 @@ def test_saudi_israel_normalization_base_rate():
     """Saudi-Israel normalization gets ~20% base rate."""
     br = scanner.estimate_base_rate({"title": "Will Saudi-Israel normalization happen by January 2029?"})
     assert br == 0.20
+
+
+# ─── New heuristics: min_hours_to_close filter ───────────────────────────────
+
+def test_min_hours_to_close_drops_imminent_market():
+    """Markets closing within min_hours_to_close hours are filtered out."""
+    cfg = {**BASE_CFG, "markets": {**BASE_CFG["markets"], "min_hours_to_close": 6}}
+    m = _market(days_out=0.1)  # closes in ~2.4 hours
+    assert scanner.filter_markets([m], cfg) == []
+
+
+def test_min_hours_to_close_keeps_market_closing_after_threshold():
+    """Markets closing after min_hours_to_close hours are kept."""
+    cfg = {**BASE_CFG, "markets": {**BASE_CFG["markets"], "min_hours_to_close": 6}}
+    m = _market(days_out=1)  # closes in 24 hours
+    result = scanner.filter_markets([m], cfg)
+    assert len(result) == 1
+
+
+def test_min_hours_to_close_zero_keeps_all():
+    """min_hours_to_close=0 disables the filter — all markets pass."""
+    cfg = {**BASE_CFG, "markets": {**BASE_CFG["markets"], "min_hours_to_close": 0}}
+    m = _market(days_out=0.05)  # closes in ~72 minutes
+    result = scanner.filter_markets([m], cfg)
+    assert len(result) == 1
+
+
+def test_min_hours_to_close_default_absent():
+    """When min_hours_to_close is absent from config, defaults to 6h (imminent excluded)."""
+    cfg = {**BASE_CFG}  # no min_hours_to_close key
+    m = _market(days_out=0.1)  # closes in ~2.4 hours
+    assert scanner.filter_markets([m], cfg) == []
+
+
+# ─── New heuristics: stock buyback / dividend ────────────────────────────────
+
+def test_stock_buyback_base_rate():
+    """Stock buyback announcements get ~40% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Apple announce a share buyback program before Q3?"})
+    assert br == 0.40
+
+
+def test_dividend_increase_base_rate():
+    """Dividend increase announcements get ~40% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Microsoft increase its dividend in 2026?"})
+    assert br == 0.40
+
+
+def test_special_dividend_base_rate():
+    """Special dividend gets ~40% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Meta declare a special dividend before June?"})
+    assert br == 0.40
+
+
+# ─── New heuristics: treaty withdrawal ───────────────────────────────────────
+
+def test_withdraw_from_treaty_base_rate():
+    """Treaty withdrawal gets ~20% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the US withdraw from the Paris Agreement by 2027?"})
+    assert br == 0.20
+
+
+def test_withdraw_from_nato_base_rate():
+    """NATO withdrawal gets ~20% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will any country withdraw from NATO by 2027?"})
+    assert br == 0.20
+
+
+def test_exit_the_eu_base_rate():
+    """EU exit gets ~20% base rate (treaty withdrawal category)."""
+    br = scanner.estimate_base_rate({"title": "Will Hungary leave the EU before 2028?"})
+    assert br == 0.20
+
+
+# ─── New heuristics: formal candidacy announcement ───────────────────────────
+
+def test_announce_candidacy_base_rate():
+    """Formal candidacy announcements get ~35% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will DeSantis announce his candidacy before March?"})
+    assert br == 0.35
+
+
+def test_launch_campaign_base_rate():
+    """Campaign launch gets ~35% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Newsom launch his campaign before the primary?"})
+    assert br == 0.35
+
+
+def test_enter_the_race_base_rate():
+    """Entering the race gets ~35% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will AOC enter the race for Senate by April?"})
+    assert br == 0.35
+
+
+# ─── New heuristics: martial law ─────────────────────────────────────────────
+
+def test_martial_law_base_rate():
+    """Martial law declaration gets ~5% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the Philippines declare martial law before 2027?"})
+    assert br == 0.05
+
+
+def test_declare_martial_law_base_rate():
+    """'Declare martial law' phrasing gets ~5% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Trump declare martial law in 2026?"})
+    assert br == 0.05
+
+
+# ─── New heuristics: social media post markets ───────────────────────────────
+
+def test_tweet_about_base_rate():
+    """Social media post markets get ~75% base rate (active user)."""
+    br = scanner.estimate_base_rate({"title": "Will Trump tweet about tariffs before June 30?"})
+    assert br == 0.75
+
+
+def test_post_about_base_rate():
+    """'Post about' framing gets ~75% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Elon Musk post about AI before the end of June?"})
+    assert br == 0.75
+
+
+def test_mention_on_twitter_base_rate():
+    """'Mention on Twitter' phrasing gets ~75% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Biden mention on Twitter about Ukraine before July?"})
+    assert br == 0.75
+
+
+def test_social_media_post_precedes_entertainment():
+    """Social media post (0.75) takes priority over generic entertainment (0.25)."""
+    br = scanner.estimate_base_rate({"title": "Will Taylor Swift post about her new album on Instagram?"})
+    assert br == 0.75
