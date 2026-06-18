@@ -636,8 +636,12 @@ def estimate_base_rate(market: dict) -> float | None:
           "housing bubble burst", "housing bubble pop",
           "home prices crash", "home prices collapse"], 0.15),
         # Housing price direction — less extreme than crash; closer to 50/50
+        # "housing market" alone (price appreciation/decline) is also a 50/50 threshold question
         (["housing prices", "home prices", "home values",
-          "real estate prices", "median home price"], 0.50),
+          "real estate prices", "median home price",
+          "housing market see", "housing market price",
+          "housing price appreciation", "price appreciation in the housing",
+          "house price", "house prices"], 0.50),
         (["default", "debt default", "sovereign default"], 0.10),
         # Trade/current account — near 50/50 like other macro level markets
         (["trade deficit", "trade surplus", "trade balance",
@@ -668,11 +672,17 @@ def estimate_base_rate(market: dict) -> float | None:
           "inflation falls below", "inflation returns to", "inflation target",
           "inflation stays below", "above the inflation", "below the inflation"], 0.50),
         (["inflation rate", "cpi", "pce", "consumer price index",
-          "core inflation"], 0.50),
+          "core inflation", "consumer price inflation",
+          "price inflation", "inflation reading"], 0.50),
         (["gdp growth", "gdp contraction", "gdp shrinks",
           "gdp exceed", "gdp above", "gdp below", "gdp surpass",
           "economic growth", "economic contraction",
           "grow at", "growth rate", "growth of"], 0.50),
+        # National debt threshold questions — large economy, thresholds are uncertain → ~50%
+        (["national debt exceed", "national debt surpass", "national debt above",
+          "national debt reach", "federal debt exceed", "federal debt surpass",
+          "federal debt above", "federal debt reach",
+          "us debt exceed", "us debt surpass", "debt-to-gdp"], 0.50),
         # Stock index / financial index price levels — 50/50 by construction (like crypto)
         # Placed BEFORE generic "above $" / "below $" to avoid the 0.35 price-level pattern
         (["s&p 500 above", "s&p 500 below", "s&p 500 exceed", "s&p 500 reach",
@@ -733,6 +743,7 @@ def estimate_base_rate(market: dict) -> float | None:
         # These are slightly above 0.35 because commodity trends are stickier than equities
         (["gold price", "gold prices", "gold above", "gold below",
           "gold exceed", "gold surpass", "price of gold", "gold reaches",
+          "gold reach", "gold hit", "gold top",
           "crude oil", "oil price", "oil prices", "oil above", "oil below",
           "brent crude", "wti crude", "price of oil", "barrel of oil",
           "natural gas price", "natural gas above", "natural gas below",
@@ -803,7 +814,9 @@ def estimate_base_rate(market: dict) -> float | None:
         (["municipal bankruptcy", "city bankruptcy", "county bankruptcy",
           "municipality default", "city default", "municipal default",
           "file for chapter 9", "chapter 9 bankruptcy",
-          "city insolvency", "detroit bankruptcy", "city declares bankruptcy"], 0.10),
+          "city insolvency", "detroit bankruptcy", "city declares bankruptcy",
+          "city declare insolvency", "municipality insolvency",
+          "municipal insolvency", "city declare bankruptcy"], 0.10),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt",
           "go bankrupt", "declare bankruptcy", "seek bankruptcy"], 0.15),
         # Corporate partnership / licensing / supply deal — common but announcements slip → ~35%
@@ -1158,9 +1171,12 @@ def estimate_base_rate(market: dict) -> float | None:
           "union organizing", "right to organize", "vote on unionization",
           "union certification", "union authorization",
           "organize a union", "unionization vote"], 0.40),
-        # Labor strikes / work stoppages
+        # Labor strikes / work stoppages (includes general strikes and nationwide walkouts)
         (["go on strike", "labor strike", "workers strike", "union strike",
-          "strike action", "work stoppage", "walkout"], 0.30),
+          "strike action", "work stoppage", "walkout",
+          "general strike", "nationwide strike", "national strike",
+          "transit strike", "teachers strike", "nurses strike",
+          "rail strike", "airline strike"], 0.30),
         # Sports awards / honors — single winner from many candidates
         (["mvp", "cy young", "rookie of the year", "heisman",
           "hall of fame", "all-star", "golden glove", "best player"], 0.20),
@@ -1261,6 +1277,9 @@ def get_heuristic_label(market: dict) -> str | None:
         ("senate confirmation",       "senate confirmation"),
         ("member of trump's cabinet", "cabinet departure"),
         ("leave the cabinet",         "cabinet departure"),
+        ("resign",                    "resignation"),
+        ("step down",                 "resignation"),
+        ("stepping down",             "resignation"),
         ("announce his retirement",   "athlete retirement"),
         ("announce her retirement",   "athlete retirement"),
         ("retire from the",           "athlete retirement"),
@@ -1384,7 +1403,11 @@ def get_heuristic_label(market: dict) -> str | None:
         ("real estate crash",         "housing market crash"),
         ("housing prices",            "housing price level"),
         ("home prices",               "housing price level"),
+        ("house prices",              "housing price level"),
+        ("house price",               "housing price level"),
         ("median home price",         "housing price level"),
+        ("housing market see",        "housing price level"),
+        ("housing price appreciation","housing price level"),
         ("default",                   "sovereign/corporate default"),
         ("trade deficit",             "trade balance"),
         ("trade surplus",             "trade balance"),
@@ -1402,9 +1425,16 @@ def get_heuristic_label(market: dict) -> str | None:
         ("consumer sentiment",        "consumer confidence data"),
         ("inflation exceed",          "inflation threshold"),
         ("inflation rate",            "CPI/inflation data"),
+        ("consumer price inflation",  "CPI/inflation data"),
+        ("price inflation",           "CPI/inflation data"),
+        ("inflation reading",         "CPI/inflation data"),
         ("cpi",                       "CPI/inflation data"),
         ("gdp growth",                "GDP data"),
         ("economic growth",           "GDP data"),
+        ("national debt exceed",      "national debt threshold"),
+        ("national debt surpass",     "national debt threshold"),
+        ("federal debt exceed",       "national debt threshold"),
+        ("debt-to-gdp",               "national debt threshold"),
         ("s&p 500 above",             "equity index level"),
         ("s&p above",                 "equity index level"),
         ("nasdaq above",              "equity index level"),
@@ -1492,8 +1522,14 @@ def get_heuristic_label(market: dict) -> str | None:
         ("municipal bankruptcy",      "municipal bankruptcy"),
         ("city bankruptcy",           "municipal bankruptcy"),
         ("chapter 9 bankruptcy",      "municipal bankruptcy"),
+        ("city declare insolvency",   "municipal bankruptcy"),
+        ("city insolvency",           "municipal bankruptcy"),
+        ("city default",              "municipal bankruptcy"),
         # Corporate bankruptcy
         ("bankruptcy",                "corporate bankruptcy"),
+        ("go bankrupt",               "corporate bankruptcy"),
+        ("goes bankrupt",             "corporate bankruptcy"),
+        ("declare bankruptcy",        "corporate bankruptcy"),
         # Credit rating change
         ("credit rating downgrade",   "credit rating change"),
         ("credit rating upgrade",     "credit rating change"),
@@ -1532,6 +1568,8 @@ def get_heuristic_label(market: dict) -> str | None:
         # Tech platform ban
         ("tiktok ban",                "tech platform ban"),
         ("ban tiktok",                "tech platform ban"),
+        ("social media ban",          "tech platform ban"),
+        ("platform ban",              "tech platform ban"),
         # NATO Article 5
         ("invoke article 5",          "NATO Article 5"),
         ("article 5 of nato",         "NATO Article 5"),
@@ -1636,7 +1674,11 @@ def get_heuristic_label(market: dict) -> str | None:
         # Labor strike
         ("go on strike",              "labor strike"),
         ("labor strike",              "labor strike"),
+        ("general strike",            "labor strike"),
+        ("nationwide strike",         "labor strike"),
+        ("transit strike",            "labor strike"),
         ("work stoppage",             "labor strike"),
+        ("walkout",                   "labor strike"),
         # Sports awards
         ("mvp",                       "sports award"),
         ("cy young",                  "sports award"),
