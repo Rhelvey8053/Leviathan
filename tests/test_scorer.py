@@ -957,3 +957,86 @@ def test_heuristic_consensus_conflict_not_shown_for_single_platform():
     }
     prompt = scorer.build_prompt([m])
     assert "HEURISTIC vs CONSENSUS CONFLICT" not in prompt
+
+
+# ─── Signal persistence block ─────────────────────────────────────────────────
+
+def test_persistence_block_absent_when_no_prior_appearances():
+    """No prior_appearances → Signal history block not shown."""
+    m = _base_market()
+    # no prior_appearances key — falls through
+    prompt = scorer.build_prompt([m])
+    assert "Signal history" not in prompt
+
+
+def test_persistence_block_shown_when_prior_appearances():
+    """prior_appearances > 0 → Signal history block appears."""
+    m = _base_market()
+    m["prior_appearances"] = 3
+    m["prior_yes"] = 3
+    m["prior_no"] = 0
+    m["direction_consistent"] = True
+    prompt = scorer.build_prompt([m])
+    assert "Signal history" in prompt
+    assert "3 distinct day(s)" in prompt
+
+
+def test_persistence_block_consistent_tag():
+    """direction_consistent=True shows [CONSISTENT] tag."""
+    m = _base_market()
+    m["prior_appearances"] = 2
+    m["prior_yes"] = 2
+    m["prior_no"] = 0
+    m["direction_consistent"] = True
+    prompt = scorer.build_prompt([m])
+    assert "[CONSISTENT]" in prompt
+
+
+def test_persistence_block_mixed_tag():
+    """direction_consistent=False shows [MIXED] tag."""
+    m = _base_market()
+    m["prior_appearances"] = 3
+    m["prior_yes"] = 2
+    m["prior_no"] = 1
+    m["direction_consistent"] = False
+    prompt = scorer.build_prompt([m])
+    assert "[MIXED" in prompt
+
+
+def test_persistence_price_drift_deepening_yes():
+    """If direction YES and price fell since first flag, shows mispricing deepened."""
+    m = _base_market(heuristic_direction="YES")
+    m["prior_appearances"] = 2
+    m["prior_yes"] = 2
+    m["prior_no"] = 0
+    m["direction_consistent"] = True
+    m["first_flagged_price"] = 0.50   # was 50%
+    m["market_price"] = 0.42          # now 42% → fell → YES mispricing deepened
+    prompt = scorer.build_prompt([m])
+    assert "mispricing deepened" in prompt
+
+
+def test_persistence_price_drift_converging_yes():
+    """If direction YES and price rose since first flag, shows market converging."""
+    m = _base_market(heuristic_direction="YES")
+    m["prior_appearances"] = 2
+    m["prior_yes"] = 2
+    m["prior_no"] = 0
+    m["direction_consistent"] = True
+    m["first_flagged_price"] = 0.42   # was 42%
+    m["market_price"] = 0.50          # now 50% → rose → YES tightening edge
+    prompt = scorer.build_prompt([m])
+    assert "tightening edge" in prompt
+
+
+def test_persistence_price_delta_omitted_when_small():
+    """Price delta < 1pp is not shown to avoid noise."""
+    m = _base_market(heuristic_direction="YES")
+    m["prior_appearances"] = 2
+    m["prior_yes"] = 2
+    m["prior_no"] = 0
+    m["direction_consistent"] = True
+    m["first_flagged_price"] = 0.450
+    m["market_price"] = 0.454  # only 0.4pp delta — below threshold
+    prompt = scorer.build_prompt([m])
+    assert "Price since first flag" not in prompt

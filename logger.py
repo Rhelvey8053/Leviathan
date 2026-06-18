@@ -379,6 +379,36 @@ def get_ticker_day_count(ticker: str, days: int = 14) -> int:
         return 0
 
 
+def get_signal_history_batch(tickers: list, days: int = 14) -> dict:
+    """
+    Fetch paper signal history for multiple tickers in a single DB query.
+    Returns {ticker: [row_dict, ...]} sorted newest-first within each ticker.
+    Useful for computing persistence and direction consistency before scoring.
+    """
+    tickers = [t for t in tickers if t]
+    if not tickers:
+        return {}
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    placeholders = ",".join("?" * len(tickers))
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT ticker, timestamp, direction, market_price, our_estimate, edge "
+                f"FROM signals WHERE ticker IN ({placeholders}) AND timestamp >= ? "
+                f"AND ({_PAPER}) "
+                f"ORDER BY timestamp DESC",
+                (*tickers, cutoff),
+            ).fetchall()
+    except Exception:
+        return {}
+    result: dict = {}
+    for r in rows:
+        t = r["ticker"]
+        if t:
+            result.setdefault(t, []).append(dict(r))
+    return result
+
+
 def get_week_signals(days: int = 7) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     try:

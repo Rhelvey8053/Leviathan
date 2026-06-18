@@ -212,6 +212,14 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     if kelly_s:
         lines.append(f"  Kelly:{kelly_s}")
 
+    # Signal persistence
+    pa = s.get("prior_appearances", 0)
+    if pa > 0:
+        prev_yes = s.get("prior_yes", 0)
+        prev_no  = s.get("prior_no", 0)
+        c_str = "consistent" if s.get("direction_consistent") else "mixed"
+        lines.append(f"  Seen {pa}d/14d:   {prev_yes}Y/{prev_no}N prior — {c_str}")
+
     # Signals fired
     fired = []
     if s.get("flag_path") == "HEURISTIC" and s.get("base_rate") is not None:

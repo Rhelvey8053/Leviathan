@@ -347,6 +347,26 @@ def main():
         if (m["whale_reversal"] or m.get("ob_flag")) and not m.get("flag"):
             m["flag"] = True
 
+    # Signal persistence: query DB for prior paper signals on these tickers.
+    # Runs in one batch query. Gives Claude longitudinal context: "flagged 4 days
+    # in a row, all YES" is much stronger than a single-day appearance.
+    _history_batch = logger.get_signal_history_batch(
+        [m.get("ticker", "") for m in flagged_markets], days=14
+    )
+    for m in flagged_markets:
+        ticker = m.get("ticker", "")
+        hist   = _history_batch.get(ticker, [])
+        days_seen = len({h["timestamp"][:10] for h in hist})
+        m["prior_appearances"] = days_seen
+        dirs = [h["direction"] for h in hist if h.get("direction") in ("YES", "NO")]
+        m["prior_yes"] = sum(1 for d in dirs if d == "YES")
+        m["prior_no"]  = len(dirs) - m["prior_yes"]
+        m["direction_consistent"] = (
+            (m["prior_yes"] == 0 or m["prior_no"] == 0) and bool(dirs)
+        )
+        # Oldest entry in DESC list = first time we flagged this ticker
+        m["first_flagged_price"] = hist[-1]["market_price"] if hist else None
+
     def _pre_sort_score(m: dict) -> int:
         """Pre-Claude signal quality score: higher = more evidence of real edge."""
         sc = 0
@@ -364,6 +384,14 @@ def main():
         if poly.get("price_gap") is not None and abs(poly["price_gap"]) >= 0.10: sc += 2
         ext  = m.get("ext_markets") or []
         if any(abs(e.get("price_gap", 0)) >= 0.05 for e in ext): sc += 1
+
+        # Signal persistence: consecutive multi-day appearance with consistent direction
+        # is strong evidence of a structural mispricing, not transient noise.
+        pa         = m.get("prior_appearances", 0)
+        consistent = m.get("direction_consistent")
+        if pa >= 3 and consistent:   sc += 3
+        elif pa >= 2 and consistent: sc += 2
+        elif pa >= 2:                sc += 1
 
         # Recent activity signals: evidence of fresh information flowing in.
         vol_total = float(m.get("volume_fp") or m.get("volume") or 0)

@@ -867,6 +867,39 @@ def test_net_edge_absent_when_not_provided():
     assert "Net Edge" not in block
 
 
+# ─── Signal persistence in _signal_block ──────────────────────────────────────
+
+def test_persistence_shown_when_prior_appearances():
+    """prior_appearances > 0 shows persistence line in signal block."""
+    s = _signal()
+    s["prior_appearances"] = 3
+    s["prior_yes"] = 3
+    s["prior_no"] = 0
+    s["direction_consistent"] = True
+    block = "\n".join(report._signal_block(s, index=1))
+    assert "3d/14d" in block
+    assert "3Y/0N" in block
+    assert "consistent" in block
+
+
+def test_persistence_shows_mixed_when_not_consistent():
+    """direction_consistent=False shows 'mixed' in persistence line."""
+    s = _signal()
+    s["prior_appearances"] = 4
+    s["prior_yes"] = 2
+    s["prior_no"] = 2
+    s["direction_consistent"] = False
+    block = "\n".join(report._signal_block(s, index=1))
+    assert "mixed" in block
+
+
+def test_persistence_absent_when_no_prior_appearances():
+    """No persistence line when prior_appearances is 0 or absent."""
+    s = _signal()
+    block = "\n".join(report._signal_block(s, index=1))
+    assert "d/14d" not in block
+
+
 # ─── _top_picks executive summary ─────────────────────────────────────────────
 
 def test_top_picks_returns_empty_for_no_signals():
