@@ -4,6 +4,7 @@
     "max_fetch": 1000,
     "max_events": 400,
     "edge_threshold": 0.08,
+    "short_horizon_edge_threshold": 0.15,
     "drift_min_abs": 0.03,
     "drift_min_pct": 0.07,
     "min_market_price": 0.05,

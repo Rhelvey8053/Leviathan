@@ -287,6 +287,46 @@ def main(resolve: bool = True):
                 "overrides underperform" if delta < -5 else "no meaningful difference")
             print(f"\n  Override vs Aligned: {delta:+.0f}pp  → {verdict}")
 
+    # ── Net-of-spread edge breakdown ──────────────────────────────────────────
+    ne_stats = logger.get_stats_by_net_edge()
+    ne_any   = any(ne_stats[b]["total"] for b in ne_stats)
+    if ne_any:
+        print()
+        print(_rule("="))
+        print("NET-OF-SPREAD EDGE BREAKDOWN  (paper signals, resolved only)")
+        print(_rule("-"))
+        print()
+        print("  Does realizable edge (after bid-ask spread) predict win rate?")
+        print()
+        bucket_labels = {
+            "spread_dominant": "spread > edge",
+            "thin":            "0-5pp net edge",
+            "good":            "5-10pp net edge",
+            "strong":          ">10pp net edge",
+            "no_data":         "no spread data",
+        }
+        print(f"  {'Bucket':<18}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        print(f"  {'-'*18}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
+        for b in ("spread_dominant", "thin", "good", "strong", "no_data"):
+            d = ne_stats[b]
+            if not d["total"]:
+                continue
+            label  = bucket_labels[b]
+            wr_s   = f"{d['win_rate']:.0f}%"      if d["win_rate"]  is not None else "--"
+            pnl_s  = _fmt_pnl(d["total_pnl"])     if d["total_pnl"] is not None else "--"
+            edge_s = f"{d['avg_edge']*100:.1f}pp"  if d["avg_edge"]  is not None else "--"
+            print(f"  {label:<18}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
+        thin_plus = sum(ne_stats[b]["total"] for b in ("thin", "good", "strong"))
+        thin_wins = sum(ne_stats[b]["wins"]  for b in ("thin", "good", "strong"))
+        sd = ne_stats["spread_dominant"]
+        if thin_plus and sd["total"] and sd["win_rate"] is not None:
+            tp_wr   = thin_wins / thin_plus * 100
+            delta   = tp_wr - sd["win_rate"]
+            verdict = "tradeable edge outperforms" if delta > 5 else (
+                      "no meaningful difference" if abs(delta) <= 5 else
+                      "spread-dominant outperforms (unexpected)")
+            print(f"\n  Tradeable (net>0) vs Spread-dominant: {tp_wr:.0f}% vs {sd['win_rate']:.0f}%  --> {verdict}")
+
     # ── Combined summary ──────────────────────────────────────────────────────
     all_resolved = [r for r in all_rows if r.get("outcome")]
     all_pnl      = sum(float(r["pnl_if_traded"] or 0) for r in all_resolved

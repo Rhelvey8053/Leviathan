@@ -218,6 +218,14 @@ def main():
                         m["flag"]      = True
                         m["flag_path"] = "CROSS_MARKET"
                         m["poly"]      = cd
+                        # Poly-based net_edge for CROSS_MARKET signals:
+                        # abs(Poly-Kalshi gap) minus half bid-ask spread.
+                        # raw_edge is None here (no base_rate), so use Poly gap as proxy.
+                        _poly_gap = abs(cd.get("price_gap") or 0)
+                        _bid = float(m.get("yes_bid_dollars") or 0)
+                        _ask = float(m.get("yes_ask_dollars") or 0)
+                        if _poly_gap > 0 and _bid > 0 and _ask > 0:
+                            m["net_edge"] = round(_poly_gap - (_ask - _bid) / 2, 6)
                         flagged_markets.append(m)
                         poly_data[ticker] = cd
                         n_promoted += 1
