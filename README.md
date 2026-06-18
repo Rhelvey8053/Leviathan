@@ -126,6 +126,7 @@ Samples ~50 markets across 5 volume tiers (including markets the main filter rej
 | `analysis/backtest.py` | Hypothetical P&L summary from logged signals | `python analysis/backtest.py` |
 | `analysis/calibration.py` | Win rate + Brier score by flag_path, confidence, horizon, alignment, net_edge | `python analysis/calibration.py` |
 | `analysis/net_edge_analysis.py` | Net-of-spread edge distribution — shows what % of flagged markets are actually tradeable | `python analysis/net_edge_analysis.py` |
+| `analysis/pass_analysis.py` | Scanner precision — PASS rate by flag path, time horizon, and repeat false-positive tickers | `python analysis/pass_analysis.py` |
 | `analysis/snapshot_markets.py` | Fetches and saves full Kalshi market catalog snapshot | `python analysis/snapshot_markets.py` |
 | `scripts/daily_smart_money.py` | Runs watchlist scan, saves report, commits and pushes | Scheduled via Task Scheduler |
 
@@ -156,6 +157,7 @@ Samples ~50 markets across 5 volume tiers (including markets the main filter rej
 | `analysis/backtest.py` | Historical P&L from logged signals |
 | `analysis/calibration.py` | Calibration analysis — win rate by flag_path, horizon, alignment, net_edge, Brier score |
 | `analysis/net_edge_analysis.py` | Net-of-spread edge distribution for flagged markets |
+| `analysis/pass_analysis.py` | Scanner precision — PASS rate by flag_path, horizon, repeat false-positives |
 | `scripts/daily_smart_money.py` | Scheduled daily watchlist scan runner |
 | `scripts/setup_scheduler.ps1` | Registers daily Task Scheduler jobs |
 
