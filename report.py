@@ -170,6 +170,12 @@ def compute_leviathan_score(s: dict) -> int:
         "chip export restriction",      # ~45% — active US policy area, better calibrated
         "bond/debt issuance",           # ~65% — routine auctions nearly always complete
         "fda complete response letter", # ~60% on resubmission — well-tracked statistic
+        "merger or acquisition",        # stage-dependent but well-tracked by deal type
+        "merger close (signed deal)",   # ~80% completion once definitive agreement signed
+        "hostile takeover bid",         # ~42% — premium-driven, better calibrated than speculation
+        "trade tariffs",                # executive action — policy-specific base rates clear
+        "presidential veto",            # SAP threats lead to veto ~85% — precise signal
+        "spacex launch",                # Falcon 9 cadence well-tracked (~75% on schedule)
     }
     if _hl in _HIGH_SPEC:   pts += 8
     elif _hl in _MED_SPEC:  pts += 4

@@ -772,9 +772,26 @@ def estimate_base_rate(market: dict) -> float | None:
         (["make his mlb debut", "make her mlb debut",
           "play in a game for", "called up", "nhl debut",
           "nba debut", "make his debut", "make her debut"], 0.35),
+        # M&A: signed definitive agreement already in place → deal nearly always closes → ~80%
+        # Must come BEFORE the generic merger block (0.35) to catch closed-deal framing.
+        # "acquisition close" catches "acquisition close by/before" word order.
+        # "merger close" catches "merger close by/before" word order.
+        (["close the merger", "close the acquisition", "close the deal",
+          "complete the merger", "complete the acquisition",
+          "finalize the acquisition", "finalize the merger",
+          "merger be completed", "acquisition be completed",
+          "merger to close", "acquisition to close",
+          "deal to close", "close the buyout",
+          "transaction close", "deal close by",
+          "acquisition close", "merger close"], 0.80),
+        # M&A: hostile/unsolicited takeover bid — higher completion than exploratory → ~42%
+        # Placed BEFORE generic merger block; hostile bids generate more certainty than mere rumors
+        (["hostile takeover", "unsolicited offer", "unsolicited bid",
+          "hostile bid", "reject the takeover", "poison pill",
+          "tender offer"], 0.42),
+        # M&A: general merger/acquisition (exploratory through signed — mixed pool) → ~35%
         (["merger", "acquisition", "acquired by", "be acquired",
-          "get acquired", "was acquired", "will acquire", "acquire a",
-          "acquire the company", "acquire an", "take private",
+          "get acquired", "was acquired", "acquire", "take private",
           "buyout", "takeover", "be taken over", "be bought out"], 0.35),
         # Corporate market entry / expansion — entering a new business vertical → ~35%
         (["enter the market", "enter the healthcare", "enter the insurance",
@@ -1492,10 +1509,32 @@ def get_heuristic_label(market: dict) -> str | None:
         ("make his mlb debut",        "sports debut"),
         ("play in a game for",        "sports debut"),
         ("called up",                 "sports debut"),
-        # Merger / acquisition
+        # M&A: signed deal close (more specific) — must come BEFORE generic merger label
+        ("close the merger",          "merger close (signed deal)"),
+        ("close the acquisition",     "merger close (signed deal)"),
+        ("complete the merger",       "merger close (signed deal)"),
+        ("complete the acquisition",  "merger close (signed deal)"),
+        ("finalize the acquisition",  "merger close (signed deal)"),
+        ("finalize the merger",       "merger close (signed deal)"),
+        ("merger be completed",       "merger close (signed deal)"),
+        ("acquisition be completed",  "merger close (signed deal)"),
+        ("merger to close",           "merger close (signed deal)"),
+        ("acquisition to close",      "merger close (signed deal)"),
+        ("deal to close",             "merger close (signed deal)"),
+        ("close the deal",            "merger close (signed deal)"),
+        ("transaction close",         "merger close (signed deal)"),
+        ("deal close by",             "merger close (signed deal)"),
+        ("acquisition close",         "merger close (signed deal)"),
+        ("merger close",              "merger close (signed deal)"),
+        # M&A: hostile / unsolicited
+        ("hostile takeover",          "hostile takeover bid"),
+        ("unsolicited bid",           "hostile takeover bid"),
+        ("tender offer",              "hostile takeover bid"),
+        # Merger / acquisition (generic)
         ("merger",                    "merger or acquisition"),
         ("acquisition",               "merger or acquisition"),
         ("be acquired",               "merger or acquisition"),
+        ("acquire",                   "merger or acquisition"),
         ("take private",              "merger or acquisition"),
         # EV adoption — before generic vehicle delivery
         ("ev sales",                  "EV adoption milestone"),

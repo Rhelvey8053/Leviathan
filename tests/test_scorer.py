@@ -339,6 +339,42 @@ def test_system_prompt_has_government_funding_rule():
     assert "70%" in scorer.SYSTEM_PROMPT   # debt ceiling raised rate
 
 
+def test_system_prompt_has_ma_merger_rule():
+    """Rule 43: M&A merger completion — stage-dependent base rates."""
+    assert "M&A / MERGER" in scorer.SYSTEM_PROMPT
+    assert "92-95%" in scorer.SYSTEM_PROMPT   # signed deal + clearance
+    assert "definitive agreement" in scorer.SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_has_trade_tariff_rule():
+    """Rule 44: trade tariff / sanctions markets."""
+    assert "TRADE TARIFF" in scorer.SYSTEM_PROMPT
+    assert "OFAC" in scorer.SYSTEM_PROMPT   # sanctions mechanism
+    assert "20%" in scorer.SYSTEM_PROMPT    # sanctions lifting rate
+
+
+def test_system_prompt_has_executive_order_veto_rule():
+    """Rule 45: presidential executive orders and veto markets."""
+    assert "EXECUTIVE ORDERS AND VETO" in scorer.SYSTEM_PROMPT
+    assert "Statement of Administration Policy" in scorer.SYSTEM_PROMPT
+    assert "10%" in scorer.SYSTEM_PROMPT   # veto override rate
+
+
+def test_system_prompt_has_space_launch_rule():
+    """Rule 46: space launch markets — SpaceX vs NASA cadence."""
+    assert "SPACE LAUNCH" in scorer.SYSTEM_PROMPT
+    assert "SpaceX Falcon 9" in scorer.SYSTEM_PROMPT
+    assert "NASA SLS" in scorer.SYSTEM_PROMPT
+    assert "FAA" in scorer.SYSTEM_PROMPT   # FAA license is the key gate
+
+
+def test_system_prompt_has_ev_adoption_rule():
+    """Rule 47: EV adoption and sales threshold markets."""
+    assert "ELECTRIC VEHICLE ADOPTION" in scorer.SYSTEM_PROMPT
+    assert "45%" in scorer.SYSTEM_PROMPT   # base rate near 50/50
+    assert "IRA" in scorer.SYSTEM_PROMPT   # key policy context
+
+
 # ─── Liquidity context ───────────────────────────────────────────────────────
 
 def test_liquidity_shown_when_volume_present():
