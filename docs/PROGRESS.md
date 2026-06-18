@@ -47,6 +47,21 @@
   release qualifies as HIGH confidence
 - 9 new tests (1021 total)
 
+**Commit 61 — 4 more heuristic categories + Rule 39 OPEC/chip exports**
+- New scanner heuristics:
+  - OPEC/oil cartel production decision (0.40) — OPEC+ meetings; common on Kalshi;
+    "reduce oil production" / "production quota" patterns; placed before commodity block
+  - Semiconductor/chip export restriction (0.45) — US chip bans/entity list additions;
+    "chip export ban", "export ban list", "nvidia chip export" etc.; placed before antitrust block
+  - Filibuster reform (0.10) — Senate rules changes require 67 votes; historically very rare;
+    placed BEFORE legislative block (0.35) to prevent false-match on "senate"
+  - Housing permits/starts data (0.50) — monthly economic data threshold questions; ~50/50
+    like other macro data releases; placed before housing crash (0.15)
+- `scorer.py` Rule 39: OPEC meetings — delegate consensus language is standard pre-meeting
+  noise; only post-meeting communiqué qualifies as HIGH. Chip export restrictions — "reviewing"
+  / "considering" is background policy noise; only final Federal Register rule qualifies.
+- 19 new tests (1048 → 1067 total)
+
 **Commit 60 — Calibration analytics: whale, watchlist, PASS-rate breakdowns**
 - `logger.py get_stats_by_whale()`: win rate for whale-detected vs non-whale signals
 - `logger.py get_stats_by_watchlist()`: win rate for watchlist-aligned vs non-watchlist signals
