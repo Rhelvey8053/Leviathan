@@ -1666,3 +1666,41 @@ def test_net_edge_negative_when_spread_exceeds_raw_edge():
     if raw is not None and net is not None:
         # net_edge should reflect that the huge spread wipes theoretical edge
         assert abs(net - (raw - half)) < 1e-9
+
+
+# ─── FDA / PDUFA heuristic base rates ────────────────────────────────────────
+
+def test_pdufa_base_rate_is_high():
+    """PDUFA date markets get ~85% approval base rate (NDA/BLA under active review)."""
+    br = scanner.estimate_base_rate({"title": "Will the FDA approve Drug X by the PDUFA date?"})
+    assert br == 0.85
+
+
+def test_clinical_hold_base_rate_is_low():
+    """Clinical hold markets get ~10% — active FDA safety concern."""
+    br = scanner.estimate_base_rate({"title": "Will the clinical hold on Drug X be lifted by Q2?"})
+    assert br == 0.10
+
+
+def test_crl_resubmission_base_rate():
+    """Complete Response Letter / resubmission: ~60% on second review."""
+    br = scanner.estimate_base_rate({"title": "Will Drug X resubmission receive FDA approval?"})
+    assert br == 0.60
+
+
+def test_fda_adcom_base_rate_neutral():
+    """Advisory committee vote outcome is 50/50 before vote — neutral base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the FDA advisory committee vote to approve Drug X?"})
+    assert br == 0.50
+
+
+def test_generic_fda_approval_base_rate():
+    """Generic FDA approval (no PDUFA/CRL context) stays at 40%."""
+    br = scanner.estimate_base_rate({"title": "Will the FDA approve the new cancer drug by year-end?"})
+    assert br == 0.40
+
+
+def test_pdufa_takes_priority_over_fda_approve():
+    """PDUFA pattern (0.85) must precede generic 'fda approve' (0.40) in heuristics list."""
+    br = scanner.estimate_base_rate({"title": "FDA approval of Drug X ahead of PDUFA date"})
+    assert br == 0.85
