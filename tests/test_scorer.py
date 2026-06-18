@@ -735,3 +735,27 @@ def test_signal_summary_absent_when_only_one_source():
     )
     prompt = scorer.build_prompt([m])
     assert "SIGNAL SUMMARY" not in prompt
+
+
+# ─── SHORT HORIZON warning in prompt ─────────────────────────────────────────
+
+def test_short_horizon_warning_shown_when_true():
+    """[!] SHORT HORIZON appears in prompt when short_horizon=True."""
+    m = _base_market(short_horizon=True, time_horizon="WEEKLY")
+    prompt = scorer.build_prompt([m])
+    assert "SHORT HORIZON" in prompt
+    assert "72 hours" in prompt
+
+
+def test_short_horizon_warning_absent_when_false():
+    """No SHORT HORIZON line when short_horizon is False or absent."""
+    m = _base_market(short_horizon=False, time_horizon="MONTHLY")
+    prompt = scorer.build_prompt([m])
+    assert "SHORT HORIZON" not in prompt
+
+
+def test_short_horizon_warning_absent_by_default():
+    """No SHORT HORIZON line when short_horizon key is not in the market dict."""
+    m = _base_market(time_horizon="QUARTERLY")  # no short_horizon key
+    prompt = scorer.build_prompt([m])
+    assert "SHORT HORIZON" not in prompt

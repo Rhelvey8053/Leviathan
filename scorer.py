@@ -319,6 +319,15 @@ def build_prompt(markets: list[dict]) -> str:
                 f"Determine whether Kalshi or Polymarket is better calibrated for this event."
             )
 
+        # Short-horizon warning — reinforce Rule 28 in context.
+        if m.get("short_horizon"):
+            lines.append(
+                f"   [!] SHORT HORIZON: This market closes within 7 days. Heuristic base rates "
+                f"are long-run averages — they do NOT carry predictive signal over a 1-7 day "
+                f"window. Require 15pp edge AND evidence dated within 72 hours. "
+                f"Default to PASS unless you find a very recent, specific, primary-source catalyst."
+            )
+
         # Signal alignment summary — show how many independent sources agree on direction.
         # Only appears when ≥2 sources have a directional opinion (≥5pp from neutral).
         _s_yes = 0

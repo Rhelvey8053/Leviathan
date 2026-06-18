@@ -100,6 +100,7 @@ def _init_db() -> None:
             "sig_br_none           INTEGER DEFAULT 0",
             "base_rate             REAL",
             "heuristic_direction   TEXT",
+            "short_horizon         INTEGER DEFAULT 0",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -198,8 +199,8 @@ def log_signal(signal: dict) -> None:
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
-                 base_rate,heuristic_direction)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 base_rate,heuristic_direction,short_horizon)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -223,6 +224,7 @@ def log_signal(signal: dict) -> None:
                 1 if signal.get("sig_br_none") else 0,
                 _to_float(signal.get("base_rate")),
                 signal.get("heuristic_direction"),
+                1 if signal.get("short_horizon") else 0,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
