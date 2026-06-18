@@ -861,6 +861,7 @@ def tag_watchlist_overlap(
     markets: list[dict],
     watchlist_tickers: set[str],
     ticker_details: dict | None = None,
+    stale: bool = False,
 ) -> list[dict]:
     """
     Mark markets that overlap with smart money watchlist positions.
@@ -870,20 +871,25 @@ def tag_watchlist_overlap(
       - m['watchlist_direction']: consensus YES/NO/MIXED/UNKNOWN
       - m['watchlist_position_val']: total $ smart money behind this ticker
       - m['watchlist_trader_count']: number of traders
+    If stale=True (scan data older than 24h), sets m['watchlist_stale']=True
+    so the pre-sort score and prompt can apply a discount.
     """
     for m in markets:
         ticker = m.get("ticker", "")
         hit = ticker in watchlist_tickers
         m["watchlist_signal"] = hit
-        if hit and ticker_details:
-            detail = ticker_details.get(ticker, {})
-            m["watchlist_direction"]     = detail.get("consensus_direction", "UNKNOWN")
-            m["watchlist_position_val"]  = detail.get("total_position_val", 0.0)
-            m["watchlist_trader_count"]  = detail.get("trader_count", 0)
+        if hit:
+            m["watchlist_stale"] = stale
+            if ticker_details:
+                detail = ticker_details.get(ticker, {})
+                m["watchlist_direction"]    = detail.get("consensus_direction", "UNKNOWN")
+                m["watchlist_position_val"] = detail.get("total_position_val", 0.0)
+                m["watchlist_trader_count"] = detail.get("trader_count", 0)
         elif not hit:
             m.setdefault("watchlist_direction", None)
             m.setdefault("watchlist_position_val", None)
             m.setdefault("watchlist_trader_count", None)
+            m.setdefault("watchlist_stale", False)
     return markets
 
 

@@ -904,6 +904,33 @@ def test_watchlist_ticker_details_multiple_markets():
     assert m3.get("watchlist_direction") is None
 
 
+def test_watchlist_stale_flag_set_when_stale_true():
+    """watchlist_stale=True is set on matching markets when stale=True."""
+    m = _market()
+    m["ticker"] = "KXTEST-STALE"
+    scanner.tag_watchlist_overlap([m], {"KXTEST-STALE"}, stale=True)
+    assert m["watchlist_signal"] is True
+    assert m["watchlist_stale"] is True
+
+
+def test_watchlist_stale_flag_false_when_fresh():
+    """watchlist_stale=False on matching markets when stale=False (default)."""
+    m = _market()
+    m["ticker"] = "KXTEST-FRESH"
+    scanner.tag_watchlist_overlap([m], {"KXTEST-FRESH"}, stale=False)
+    assert m["watchlist_signal"] is True
+    assert m["watchlist_stale"] is False
+
+
+def test_watchlist_stale_not_set_on_non_matching():
+    """Non-matching markets get watchlist_stale=False via setdefault."""
+    m = _market()
+    m["ticker"] = "KXTEST-NOMATCH"
+    scanner.tag_watchlist_overlap([m], {"KXTEST-OTHER"}, stale=True)
+    assert m["watchlist_signal"] is False
+    assert m.get("watchlist_stale") is False
+
+
 def test_watchlist_flag_path_override():
     """Unflagged watchlist market gets flag_path=WATCHLIST when force-flagged."""
     # Build an inert market: mid=0.50, no drift, no keyword match in heuristics
