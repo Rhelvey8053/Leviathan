@@ -686,6 +686,55 @@ def test_rule_28_short_horizon_decay_in_system_prompt():
     assert "15pp" in sp or "15 pp" in sp
 
 
+# ─── build_system_prompt calibration feedback ─────────────────────────────────
+
+def test_build_system_prompt_no_calibration_returns_base():
+    """No calibration dict → returns SYSTEM_PROMPT unchanged."""
+    assert scorer.build_system_prompt(None) == scorer.SYSTEM_PROMPT
+    assert scorer.build_system_prompt({}) == scorer.SYSTEM_PROMPT
+
+
+def test_build_system_prompt_no_data_returns_base():
+    """All zero totals → returns SYSTEM_PROMPT unchanged (no feedback to show)."""
+    cal = {
+        "HIGH": {"total": 0, "wins": 0, "win_rate": None},
+        "MED":  {"total": 0, "wins": 0, "win_rate": None},
+        "LOW":  {"total": 0, "wins": 0, "win_rate": None},
+    }
+    assert scorer.build_system_prompt(cal) == scorer.SYSTEM_PROMPT
+
+
+def test_build_system_prompt_with_data_appends_feedback():
+    """Resolved data → CALIBRATION FEEDBACK section appended."""
+    cal = {
+        "HIGH": {"total": 5, "wins": 3, "win_rate": 60.0},
+        "MED":  {"total": 3, "wins": 1, "win_rate": 33.3},
+        "LOW":  {"total": 0, "wins": 0, "win_rate": None},
+    }
+    sp = scorer.build_system_prompt(cal)
+    assert "CALIBRATION FEEDBACK" in sp
+    assert "HIGH" in sp
+    assert "3/5" in sp
+    assert "60%" in sp
+    assert "MED" in sp
+    assert "1/3" in sp
+
+
+def test_build_system_prompt_includes_guidance_text():
+    """Guidance text about what to do with calibration data is present."""
+    cal = {"HIGH": {"total": 4, "wins": 2, "win_rate": 50.0}}
+    sp = scorer.build_system_prompt(cal)
+    assert "overconfident" in sp or "downgrade" in sp
+
+
+def test_build_system_prompt_base_prompt_still_present():
+    """Original SYSTEM_PROMPT content is preserved when feedback is appended."""
+    cal = {"HIGH": {"total": 2, "wins": 1, "win_rate": 50.0}}
+    sp = scorer.build_system_prompt(cal)
+    assert scorer.SYSTEM_PROMPT[:100] in sp
+    assert "CALIBRATION RULES" in sp
+
+
 # ─── SIGNAL SUMMARY alignment block ─────────────────────────────────────────
 
 def test_signal_summary_shown_when_two_sources_agree_yes():
