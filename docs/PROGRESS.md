@@ -96,6 +96,42 @@ Human reviewer flag for signals where Claude overrode the conservative heuristic
 34. `55e0448` — Rule 28: short-horizon edge decay for INTRADAY/WEEKLY markets + 1 test (805)
 35. `b7f8ef0` — CLAUDE OVERRIDE indicator in report + 4 tests (809)
 
+## Session 11 — 2026-06-17 (autonomous continuation)
+
+### Short-horizon enforcement, heuristic alignment DB analysis, signal pre-sort
+
+**`logger.py` schema additions (`base_rate`, `heuristic_direction`, `short_horizon`):**
+Three new columns added via additive migration. Enables: (1) calibration analysis of whether
+CLAUDE OVERRIDE signals outperform aligned signals, (2) short-horizon win rate breakdown.
+`log_signal()` persists all three fields. `get_stats_by_heuristic_alignment()` groups resolved
+paper signals into aligned/override/no_heuristic — surfaced in `analysis/backtest.py`.
+
+**Scanner: short-horizon edge decay at filter level (`scanner.py`):**
+Markets with `time_horizon in (INTRADAY, WEEKLY)` now require `raw_edge > 0.15` to fire the
+HEURISTIC/EDGE flag (default threshold is 0.08). Configurable via `short_horizon_edge_threshold`.
+`short_horizon: bool` added to `score_market()` return dict.
+
+**`build_prompt()` — `[!] SHORT HORIZON` warning:**
+Markets closing within 7 days now show explicit Rule 28 context: "Heuristic base rates are
+long-run averages — require 15pp edge AND evidence dated within 72 hours."
+
+**`_pre_sort_score()` — signal convergence and short-horizon penalty:**
+Now counts directional sources (heuristic, Polymarket, ext consensus, drift, whale, order book).
+Adds +3 for 3+ agreeing sources, +1 for 2. Short-horizon markets with score <5 get -2 penalty
+so long-horizon high-quality markets win Claude slots when evidence is weak.
+
+**`report.py` — `[SHORT HORIZON — verify within 72h]` in signal header:**
+Human reviewer can immediately see which signals need extra evidence scrutiny.
+
+### Git commits this session
+
+36. `91cb519` — base_rate + heuristic_direction schema migration + 3 logger tests (816)
+37. `f8bf3b2` — get_stats_by_heuristic_alignment() + backtest section + 6 tests (822)
+38. `f4aa329` — short-horizon edge decay at filter level + 6 scanner tests (828)
+39. `946f54e` — short_horizon end-to-end: DB column + build_prompt warning + 5 tests (833)
+40. `0a7d85e` — pre-sort: signal convergence bonus + short-horizon penalty (833)
+41. `6074aaf` — [SHORT HORIZON] label in daily report + 3 tests (836)
+
 ---
 
 ## Session 9 — 2026-06-17 (autonomous continuation)
