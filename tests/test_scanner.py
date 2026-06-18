@@ -1936,3 +1936,47 @@ def test_data_center_announcement_base_rate():
     """Data center opening gets ~40% base rate."""
     br = scanner.estimate_base_rate({"title": "Will Amazon open a data center in Saudi Arabia before 2027?"})
     assert br == 0.40
+
+
+# ─── New heuristics: BRICS / QE / celebrity legal ────────────────────────────
+
+def test_brics_membership_base_rate():
+    """BRICS membership markets get ~30% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Saudi Arabia join BRICS before 2027?"})
+    assert br == 0.30
+
+
+def test_brics_expansion_base_rate():
+    """BRICS expansion phrasing gets ~30% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Turkey be added to BRICS before 2027?"})
+    assert br == 0.30
+
+
+def test_quantitative_easing_base_rate():
+    """QE announcement markets get ~40% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the Fed announce a new quantitative easing program in 2026?"})
+    assert br == 0.40
+
+
+def test_quantitative_tightening_base_rate():
+    """QT markets get ~40% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the ECB begin quantitative tightening before Q4?"})
+    assert br == 0.40
+
+
+def test_divorce_settlement_base_rate():
+    """Divorce settlement markets get ~45% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Elon Musk's divorce settlement be finalized before March?"})
+    assert br == 0.45
+
+
+def test_custody_battle_base_rate():
+    """Custody battle outcomes get ~45% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Britney Spears win the custody ruling before July?"})
+    assert br == 0.45
+
+
+def test_defamation_settlement_base_rate():
+    """Defamation settlement gets ~45% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will there be a defamation settlement between the parties?"})
+    assert br == 0.45

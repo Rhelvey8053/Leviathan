@@ -393,6 +393,10 @@ def estimate_base_rate(market: dict) -> float | None:
           "gulf normalization"], 0.20),
         (["join nato", "nato membership", "nato expansion",
           "nato accession"], 0.35),
+        # BRICS / SCO / non-Western bloc membership — expanding but each new member is uncertain → ~30%
+        (["join brics", "join the brics", "brics membership", "brics expansion",
+          "brics member", "added to brics", "new brics member",
+          "join the sco", "sco membership", "join the shanghai cooperation"], 0.30),
         # Rejoin an international agreement — countries rarely rejoin after withdrawal → ~25%
         (["rejoin the paris", "rejoin paris", "rejoin the un",
           "rejoin the who", "rejoin the tpp",
@@ -446,6 +450,14 @@ def estimate_base_rate(market: dict) -> float | None:
           "ruled not guilty"], 0.35),
         # Criminal / legal — conviction base rates are moderate
         (["convicted", "found guilty", "indicted", "charged with"], 0.40),
+        # Divorce / custody / civil suit resolution — high-profile celebrity legal cases → ~45%
+        # Placed after conviction; these civil proceedings typically resolve but timing varies
+        (["divorce settlement", "divorce finalized", "divorce is finalized",
+          "custody battle", "custody ruling", "custody decision",
+          "custody settlement", "child custody",
+          "civil settlement", "civil suit settled",
+          "win the lawsuit", "wins the lawsuit",
+          "defamation settlement", "defamation verdict"], 0.45),
         (["impeach", "impeachment", "removed from office"], 0.15),
         # 25th Amendment invocation — historically zero successful non-voluntary uses
         (["25th amendment", "invoke the 25th", "invoked the 25th",
@@ -548,6 +560,14 @@ def estimate_base_rate(market: dict) -> float | None:
           "interest rates rise", "interest rates fall", "interest rates exceed",
           "interest rates drop", "interest rates above", "interest rates below",
           "rates rise above", "rates fall below", "rates exceed"], 0.50),
+        # Quantitative easing / tightening — central bank balance sheet policy → ~40%
+        # Fed announced QE/QT is fairly common during stress periods; specific timing uncertain
+        (["quantitative easing", "quantitative tightening",
+          "qe program", "qt program", "asset purchase program",
+          "balance sheet expansion", "balance sheet reduction",
+          "end qe", "begin qe", "restart qe",
+          "end qt", "begin qt", "resume qe",
+          "purchase treasuries", "purchase mortgage-backed"], 0.40),
         (["recession", "in recession", "enters recession"], 0.25),
         # Housing market crash / real estate bust — tail event; ~15% in any given year
         # Placed BEFORE generic "fall below" / price-level patterns
