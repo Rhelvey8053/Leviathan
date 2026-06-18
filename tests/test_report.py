@@ -325,8 +325,8 @@ def test_smart_money_section_rendered():
 # ─── compile_weekly_digest ────────────────────────────────────────────────────
 
 def _week_row(ticker, direction="YES", confidence="MED", edge=0.12,
-              timestamp="2026-06-17T08:00:00+00:00"):
-    return {
+              timestamp="2026-06-17T08:00:00+00:00", net_edge=None):
+    row = {
         "ticker":     ticker,
         "title":      f"Will {ticker} happen?",
         "direction":  direction,
@@ -334,6 +334,9 @@ def _week_row(ticker, direction="YES", confidence="MED", edge=0.12,
         "edge":       edge,
         "timestamp":  timestamp,
     }
+    if net_edge is not None:
+        row["net_edge"] = net_edge
+    return row
 
 
 def _stats(total=5, resolved=3, wins=2, win_rate=66.7,
@@ -417,6 +420,29 @@ def test_weekly_digest_ticker_appears_in_markets_table():
     signals = [_week_row("KXUNIQUE-TEST")]
     digest = report.compile_weekly_digest(signals, _stats(), {})
     assert "KXUNIQUE-TEST" in digest
+
+
+def test_weekly_digest_net_edge_column_header_present():
+    digest = report.compile_weekly_digest([], _stats(), {})
+    assert "Net" in digest
+
+
+def test_weekly_digest_net_edge_shown_when_present():
+    signals = [_week_row("KXTEST", net_edge=0.063)]
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "+6.3pp" in digest
+
+
+def test_weekly_digest_net_edge_negative_shown():
+    signals = [_week_row("KXTEST", net_edge=-0.02)]
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "-2.0pp" in digest
+
+
+def test_weekly_digest_net_edge_absent_shows_dash():
+    signals = [_week_row("KXTEST")]  # no net_edge key
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "--" in digest
 
 
 # ─── compile_report ───────────────────────────────────────────────────────────
