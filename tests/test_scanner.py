@@ -1010,7 +1010,7 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will a Category 4 hurricane hit the US in 2026?", 0.45),
     # Geopolitical
     ("Will US recognize Palestinian statehood before 2027?", 0.30),
-    ("Will Saudi Arabia normalize relations with Israel?", 0.30),
+    ("Will Saudi Arabia normalize relations with Israel?", 0.20),
     # IPO announcement timing markets
     ("When will Canva officially announce an IPO?", 0.25),
     ("When will Fannie Mae officially announce an IPO?", 0.25),
@@ -1704,3 +1704,47 @@ def test_pdufa_takes_priority_over_fda_approve():
     """PDUFA pattern (0.85) must precede generic 'fda approve' (0.40) in heuristics list."""
     br = scanner.estimate_base_rate({"title": "FDA approval of Drug X ahead of PDUFA date"})
     assert br == 0.85
+
+
+# ─── Iran/geopolitical / regime change heuristics ────────────────────────────
+
+def test_uranium_enrichment_deal_base_rate():
+    """Uranium enrichment agreement markets get ~20% (similar to nuclear deal)."""
+    br = scanner.estimate_base_rate({"title": "Iran agrees to end enrichment of uranium by June 30"})
+    assert br == 0.20
+
+
+def test_uranium_stockpile_surrender_base_rate():
+    """Uranium stockpile surrender markets get ~20%."""
+    br = scanner.estimate_base_rate({"title": "Iran agrees to surrender enriched uranium stockpile by Q3"})
+    assert br == 0.20
+
+
+def test_regime_fall_base_rate_low():
+    """Regime fall / government collapse markets get ~10% (rare event)."""
+    br = scanner.estimate_base_rate({"title": "Will the Iranian regime fall before 2027?"})
+    assert br == 0.10
+
+
+def test_coup_attempt_base_rate():
+    """Coup attempt markets get ~10% (included in regime fall category)."""
+    br = scanner.estimate_base_rate({"title": "Iran coup attempt by June 30?"})
+    assert br == 0.10
+
+
+def test_leadership_change_base_rate():
+    """Leadership change / transition get ~10%."""
+    br = scanner.estimate_base_rate({"title": "Iran leadership change by December 31?"})
+    assert br == 0.10
+
+
+def test_abraham_accords_base_rate():
+    """Abraham Accords normalization markets get ~20% (very slow-moving)."""
+    br = scanner.estimate_base_rate({"title": "Will Israel and Saudi Arabia normalize relations before 2027?"})
+    assert br == 0.20
+
+
+def test_saudi_israel_normalization_base_rate():
+    """Saudi-Israel normalization gets ~20% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Saudi-Israel normalization happen by January 2029?"})
+    assert br == 0.20

@@ -337,7 +337,29 @@ def estimate_base_rate(market: dict) -> float | None:
           "nuclear warhead", "nuclear device"], 0.05),
         (["nuclear deal", "nuclear agreement", "nuclear accord",
           "nuclear treaty", "npt", "iaea agreement"], 0.20),
+        # Uranium enrichment stop / nuclear surrender — Iran-specific or similar state → ~20%
+        # These are near-equivalent to nuclear deal but phrased differently in Kalshi titles
+        (["end enrichment", "stop enrichment", "halt enrichment",
+          "cease enrichment", "enrichment of uranium",
+          "surrender enriched uranium", "uranium stockpile",
+          "agrees to end uranium", "uranium enrichment deal",
+          "uranium enrichment agreement"], 0.20),
+        # Regime fall / government collapse — extremely rare for entrenched authoritarian regimes
+        # Iran regime ~5%/year, other autocracies roughly similar → ~8% for any given window
+        (["regime fall", "regime falls", "regime collapse", "government falls",
+          "government collapse", "lose power", "loses power",
+          "overthrown", "government overthrown", "coup attempt",
+          "fall of the government", "fall of the regime",
+          "leadership change", "leadership transition",
+          "end of the regime", "end of the government"], 0.10),
         (["peace deal", "ceasefire", "peace agreement", "armistice"], 0.25),
+        # Abraham Accords / Gulf normalization — very slow-moving; only 4 countries in 75 years
+        # Saudi deal is the most discussed but remains uncertain → ~20% for any deadline
+        (["abraham accords", "normalization with israel", "normalize with israel",
+          "normalize relations with israel", "normalize ties with israel",
+          "israel normalization", "israel normalize", "israel and saudi",
+          "saudi and israel", "saudi-israel", "uae-israel",
+          "gulf normalization"], 0.20),
         (["join nato", "nato membership", "nato expansion",
           "nato accession"], 0.35),
         # Rejoin an international agreement — countries rarely rejoin after withdrawal → ~25%
