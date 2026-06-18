@@ -251,6 +251,30 @@ def main(use_snapshot: bool = False):
         if cnt:
             print(f"    {h:<12}  {cnt:>4}")
 
+    # Short-horizon edge suppression analysis
+    # Compare: how many short-horizon markets would have been flagged at the normal
+    # threshold vs how many actually passed the elevated 15pp threshold.
+    sh_edge_threshold = mkt_cfg.get("short_horizon_edge_threshold", 0.15)
+    edge_threshold    = mkt_cfg.get("edge_threshold", 0.08)
+    short_markets     = [m for m in scored if m.get("time_horizon") in ("INTRADAY", "WEEKLY")]
+    sh_suppressed     = [
+        m for m in short_markets
+        if not m.get("flag")
+           and m.get("raw_edge") is not None
+           and edge_threshold < m["raw_edge"] <= sh_edge_threshold
+    ]
+    sh_passed = [m for m in short_markets if m.get("flag")]
+    if short_markets:
+        print()
+        print("  Short-horizon (Rule 28) edge threshold analysis:")
+        print(f"    Markets in INTRADAY/WEEKLY pool:  {len(short_markets):>4}")
+        print(f"    Flagged (edge > {sh_edge_threshold*100:.0f}pp):          {len(sh_passed):>4}")
+        print(f"    Suppressed ({edge_threshold*100:.0f}-{sh_edge_threshold*100:.0f}pp, normal would flag):  {len(sh_suppressed):>4}")
+        if sh_suppressed:
+            print(f"    Top suppressed:")
+            for m in sorted(sh_suppressed, key=lambda x: -(x.get("raw_edge") or 0))[:5]:
+                print(f"      {(m.get('ticker') or ''):<28}  edge {m['raw_edge']*100:.1f}pp  {(m.get('title') or '')[:40]}")
+
     # Heuristic base rate distribution across all scored markets
     br_dist: dict[str, int] = {"None (BR_NONE)": 0}
     for m in scored:
