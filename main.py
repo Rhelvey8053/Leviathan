@@ -357,6 +357,18 @@ def main():
     for m in flagged_markets:
         m["pass_count"] = _pass_tickers.get(m.get("ticker", ""), 0)
 
+    # Hard PASS suppression: markets that Claude has PASS'd many times in the
+    # look-back window are systematic scanner false-positives. Remove them from
+    # the queue entirely — deprioritization is not enough at that point.
+    _max_suppress = config.get("scoring", {}).get("max_pass_before_suppress", 5)
+    if _max_suppress > 0:
+        _before_sup = len(flagged_markets)
+        flagged_markets = [m for m in flagged_markets if m.get("pass_count", 0) < _max_suppress]
+        _n_sup = _before_sup - len(flagged_markets)
+        if _n_sup:
+            print(f"      PASS suppress: {_n_sup} market(s) hard-suppressed "
+                  f"({_max_suppress}+ PASSes in 14d — systematic false-positives)")
+
     # Signal persistence: query DB for prior paper signals on these tickers.
     # Runs in one batch query. Gives Claude longitudinal context: "flagged 4 days
     # in a row, all YES" is much stronger than a single-day appearance.
