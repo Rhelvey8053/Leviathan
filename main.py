@@ -721,13 +721,15 @@ def main():
         stats            = logger.get_stats()
         probe_stats      = logger.get_stats_probe()
         flag_path_stats  = logger.get_stats_by_flag_path()
+        lv_stats         = logger.get_stats_by_leviathan_score()
         body  = report.compile_report(final_signals, whale_only, stats, run_meta, config,
                                       all_filtered=filtered,
                                       new_signals=new_signals,
                                       repeat_signals=repeat_signals,
                                       smart_money_result=smart_money_result,
                                       probe_stats=probe_stats,
-                                      flag_path_stats=flag_path_stats)
+                                      flag_path_stats=flag_path_stats,
+                                      lv_stats=lv_stats)
         report.send_report(body, final_signals, run_meta["whale_flags"], config)
     except Exception as e:
         print(f"      FAILED: {e}")
@@ -737,7 +739,8 @@ def main():
             body = report.compile_report(final_signals, whale_only, logger.get_stats(), run_meta, config,
                                          smart_money_result=smart_money_result,
                                          probe_stats=logger.get_stats_probe(),
-                                         flag_path_stats=logger.get_stats_by_flag_path())
+                                         flag_path_stats=logger.get_stats_by_flag_path(),
+                                         lv_stats=logger.get_stats_by_leviathan_score())
             print(body)
         except Exception:
             pass
