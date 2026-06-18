@@ -131,6 +131,33 @@ Human reviewer can immediately see which signals need extra evidence scrutiny.
 39. `946f54e` — short_horizon end-to-end: DB column + build_prompt warning + 5 tests (833)
 40. `0a7d85e` — pre-sort: signal convergence bonus + short-horizon penalty (833)
 41. `6074aaf` — [SHORT HORIZON] label in daily report + 3 tests (836)
+42. `91acdb3` — filter_stats.py short-horizon suppression analysis + README test count (836)
+43. `54696a9` — net-of-spread edge + watchlist_direction convergence; 12 tests (855)
+44. (current) — smart dedup post-scoring: dedup_by_event_scored picks best-signal market; 7 tests (862)
+
+---
+
+## Session 12 — 2026-06-17 (autonomous continuation)
+
+### Net-of-spread edge, watchlist convergence, smart event dedup
+
+**Net-of-spread edge (`net_edge`):**
+`scanner.py` computes `net_edge = raw_edge - half_spread` so the realizable edge (after paying
+the bid-ask spread to enter) is tracked separately from the theoretical edge. A market with 10pp
+raw edge but 12pp spread has `net_edge = -2pp` — no profit possible. `scorer.py` shows both to
+Claude with [SPREAD CONSUMES EDGE] and [thin net edge] warnings. `report.py` surfaces Net Edge
+in every signal block. `logger.py` persists it as a new column.
+
+**Watchlist direction in convergence:**
+`build_prompt()` SIGNAL SUMMARY now counts `watchlist_direction=YES/NO` as an independent
+directional source when `watchlist_signal=True`. `_pre_sort_score()` convergence counter
+also includes it. Previously watchlist confirmed presence but not direction.
+
+**Smart event dedup (`dedup_by_event_scored()`):**
+New function in `scanner.py` runs post-scoring and picks the best-signal market per event using
+priority: watchlist_signal > net_edge > raw_edge > volume. Previously, dedup ran pre-scoring and
+used raw volume only — could discard the highest-edge market in favour of the most liquid.
+Pipeline in `main.py` and `filter_stats.py` updated to dedup after `score_markets()`.
 
 ---
 

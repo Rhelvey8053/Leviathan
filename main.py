@@ -135,12 +135,6 @@ def main():
     try:
         filtered = scanner.filter_markets(all_markets, config)
 
-        # Optional event-level deduplication (keeps highest-volume per event_ticker)
-        if config.get("markets", {}).get("dedup_by_event", False):
-            before_dedup = len(filtered)
-            filtered = scanner.dedup_by_event(filtered)
-            print(f"      Dedup: {before_dedup} -> {len(filtered)} markets (removed {before_dedup - len(filtered)} lower-liquidity duplicates)")
-
         # Load smart money signals cache to boost priority for matched markets
         try:
             _sig_cache = os.path.join(os.path.dirname(__file__),
@@ -159,7 +153,16 @@ def main():
         except Exception as _e:
             print(f"      [warn] Smart money tag failed: {_e}")
 
-        scored_markets  = scanner.score_markets(filtered, config)
+        scored_markets = scanner.score_markets(filtered, config)
+
+        # Post-scoring event dedup: picks the best-signal market per event
+        # (watchlist > net_edge > raw_edge > volume) instead of raw volume.
+        # Running after score_markets() means we use realizable edge, not just liquidity.
+        if config.get("markets", {}).get("dedup_by_event", False):
+            before_dedup = len(scored_markets)
+            scored_markets = scanner.dedup_by_event_scored(scored_markets)
+            print(f"      Dedup: {before_dedup} -> {len(scored_markets)} markets "
+                  f"(kept best-signal market per event)")
         # Include flagged markets + any watchlist-tagged markets not already flagged
         flagged_markets = [m for m in scored_markets if m.get("flag")]
         wl_unflagged    = [m for m in scored_markets if m.get("watchlist_signal") and not m.get("flag")]

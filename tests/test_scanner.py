@@ -690,6 +690,97 @@ def test_dedup_mixed_event_and_no_event():
     assert "T3" in tickers
 
 
+# ─── dedup_by_event_scored ────────────────────────────────────────────────────
+
+def _scored_mkt(ticker: str, event_ticker: str, raw_edge: float = 0.0,
+                net_edge: float = None, volume: float = 1000,
+                watchlist_signal: bool = False) -> dict:
+    return {
+        "ticker": ticker,
+        "event_ticker": event_ticker,
+        "volume_fp": volume,
+        "raw_edge": raw_edge,
+        "net_edge": net_edge,
+        "watchlist_signal": watchlist_signal,
+    }
+
+
+def test_dedup_scored_picks_highest_net_edge():
+    """dedup_by_event_scored keeps market with highest net_edge per event."""
+    markets = [
+        _scored_mkt("T1", "EVT-A", raw_edge=0.15, net_edge=0.12),
+        _scored_mkt("T2", "EVT-A", raw_edge=0.10, net_edge=0.08),
+        _scored_mkt("T3", "EVT-A", raw_edge=0.20, net_edge=0.05),
+    ]
+    result = scanner.dedup_by_event_scored(markets)
+    assert len(result) == 1
+    assert result[0]["ticker"] == "T1"  # highest net_edge
+
+
+def test_dedup_scored_watchlist_beats_higher_edge():
+    """Watchlist signal wins over higher net_edge — smart money confirmation takes priority."""
+    markets = [
+        _scored_mkt("T1", "EVT-A", raw_edge=0.25, net_edge=0.20),
+        _scored_mkt("T2", "EVT-A", raw_edge=0.10, net_edge=0.08, watchlist_signal=True),
+    ]
+    result = scanner.dedup_by_event_scored(markets)
+    assert len(result) == 1
+    assert result[0]["ticker"] == "T2"  # watchlist wins
+
+
+def test_dedup_scored_net_edge_beats_raw_edge():
+    """When net_edge differs from raw_edge ordering, net_edge wins."""
+    markets = [
+        _scored_mkt("T1", "EVT-A", raw_edge=0.20, net_edge=0.04),  # raw high, net low
+        _scored_mkt("T2", "EVT-A", raw_edge=0.12, net_edge=0.10),  # raw lower, net higher
+    ]
+    result = scanner.dedup_by_event_scored(markets)
+    assert len(result) == 1
+    assert result[0]["ticker"] == "T2"  # net_edge wins tiebreak
+
+
+def test_dedup_scored_none_net_edge_treated_as_minus_one():
+    """net_edge=None is treated as -1 (worse than any real edge)."""
+    markets = [
+        _scored_mkt("T1", "EVT-A", raw_edge=0.10, net_edge=None),
+        _scored_mkt("T2", "EVT-A", raw_edge=0.09, net_edge=0.07),
+    ]
+    result = scanner.dedup_by_event_scored(markets)
+    assert len(result) == 1
+    assert result[0]["ticker"] == "T2"  # real net_edge beats None
+
+
+def test_dedup_scored_volume_fallback():
+    """Volume is the final tiebreaker when edge metrics are equal."""
+    markets = [
+        _scored_mkt("T1", "EVT-A", raw_edge=0.10, net_edge=0.08, volume=1000),
+        _scored_mkt("T2", "EVT-A", raw_edge=0.10, net_edge=0.08, volume=5000),
+    ]
+    result = scanner.dedup_by_event_scored(markets)
+    assert len(result) == 1
+    assert result[0]["ticker"] == "T2"  # higher volume wins tiebreak
+
+
+def test_dedup_scored_separate_events_both_kept():
+    """Markets in different events are all kept."""
+    markets = [
+        _scored_mkt("T1", "EVT-A", raw_edge=0.10),
+        _scored_mkt("T2", "EVT-B", raw_edge=0.12),
+    ]
+    result = scanner.dedup_by_event_scored(markets)
+    assert len(result) == 2
+
+
+def test_dedup_scored_no_event_ticker_passthrough():
+    """Markets with no event_ticker pass through unchanged."""
+    markets = [
+        {"ticker": "T1", "raw_edge": 0.10},
+        {"ticker": "T2", "raw_edge": 0.20},
+    ]
+    result = scanner.dedup_by_event_scored(markets)
+    assert len(result) == 2
+
+
 # ─── tag_watchlist_overlap ────────────────────────────────────────────────────
 
 def test_watchlist_tag_sets_true_for_matching_ticker():
