@@ -175,11 +175,12 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     pass_label = "  [SECOND PASS — LOW CONVICTION]" if s.get("second_pass") else ""
     dg_label   = "  [conf downgraded: edge<10pp]" if s.get("confidence_downgraded") else ""
     fp_label   = f"  [{s.get('flag_path')}]" if s.get("flag_path") else ""
+    sh_label   = "  [SHORT HORIZON — verify within 72h]" if s.get("short_horizon") else ""
     strength   = _signal_strength(s)
     str_label  = f"  ★×{strength}" if strength >= 2 else ""
     repeat_cnt  = s.get("repeat_count", 0) or 0
     rep_label   = f"  [REPEAT x{repeat_cnt}]" if repeat_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
-    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{dg_label}{fp_label}{str_label}")
+    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{dg_label}{fp_label}{sh_label}{str_label}")
     lines.append(f"{ticker}  ·  {close_fmt}{urgency}{rep_label}" if close_fmt else f"{ticker}{urgency}{rep_label}")
     lines.append("")
 

@@ -787,6 +787,33 @@ def test_confidence_downgraded_label_absent_normally():
     assert "conf downgraded" not in header
 
 
+# ─── Short-horizon label in signal block ─────────────────────────────────────
+
+def test_short_horizon_label_shown_when_true():
+    """[SHORT HORIZON] label appears in header when short_horizon=True."""
+    s = _signal(short_horizon=True, time_horizon="WEEKLY")
+    lines = report._signal_block(s, index=1)
+    header = lines[0]
+    assert "SHORT HORIZON" in header
+    assert "72h" in header
+
+
+def test_short_horizon_label_absent_when_false():
+    """No SHORT HORIZON label when short_horizon=False."""
+    s = _signal(short_horizon=False)
+    lines = report._signal_block(s, index=1)
+    header = lines[0]
+    assert "SHORT HORIZON" not in header
+
+
+def test_short_horizon_label_absent_by_default():
+    """No SHORT HORIZON label when key is not in signal dict."""
+    s = _signal()  # no short_horizon key
+    lines = report._signal_block(s, index=1)
+    header = lines[0]
+    assert "SHORT HORIZON" not in header
+
+
 # ─── _top_picks executive summary ─────────────────────────────────────────────
 
 def test_top_picks_returns_empty_for_no_signals():
