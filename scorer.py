@@ -533,6 +533,41 @@ def build_prompt(markets: list[dict]) -> str:
                         _edge_str += "  [thin net edge — spread-sensitive]"
                 lines.append(_edge_str)
 
+        # Signal persistence — longitudinal view from DB history
+        pa = m.get("prior_appearances", 0)
+        if pa > 0:
+            prev_yes = m.get("prior_yes", 0)
+            prev_no  = m.get("prior_no", 0)
+            consistent = m.get("direction_consistent")
+            c_tag = " [CONSISTENT]" if consistent else " [MIXED — review carefully]"
+            lines.append(f"   Signal history:  flagged on {pa} distinct day(s) in past 14d")
+            if prev_yes or prev_no:
+                lines.append(f"     Prior directions: YES x{prev_yes} / NO x{prev_no}{c_tag}")
+            first_p = m.get("first_flagged_price")
+            cur_p   = float(m.get("market_price") or m.get("mid_price") or 0)
+            if first_p is not None and cur_p > 0:
+                delta_pp = (cur_p - float(first_p)) * 100
+                if abs(delta_pp) >= 1.0:
+                    hd = m.get("heuristic_direction") or (
+                        "YES" if prev_yes >= prev_no else "NO"
+                    )
+                    if hd == "YES":
+                        price_note = (
+                            "price fell — mispricing deepened, stronger entry"
+                            if delta_pp < 0 else
+                            "price rose — market converging to estimate, tightening edge"
+                        )
+                    else:
+                        price_note = (
+                            "price rose — mispricing deepened, stronger entry"
+                            if delta_pp > 0 else
+                            "price fell — market converging to estimate, tightening edge"
+                        )
+                    lines.append(
+                        f"     Price since first flag: {float(first_p)*100:.1f}% → "
+                        f"{cur_p*100:.1f}% ({delta_pp:+.1f}pp — {price_note})"
+                    )
+
         vol_total = float(m.get("volume_fp") or m.get("volume") or 0)
         vol_24h   = float(m.get("volume_24h_fp") or 0)
         if vol_total > 0 and vol_24h > 0:

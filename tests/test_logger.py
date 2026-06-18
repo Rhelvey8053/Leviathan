@@ -1066,6 +1066,86 @@ def test_get_ticker_day_count_ignores_old_entries(tmp_db):
     assert logger.get_ticker_day_count("KXOLD2", days=14) == 0
 
 
+# ─── get_signal_history_batch ─────────────────────────────────────────────────
+
+def test_signal_history_batch_empty_tickers_returns_empty(tmp_db):
+    result = logger.get_signal_history_batch([])
+    assert result == {}
+
+
+def test_signal_history_batch_missing_ticker_returns_empty(tmp_db):
+    result = logger.get_signal_history_batch(["KXNEVEREXISTS"])
+    assert "KXNEVEREXISTS" not in result
+
+
+def test_signal_history_batch_returns_rows_for_ticker(tmp_db):
+    logger.log_signal({
+        "ticker": "KXHIST1", "title": "T", "market_price": 0.45,
+        "our_estimate": 0.60, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "r-hist1",
+    })
+    result = logger.get_signal_history_batch(["KXHIST1"])
+    assert "KXHIST1" in result
+    assert len(result["KXHIST1"]) == 1
+    assert result["KXHIST1"][0]["direction"] == "YES"
+    assert result["KXHIST1"][0]["market_price"] == pytest.approx(0.45)
+
+
+def test_signal_history_batch_batches_multiple_tickers(tmp_db):
+    for ticker, price in [("KXBATCH-A", 0.40), ("KXBATCH-B", 0.55)]:
+        logger.log_signal({
+            "ticker": ticker, "title": "T", "market_price": price,
+            "our_estimate": 0.65, "edge": 0.10, "direction": "YES",
+            "confidence": "MED", "whale_detected": False, "whale_direction": "",
+            "run_id": "rbatch",
+        })
+    result = logger.get_signal_history_batch(["KXBATCH-A", "KXBATCH-B"])
+    assert "KXBATCH-A" in result
+    assert "KXBATCH-B" in result
+
+
+def test_signal_history_batch_excludes_old_entries(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('oldhist','2020-01-01T00:00:00+00:00','KXHIST-OLD','YES',0.40,'paper')"
+        )
+    result = logger.get_signal_history_batch(["KXHIST-OLD"], days=14)
+    assert result.get("KXHIST-OLD", []) == []
+
+
+def test_signal_history_batch_excludes_non_paper_sources(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('probe1',datetime('now'),'KXHIST-PROBE','YES',0.40,'research_probe')"
+        )
+    result = logger.get_signal_history_batch(["KXHIST-PROBE"])
+    assert result.get("KXHIST-PROBE", []) == []
+
+
+def test_signal_history_batch_multiple_days_counted(tmp_db):
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    day1 = (now - timedelta(days=3)).isoformat()
+    day2 = (now - timedelta(days=1)).isoformat()
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('mh1',?,'KXMULTI-HIST','YES',0.40,'paper')", (day1,)
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('mh2',?,'KXMULTI-HIST','YES',0.38,'paper')", (day2,)
+        )
+    result = logger.get_signal_history_batch(["KXMULTI-HIST"])
+    assert "KXMULTI-HIST" in result
+    assert len(result["KXMULTI-HIST"]) == 2
+    distinct_days = len({r["timestamp"][:10] for r in result["KXMULTI-HIST"]})
+    assert distinct_days == 2
+
+
 # ─── log_run ─────────────────────────────────────────────────────────────────
 
 def test_log_run_writes_run_row(tmp_db):
