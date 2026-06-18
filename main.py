@@ -391,6 +391,19 @@ def main():
         if convergence >= 3: sc += 3   # strong multi-source convergence
         elif convergence == 2: sc += 1  # moderate convergence
 
+        # Conflict penalty: when heuristic and Polymarket strongly disagree (≥10pp),
+        # demote the signal — Polymarket has real money and current information.
+        # Only apply penalty when there's no third-party corroboration (watchlist/whale).
+        hd = m.get("heuristic_direction")
+        if (hd in ("YES", "NO") and abs(pg) >= 0.10 and
+                ((hd == "YES" and pg < 0) or (hd == "NO" and pg > 0))):
+            has_corroboration = (
+                m.get("watchlist_signal") or
+                (m.get("whale_data") or {}).get("whale_detected")
+            )
+            if not has_corroboration:
+                sc -= 2  # counter-evidence from a liquid market weakens the signal
+
         # Short-horizon penalty: if weak signal AND closes within 7 days,
         # deprioritise relative to long-horizon markets with more evidence.
         if m.get("short_horizon") and sc < 5:
