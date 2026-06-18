@@ -279,7 +279,7 @@ def test_schema_new_columns_present(tmp_db):
                 "contract_type", "segment", "resolution_date", "logged_under",
                 "flag_path", "watchlist_signal",
                 "sig_edge", "sig_drift", "sig_br_none",
-                "base_rate", "heuristic_direction"):
+                "base_rate", "heuristic_direction", "short_horizon"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -618,6 +618,38 @@ def test_log_signal_base_rate_none_when_absent(tmp_db):
         ).fetchone()
     assert row["base_rate"]           is None
     assert row["heuristic_direction"] is None
+
+
+def test_log_signal_stores_short_horizon_true(tmp_db):
+    """log_signal persists short_horizon=True as 1."""
+    logger.log_signal({
+        "ticker": "KXSH-1", "title": "Short Horizon Test", "market_price": 0.40,
+        "our_estimate": 0.60, "edge": 0.20, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "short_horizon": True, "run_id": "r9",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT short_horizon FROM signals WHERE ticker='KXSH-1'"
+        ).fetchone()
+    assert row["short_horizon"] == 1
+
+
+def test_log_signal_stores_short_horizon_false_default(tmp_db):
+    """log_signal stores 0 for short_horizon when not provided."""
+    logger.log_signal({
+        "ticker": "KXSH-0", "title": "Long Horizon", "market_price": 0.30,
+        "our_estimate": 0.50, "edge": 0.20, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "run_id": "r10",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT short_horizon FROM signals WHERE ticker='KXSH-0'"
+        ).fetchone()
+    assert row["short_horizon"] == 0
 
 
 def _insert_with_flag_path(call_id, ticker, direction, market_price,
