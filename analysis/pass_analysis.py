@@ -48,7 +48,7 @@ def main(days: int = 14):
         with logger._db() as conn:
             rows = conn.execute(
                 "SELECT ticker, direction, flag_path, time_horizon, heuristic_direction, "
-                "       confidence, timestamp "
+                "       confidence, timestamp, leviathan_score "
                 "FROM signals "
                 "WHERE (source = 'paper' OR source IS NULL) "
                 "  AND timestamp >= ? "
@@ -177,6 +177,42 @@ def main(days: int = 14):
             if not d["total"]:
                 continue
             print(f"  {hd:<14}  {d['total']:>5}  {d['pass']:>5}  {_pct(d['pass'], d['total']):>6}")
+        print()
+
+    # ── PASS rate by Leviathan Score band ─────────────────────────────────────
+    by_lv: dict = defaultdict(lambda: {"total": 0, "pass": 0})
+    any_lv_data = any(r.get("leviathan_score") is not None for r in rows)
+    if any_lv_data:
+        for r in rows:
+            sc = r.get("leviathan_score")
+            if sc is None:
+                band = "unscored"
+            elif sc >= 70:
+                band = "A (>=70)"
+            elif sc >= 55:
+                band = "B (55-69)"
+            elif sc >= 40:
+                band = "C (40-54)"
+            else:
+                band = "D (<40)"
+            by_lv[band]["total"] += 1
+            if r["direction"] == "PASS":
+                by_lv[band]["pass"] += 1
+
+        print(_rule("="))
+        print("PASS RATE BY LV SCORE BAND  (D-band high = LV scoring is working)")
+        print("  If high-LV (A/B) markets are getting PASS'd, Claude is over-cautious.")
+        print("  If low-LV (C/D) markets rarely get PASS'd, raise scanner thresholds.")
+        print(_rule("-"))
+        print()
+        print(f"  {'LV Band':<12}  {'Total':>5}  {'PASS':>5}  {'PASS%':>6}")
+        print(f"  {'-'*12}  {'-'*5}  {'-'*5}  {'-'*6}")
+        band_order = ["A (>=70)", "B (55-69)", "C (40-54)", "D (<40)", "unscored"]
+        for band in band_order:
+            d = by_lv.get(band)
+            if not d or not d["total"]:
+                continue
+            print(f"  {band:<12}  {d['total']:>5}  {d['pass']:>5}  {_pct(d['pass'], d['total']):>6}")
         print()
 
     # ── Summary verdict ───────────────────────────────────────────────────────

@@ -591,6 +591,7 @@ def main():
         else:
             # Log PASS decisions for scanner calibration (identify systematic false-positives)
             if signal.get("direction", "PASS") == "PASS":
+                signal["leviathan_score"] = report.compute_leviathan_score(signal)
                 logger.log_pass(signal)
             if whale.get("whale_detected"):
                 whale_only.append({**whale, "title": m.get("title", "")})
