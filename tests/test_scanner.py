@@ -2232,3 +2232,42 @@ def test_fda_recall_base_rate():
     """FDA drug recall gets ~25% base rate."""
     br = scanner.estimate_base_rate({"title": "Will the FDA issue a drug recall for the new weight-loss pill?"})
     assert br == 0.25
+
+
+# ─── M&A stage differentiation ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("title,expected", [
+    # Signed-deal close patterns → 0.80
+    ("Will the Amazon acquisition close before the deadline?",          0.80),  # "acquisition close"
+    ("Will the Adobe-Figma merger be completed before Q3?",             0.80),  # "merger be completed"
+    ("Will the merger close by end of Q4?",                             0.80),  # "merger close"
+    ("Will the Tesla deal to close before March?",                      0.80),  # "deal to close"
+    ("Will the Google transaction close by year end?",                  0.80),  # "transaction close"
+    ("Will they complete the acquisition by December?",                 0.80),  # "complete the acquisition"
+    # Hostile/unsolicited bid → 0.42
+    ("Will the hostile takeover of Paramount succeed?",                 0.42),
+    ("Will the unsolicited bid for Southwest Airlines succeed?",        0.42),
+    ("Will the tender offer for Twitter complete before January?",      0.42),
+    # Generic exploratory merger → 0.35
+    ("Will Apple acquire Netflix?",                                     0.35),  # "acquire"
+    ("Will Amazon be acquired by a major conglomerate?",                0.35),  # "acquired by"
+    ("Will the company take private before 2027?",                      0.35),
+])
+def test_ma_stage_base_rate(title, expected):
+    br = scanner.estimate_base_rate({"title": title})
+    assert br == expected, f"{title!r}: expected {expected}, got {br}"
+
+
+@pytest.mark.parametrize("title,expected_label", [
+    ("Will the Amazon acquisition close before the deadline?",          "merger close (signed deal)"),
+    ("Will the Adobe-Figma merger be completed before Q3?",             "merger close (signed deal)"),
+    ("Will the merger close by end of Q4?",                             "merger close (signed deal)"),
+    ("Will the Tesla deal to close before March?",                      "merger close (signed deal)"),
+    ("Will the hostile takeover of Paramount succeed?",                 "hostile takeover bid"),
+    ("Will the unsolicited bid for Southwest Airlines succeed?",        "hostile takeover bid"),
+    ("Will the tender offer for Twitter complete?",                     "hostile takeover bid"),
+    ("Will Apple acquire Netflix by year end?",                         "merger or acquisition"),
+])
+def test_ma_heuristic_label(title, expected_label):
+    label = scanner.get_heuristic_label({"title": title})
+    assert label == expected_label, f"{title!r}: expected {expected_label!r}, got {label!r}"

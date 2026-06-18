@@ -1276,6 +1276,48 @@ def test_lv_high_spec_case_insensitive():
     assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 8
 
 
+def test_lv_med_spec_merger_adds_4():
+    """Merger or acquisition (MED_SPEC) adds +4 to LV score."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="merger or acquisition")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_lv_med_spec_trade_tariffs_adds_4():
+    """Trade tariffs (MED_SPEC) adds +4 to LV score."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="trade tariffs")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_lv_med_spec_presidential_veto_adds_4():
+    """Presidential veto (MED_SPEC) adds +4 to LV score."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="presidential veto")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_lv_med_spec_spacex_launch_adds_4():
+    """SpaceX launch (MED_SPEC) adds +4 to LV score."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="SpaceX launch")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_lv_med_spec_merger_close_adds_4():
+    """Merger close signed deal (MED_SPEC) adds +4."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="merger close (signed deal)")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_lv_med_spec_hostile_takeover_adds_4():
+    """Hostile takeover bid (MED_SPEC) adds +4."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="hostile takeover bid")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
 # ─── _qualifying: min_lv filter ───────────────────────────────────────────────
 
 def test_qualifying_min_lv_excludes_low_score():
