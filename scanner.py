@@ -247,6 +247,12 @@ def estimate_base_rate(market: dict) -> float | None:
           "equal rights amendment", "balanced budget amendment",
           "abolish the electoral college", "electoral college be abolished",
           "eliminate the electoral college"], 0.05),
+        # Recall election — petition threshold must be met; recalls often fail (~15%)
+        # Placed BEFORE generic "snap election" / "special election" to catch recall framing
+        (["recall election", "recall the governor", "recall the mayor",
+          "recall vote", "recall campaign", "recall effort",
+          "recall petition", "remove the governor", "remove the mayor",
+          "recall referendum", "recall initiative"], 0.15),
         # Snap election / early election — triggered by dissolution of parliament (~25%)
         (["snap election", "early election", "early general election",
           "call for early elections", "dissolve parliament",
@@ -412,7 +418,7 @@ def estimate_base_rate(market: dict) -> float | None:
         # Central bank digital currency (CBDC) — most nations are exploring; full launch is
         # rare in any given 12-month window; major economies (US, EU) move slowly → ~15%
         (["central bank digital currency", "cbdc", "digital dollar",
-          "digital euro", "digital yuan", "digital currency",
+          "digital euro", "digital yuan",
           "digital renminbi", "e-cny", "programmable money",
           "retail cbdc", "wholesale cbdc", "cbdc launch",
           "cbdc pilot", "digital pound"], 0.15),
@@ -545,6 +551,12 @@ def estimate_base_rate(market: dict) -> float | None:
           "north korea launch", "north korea conduct",
           "dprk missile", "dprk nuclear", "dprk test", "dprk launch",
           "dprk conduct", "dprk provoc", " dprk "], 0.40),
+        # Water crisis / drought — specific severity thresholds are uncertain → ~30%
+        # Placed BEFORE generic weather block to distinguish from "wildfire season" etc.
+        (["water crisis", "water shortage", "drought conditions",
+          "water scarcity", "reservoir levels", "water supply falls",
+          "severe drought", "exceptional drought", "lake mead",
+          "water restrictions", "drought emergency", "drought declaration"], 0.30),
         # Weather / natural disasters
         (["will it rain", "chance of rain", "precipitation"], 0.40),
         (["hurricane", "tropical storm", "tropical cyclone",
@@ -753,6 +765,12 @@ def estimate_base_rate(market: dict) -> float | None:
         # Stock split — corporate event, relatively rare in any given 3-6 month window → ~20%
         (["stock split", "share split", "reverse stock split",
           "forward stock split", "split its stock", "announce a split"], 0.20),
+        # Municipal / city / county financial distress — city bankruptcies are rare → ~10%
+        # Placed BEFORE corporate bankruptcy (0.15) to catch local government specifically
+        (["municipal bankruptcy", "city bankruptcy", "county bankruptcy",
+          "municipality default", "city default", "municipal default",
+          "file for chapter 9", "chapter 9 bankruptcy",
+          "city insolvency", "detroit bankruptcy", "city declares bankruptcy"], 0.10),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt",
           "go bankrupt", "declare bankruptcy", "seek bankruptcy"], 0.15),
         # Corporate partnership / licensing / supply deal — common but announcements slip → ~35%

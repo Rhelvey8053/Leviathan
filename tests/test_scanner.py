@@ -1483,6 +1483,21 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will oil prices rise above $100 per barrel in 2026?", 0.40),
     # "chip" in a non-export context should return None
     ("Will the chip shortage end by Q3 2026?", None),
+    # CBDC false positive guard — crypto titles must hit crypto (0.50), not CBDC (0.15)
+    ("Will total crypto market cap reach $5T by end of 2026?", 0.50),
+    # Recall election (~15%)
+    ("Will the California governor recall election succeed in 2026?", 0.15),
+    ("Will the recall campaign against the mayor qualify for the ballot?", 0.15),
+    ("Will the recall vote remove the governor before year end?", 0.15),
+    # Water crisis / drought (~30%)
+    ("Will there be a water crisis in California by 2027?", 0.30),
+    ("Will Lake Mead reservoir levels fall to critically low levels?", 0.30),
+    ("Will the Southwest face severe drought conditions in 2026?", 0.30),
+    # Municipal / city bankruptcy (~10%)
+    ("Will the city file for municipal bankruptcy in 2026?", 0.10),
+    ("Will Detroit face another city bankruptcy?", 0.10),
+    # False positive guard — regular corporate bankruptcy still returns 0.15
+    ("Will the retailer file for bankruptcy before Q4 2026?", 0.15),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
