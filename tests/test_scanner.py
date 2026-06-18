@@ -1435,6 +1435,32 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # AGI announcement (~25%)
     ("Will any company announce that it has achieved Artificial General Intelligence?", 0.25),
     ("Will a lab claim to have achieved AGI by 2027?", 0.25),
+    # Blockchain / crypto protocol upgrade (~65%) — must NOT hit generic crypto block (0.50)
+    ("Will Ethereum complete the Pectra network upgrade by Q2 2026?", 0.65),
+    ("Will the Ethereum protocol upgrade activate before June?", 0.65),
+    ("Will Bitcoin's Taproot upgrade be activated by year end?", 0.65),
+    ("Will the scheduled blockchain hard fork complete by August 2026?", 0.65),
+    ("Will the Shapella upgrade complete successfully?", 0.65),
+    # Secondary equity offering (~35%)
+    ("Will Tesla complete a secondary offering in Q3 2026?", 0.35),
+    ("Will the company complete a follow-on equity offering by year end?", 0.35),
+    ("Will Rivian complete an at-the-market offering before Q4?", 0.35),
+    # Credit rating change (~40%)
+    ("Will the US receive a credit rating downgrade from Moody's in 2026?", 0.40),
+    ("Will the company's credit rating be upgraded by S&P before July?", 0.40),
+    ("Will France receive a sovereign downgrade by Fitch in 2026?", 0.40),
+    # CBDC adoption (~15%)
+    ("Will the US launch a central bank digital currency by 2027?", 0.15),
+    ("Will the EU introduce a digital euro by end of 2026?", 0.15),
+    ("Will China expand its digital yuan internationally by Q4?", 0.15),
+    # Short seller report / fraud allegations (~30%)
+    ("Will a Hindenburg Research report target Tesla in 2026?", 0.30),
+    ("Will Muddy Waters publish a short report on the company?", 0.30),
+    # False positive guards
+    # "ethereum price" must still hit crypto block (0.50), not upgrade block
+    ("Will Ethereum price exceed $5000 in 2026?", 0.50),
+    # "bitcoin" alone must still hit crypto block (0.50), not upgrade block
+    ("Will Bitcoin reach $200,000 by end of 2026?", 0.50),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

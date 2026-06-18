@@ -31,6 +31,36 @@
   deal; only official joint press release / regulatory filing qualifies as HIGH confidence
 - 9 new tests (1005 total)
 
+**Commit 57 — Rule 35 FOMC markets + 3 more heuristic categories**
+- `scorer.py` Rule 35: FOMC / rate decision markets — CME FedWatch is the ground truth; do not
+  independently forecast rate path from rhetoric. Only ≥10pp divergence between FedWatch and
+  Kalshi justifies YES/NO. Addendum covers multi-meeting rate path markets.
+- New scanner heuristics: BRICS/SCO membership (0.30), quantitative easing/tightening (0.40),
+  celebrity/high-profile civil legal cases — divorce, custody, defamation (0.45)
+- 7 new tests (1012 total)
+
+**Commit 58 — 5 more heuristic categories + Rule 36 index inclusion**
+- New scanner heuristics: legalization (cannabis/gambling/drugs) (0.30), event cancellation (0.10),
+  athletic record-breaking (0.30), wealth tax/levy (0.15), product/drug recall (0.25)
+- `scorer.py` Rule 36: index inclusion markets (S&P 500/Nasdaq 100/Russell) — ~50% for eligible
+  companies within 6-month windows. All 4 S&P criteria must be met; only official S&P DJ press
+  release qualifies as HIGH confidence
+- 9 new tests (1021 total)
+
+**Commit 59 — 5 more heuristic categories + Rules 37-38**
+- New scanner heuristics:
+  - Blockchain/crypto protocol upgrade (0.65) — testnet-cleared upgrades nearly always activate;
+    placed BEFORE generic crypto block (0.50) to correctly score Ethereum/Bitcoin upgrade markets
+  - Secondary equity offering (0.35) — priced deal near-certain; rumors/exploration remain at 35%
+  - Credit rating change (0.40) — Moody's/S&P/Fitch downgrades/upgrades after watch designation
+  - CBDC adoption (0.15) — digital dollar/euro/yuan; policy adoption is rare in near term
+  - Short seller report (0.30) — Hindenburg/Citron/Muddy Waters targets; fraud claims partial success
+- `scorer.py` Rule 37: crypto network upgrades — testnet-cleared upgrades 85-90%, contentious
+  forks 50%, not-yet-testnet 65%; protocol governance evidence counts unlike product launches
+- `scorer.py` Rule 38: secondary offerings (shelf filing → 75-80%, priced deal → 90%+) and
+  credit ratings (CreditWatch Negative → 70% within 90d, negative outlook → 60% within 24mo)
+- 27 new tests (1021 → 1048 total)
+
 ---
 
 ## Session 13 — 2026-06-18 (autonomous continuation)
