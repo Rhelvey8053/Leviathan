@@ -1209,3 +1209,56 @@ def test_leviathan_score_value_in_weekly_digest_row():
     expected = report.compute_leviathan_score(row)
     text = report.compile_weekly_digest([row], _make_weekly_stats(), {})
     assert str(expected) in text
+
+
+# ─── _qualifying: min_lv filter ───────────────────────────────────────────────
+
+def test_qualifying_min_lv_excludes_low_score():
+    """Signals below min_lv are excluded from qualifying list."""
+    # Grade D signal: negative net_edge drags score below 40
+    low = _signal(confidence="HIGH", net_edge=-0.05, pass_count=3, time_horizon="INTRADAY")
+    result = report._qualifying([low], threshold_rank=0, min_lv=40)
+    assert low not in result
+
+
+def test_qualifying_min_lv_zero_keeps_all():
+    """min_lv=0 (default) does not filter any signal by LV score."""
+    low = _signal(confidence="HIGH", net_edge=-0.05, pass_count=3, time_horizon="INTRADAY")
+    result = report._qualifying([low], threshold_rank=0, min_lv=0)
+    assert low in result
+
+
+def test_qualifying_min_lv_grade_c_passes():
+    """A Grade-C signal (LV ≥40) is not filtered when min_lv=40."""
+    # Base=40 with HIGH (+20) and moderate net_edge should clear 40 easily
+    sig = _signal(confidence="HIGH", net_edge=0.07)
+    lv = report.compute_leviathan_score(sig)
+    assert lv >= 40, f"pre-condition: expected LV≥40, got {lv}"
+    result = report._qualifying([sig], threshold_rank=0, min_lv=40)
+    assert sig in result
+
+
+def test_qualifying_second_pass_bypasses_min_lv():
+    """second_pass signals bypass the confidence threshold, but min_lv still applies."""
+    # A second_pass signal below min_lv should still be filtered
+    low = _signal(confidence="LOW", direction="YES", net_edge=-0.05,
+                  pass_count=3, time_horizon="INTRADAY", second_pass=True)
+    lv = report.compute_leviathan_score(low)
+    if lv < 40:
+        result = report._qualifying([low], threshold_rank=1, min_lv=40)
+        assert low not in result
+
+
+def test_qualifying_min_lv_filters_grade_d_from_mixed_list():
+    """When min_lv=40, only Grade-C+ signals survive from a mixed list."""
+    good = _signal(confidence="HIGH", net_edge=0.12, prior_appearances=3,
+                   direction_consistent=True)
+    bad  = _signal(confidence="HIGH", net_edge=-0.05, pass_count=3,
+                   time_horizon="INTRADAY", ticker="KXBAD-TEST")
+    lv_good = report.compute_leviathan_score(good)
+    lv_bad  = report.compute_leviathan_score(bad)
+    assert lv_good >= 40, f"pre-condition failed: good={lv_good}"
+    result = report._qualifying([good, bad], threshold_rank=0, min_lv=40)
+    assert good in result
+    if lv_bad < 40:
+        assert bad not in result

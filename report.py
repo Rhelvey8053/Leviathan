@@ -184,7 +184,7 @@ def _kelly_fraction(direction: str, market_price: float, estimate: float) -> tup
     return round(full_kelly, 4), round(quarter_kelly, 4)
 
 
-def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
+def _qualifying(signals: list[dict], threshold_rank: int, min_lv: int = 0) -> list[dict]:
     out = [
         s for s in signals
         if (
@@ -192,6 +192,7 @@ def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
             or s.get("second_pass")  # always include second-pass signals
         )
         and s.get("direction", "PASS") != "PASS"
+        and compute_leviathan_score(s) >= min_lv
     ]
     out.sort(key=lambda s: (
         CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2),
@@ -572,13 +573,14 @@ def compile_report(
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
     )
+    min_lv     = int(config.get("scoring", {}).get("min_report_lv", 0))
     now_utc    = datetime.now(timezone.utc)
     date_str   = now_utc.strftime("%B %d, %Y")
     time_str   = now_utc.strftime("%H:%M UTC")
     env        = config.get("environment", "prod").upper()
-    qualifying = _qualifying(signals, threshold_rank)
-    new_q      = _qualifying(new_signals or [], threshold_rank)
-    repeat_q   = _qualifying(repeat_signals or [], threshold_rank)
+    qualifying = _qualifying(signals, threshold_rank, min_lv)
+    new_q      = _qualifying(new_signals or [], threshold_rank, min_lv)
+    repeat_q   = _qualifying(repeat_signals or [], threshold_rank, min_lv)
     n_mkt      = run_meta.get("markets_scanned", 0)
     runtime_s  = run_meta.get("runtime_ms", 0) / 1000
 
@@ -599,7 +601,7 @@ def compile_report(
     out.append("")
 
     # ── Top picks executive summary ───────────────────────────────────────
-    all_q = _qualifying(signals, threshold_rank)
+    all_q = _qualifying(signals, threshold_rank, min_lv)
     if all_q:
         out.extend(_top_picks(all_q, n=3))
 
