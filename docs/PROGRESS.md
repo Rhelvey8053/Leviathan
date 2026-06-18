@@ -47,6 +47,18 @@
   release qualifies as HIGH confidence
 - 9 new tests (1021 total)
 
+**Commit 62 — 3 more heuristic categories + CBDC false-positive fix**
+- New scanner heuristics:
+  - Recall election (0.15): "recall election", "recall the governor", "recall vote" etc.;
+    placed before snap election (0.25) to catch recall-specific framing
+  - Water crisis / drought (0.30): "water crisis", "lake mead", "drought conditions",
+    "reservoir levels"; placed before generic weather block
+  - Municipal/city bankruptcy (0.10): "municipal bankruptcy", "chapter 9", "city default";
+    placed before corporate bankruptcy (0.15) to catch local govt specifically
+- Bug fix: removed "digital currency" from CBDC block — was a false positive that would
+  score "crypto market cap" questions at 0.15 (CBDC) instead of 0.50 (crypto)
+- 14 new tests (1067 → 1081 total)
+
 **Commit 61 — 4 more heuristic categories + Rule 39 OPEC/chip exports**
 - New scanner heuristics:
   - OPEC/oil cartel production decision (0.40) — OPEC+ meetings; common on Kalshi;
