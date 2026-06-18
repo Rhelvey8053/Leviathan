@@ -249,7 +249,11 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     repeat_cnt  = s.get("repeat_count", 0) or 0
     rep_label   = f"  [REPEAT x{repeat_cnt}]" if repeat_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
     lv_score    = compute_leviathan_score(s)
-    lv_label    = f"  [LV:{lv_score}]"
+    if lv_score >= 70:   lv_band = "A"
+    elif lv_score >= 55: lv_band = "B"
+    elif lv_score >= 40: lv_band = "C"
+    else:                lv_band = "D"
+    lv_label    = f"  [LV:{lv_score}/{lv_band}]"
     lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{dg_label}{fp_label}{sh_label}{str_label}{lv_label}")
     lines.append(f"{ticker}  ·  {close_fmt}{urgency}{rep_label}" if close_fmt else f"{ticker}{urgency}{rep_label}")
     lines.append("")
@@ -503,7 +507,7 @@ def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
         return []
     ranked = sorted(signals, key=lambda s: (
         CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2),
-        -_signal_strength(s),
+        -compute_leviathan_score(s),
         -(abs(float(s.get("edge") or 0))),
     ))[:n]
 
@@ -827,7 +831,9 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
             net_s = f"{float(ne)*100:+.1f}pp" if ne is not None else "--"
         except Exception:
             net_s = "--"
-        lv_s   = str(compute_leviathan_score(row))
+        _lv    = compute_leviathan_score(row)
+        _band  = "A" if _lv >= 70 else "B" if _lv >= 55 else "C" if _lv >= 40 else "D"
+        lv_s   = f"{_lv}{_band}"
         title  = (row.get("title") or "")[:36]
         out.append(f"  {ts_s:<12}  {ticker:<26}  {conf:<4}  {dir_:<3}  {edge_s:>7}  {net_s:>7}  {lv_s:>4}  {title}")
 

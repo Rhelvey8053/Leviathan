@@ -1156,18 +1156,42 @@ def test_leviathan_score_clamps_to_zero():
 
 
 def test_leviathan_score_shown_in_signal_block_header():
-    """[LV:XX] label appears in the header line of _signal_block."""
+    """[LV:XX/Y] label appears in the header line of _signal_block."""
     s = _signal(confidence="HIGH", net_edge=0.12)
     header = report._signal_block(s, index=1)[0]
     assert "[LV:" in header
 
 
 def test_leviathan_score_header_value_matches_function():
-    """[LV:XX] value in header matches compute_leviathan_score() output."""
+    """[LV:XX/Y] value in header matches compute_leviathan_score() output."""
     s = _signal(confidence="HIGH", net_edge=0.12)
     expected = report.compute_leviathan_score(s)
     header = report._signal_block(s, index=1)[0]
-    assert f"[LV:{expected}]" in header
+    assert f"[LV:{expected}/" in header
+
+
+def test_leviathan_score_band_a_shown_for_high_scores():
+    """LV scores >= 70 show band A."""
+    s = _signal(
+        confidence="HIGH", net_edge=0.12, time_horizon="LONG",
+        prior_appearances=3, direction_consistent=True,
+        watchlist_signal=True, watchlist_direction="YES",
+    )
+    score = report.compute_leviathan_score(s)
+    header = report._signal_block(s, index=1)[0]
+    if score >= 70:
+        assert "/A]" in header
+    else:
+        assert "/B]" in header or "/C]" in header
+
+
+def test_leviathan_score_band_d_shown_for_low_scores():
+    """LV scores < 40 show band D."""
+    s = _signal(confidence="LOW", net_edge=-0.10, time_horizon="INTRADAY", pass_count=4)
+    score = report.compute_leviathan_score(s)
+    header = report._signal_block(s, index=1)[0]
+    if score < 40:
+        assert "/D]" in header
 
 
 def test_leviathan_score_shown_in_weekly_digest():
