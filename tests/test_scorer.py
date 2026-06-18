@@ -735,6 +735,48 @@ def test_build_system_prompt_base_prompt_still_present():
     assert "CALIBRATION RULES" in sp
 
 
+def test_build_system_prompt_flag_cal_appended_when_enough_data():
+    """Flag-path win rates appear when ≥2 signals resolved."""
+    flag_cal = [
+        {"flag_path": "HEURISTIC", "total": 5, "wins": 4, "win_rate": 80.0},
+        {"flag_path": "DRIFT",     "total": 3, "wins": 1, "win_rate": 33.3},
+    ]
+    sp = scorer.build_system_prompt(None, flag_cal=flag_cal)
+    assert "CALIBRATION FEEDBACK" in sp
+    assert "HEURISTIC" in sp
+    assert "80%" in sp
+    assert "DRIFT" in sp
+    assert "33%" in sp
+
+
+def test_build_system_prompt_flag_cal_filters_below_min_count():
+    """Flag paths with <2 resolved signals are excluded from flag_cal feedback."""
+    flag_cal = [{"flag_path": "EDGE", "total": 1, "wins": 1, "win_rate": 100.0}]
+    sp = scorer.build_system_prompt(None, flag_cal=flag_cal)
+    # Only 1 signal — below min threshold, no feedback shown
+    assert "EDGE" not in sp or sp == scorer.SYSTEM_PROMPT
+
+
+def test_build_system_prompt_flag_cal_shows_reliable_note():
+    """Flag paths with win_rate ≥ 65% show 'reliable' note."""
+    flag_cal = [{"flag_path": "WATCHLIST", "total": 4, "wins": 3, "win_rate": 75.0}]
+    sp = scorer.build_system_prompt(None, flag_cal=flag_cal)
+    assert "reliable" in sp
+
+
+def test_build_system_prompt_flag_cal_shows_poor_note():
+    """Flag paths with win_rate < 45% show 'poor' note."""
+    flag_cal = [{"flag_path": "DRIFT", "total": 3, "wins": 1, "win_rate": 33.0}]
+    sp = scorer.build_system_prompt(None, flag_cal=flag_cal)
+    assert "poor" in sp or "skeptical" in sp
+
+
+def test_build_system_prompt_no_flag_cal_no_effect():
+    """Omitting flag_cal leaves prompt unchanged if no confidence cal either."""
+    assert scorer.build_system_prompt(None, flag_cal=None) == scorer.SYSTEM_PROMPT
+    assert scorer.build_system_prompt(None, flag_cal=[]) == scorer.SYSTEM_PROMPT
+
+
 # ─── SIGNAL SUMMARY alignment block ─────────────────────────────────────────
 
 def test_signal_summary_shown_when_two_sources_agree_yes():

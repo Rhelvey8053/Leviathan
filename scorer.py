@@ -235,38 +235,58 @@ direction = "PASS" if edge is not meaningful or evidence is unclear
 """
 
 
-def build_system_prompt(calibration: dict | None = None) -> str:
+def build_system_prompt(calibration: dict | None = None,
+                        flag_cal: list | None = None) -> str:
     """
     Returns the system prompt, optionally with historical calibration feedback.
 
-    calibration: dict from logger.get_stats_by_confidence() — keys HIGH/MED/LOW,
-    values with total, wins, win_rate.  When resolved data is present, appends a
-    CALIBRATION FEEDBACK section so Claude can self-correct based on past accuracy.
-    No effect when calibration is None or has no resolved rows.
+    calibration: dict from logger.get_stats_by_confidence() — keys HIGH/MED/LOW.
+    flag_cal: list from logger.get_stats_by_flag_path() — flag-path win rates.
+    When resolved data is present, appends a CALIBRATION FEEDBACK section so
+    Claude can self-correct. No effect when both params are None/empty.
     """
-    if not calibration:
+    if not calibration and not flag_cal:
         return SYSTEM_PROMPT
 
     lines = ["\n\nCALIBRATION FEEDBACK (your prior calls on this system — use to recalibrate):"]
     has_data = False
-    for lvl in ("HIGH", "MED", "LOW"):
-        d = calibration.get(lvl, {})
-        total = d.get("total", 0)
-        wr    = d.get("win_rate")
-        wins  = d.get("wins", 0)
-        if total > 0 and wr is not None:
+
+    if calibration:
+        for lvl in ("HIGH", "MED", "LOW"):
+            d = calibration.get(lvl, {})
+            total = d.get("total", 0)
+            wr    = d.get("win_rate")
+            wins  = d.get("wins", 0)
+            if total > 0 and wr is not None:
+                has_data = True
+                lines.append(f"  {lvl} confidence: {wins}/{total} correct ({wr:.0f}% win rate)")
+
+        if has_data:
+            lines.append(
+                "  Guidance: HIGH confidence should win ≥65% — if below, downgrade borderline "
+                "HIGH to MED. MED should win ≥55% — if below, be more conservative on base rates. "
+                "LOW below 50% means you are adding noise — prefer PASS instead."
+            )
+
+    if flag_cal:
+        fp_rows = [r for r in flag_cal if r.get("total", 0) >= 2 and r.get("win_rate") is not None]
+        if fp_rows:
             has_data = True
-            lines.append(f"  {lvl}: {wins}/{total} correct ({wr:.0f}% win rate)")
+            lines.append("  By signal path (paths with ≥2 resolved signals):")
+            for r in fp_rows:
+                wr = r["win_rate"]
+                total = r["total"]
+                path  = r.get("flag_path", "?")
+                note  = ""
+                if wr >= 65:
+                    note = " ← reliable"
+                elif wr < 45:
+                    note = " ← poor — be more skeptical"
+                lines.append(f"    {path}: {wr:.0f}% win rate ({total} resolved){note}")
 
     if not has_data:
         return SYSTEM_PROMPT
 
-    lines.append(
-        "Guidance: HIGH confidence should win ≥65% — if it is below that, you are "
-        "overconfident; downgrade borderline HIGH calls to MED. MED confidence should "
-        "win ≥55% — if below, base rates need recalibration; be more conservative. "
-        "LOW confidence below 50% means you are adding noise — prefer PASS instead."
-    )
     return SYSTEM_PROMPT + "\n".join(lines)
 
 
@@ -660,15 +680,16 @@ def build_prompt(markets: list[dict]) -> str:
 
 
 def score_markets(flagged_markets: list[dict], config: dict,
-                  calibration: dict | None = None) -> tuple[list[dict], dict]:
+                  calibration: dict | None = None,
+                  flag_cal: list | None = None) -> tuple[list[dict], dict]:
     """
     Scores a batch of flagged markets using the local claude CLI.
     Returns (scored_markets, token_info).
     token_info is empty — no API billing when using Pro subscription via CLI.
 
-    calibration: optional dict from logger.get_stats_by_confidence().  When
-    provided and has resolved rows, injects historical win-rate feedback into
-    the system prompt so Claude can self-correct on future calls.
+    calibration: from logger.get_stats_by_confidence() — injects confidence win rates.
+    flag_cal: from logger.get_stats_by_flag_path() — injects flag-path win rates.
+    Both are optional; when present with resolved data, anchor Claude's calibration.
     """
     if not flagged_markets:
         return [], {}
@@ -676,7 +697,7 @@ def score_markets(flagged_markets: list[dict], config: dict,
     max_markets = config.get("scoring", {}).get("max_markets_per_run", 20)
     batch       = flagged_markets[:max_markets]
     user_prompt = build_prompt(batch)
-    sys_prompt  = build_system_prompt(calibration)
+    sys_prompt  = build_system_prompt(calibration, flag_cal=flag_cal)
     claude_cmd  = _find_claude()
 
     # Exclude ANTHROPIC_API_KEY so the CLI uses Pro OAuth instead of the (empty) API key
