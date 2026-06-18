@@ -339,6 +339,42 @@ def main():
         if poly.get("price_gap") is not None and abs(poly["price_gap"]) >= 0.10: sc += 2
         ext  = m.get("ext_markets") or []
         if any(abs(e.get("price_gap", 0)) >= 0.05 for e in ext): sc += 1
+
+        # Signal convergence: count directional sources that agree.
+        # Strong convergence (3+ sources) = much more likely a real mispricing.
+        _yes = _no = 0
+        hd = m.get("heuristic_direction")
+        if hd == "YES": _yes += 1
+        elif hd == "NO": _no += 1
+        pg = (poly.get("price_gap") or 0)
+        if abs(pg) >= 0.05:
+            if pg > 0: _yes += 1
+            else:      _no  += 1
+        cons = (m.get("ext_consensus") or {})
+        if abs(cons.get("consensus_gap", 0) or 0) >= 0.05:
+            cd = cons.get("consensus_dir")
+            if cd == "YES": _yes += 1
+            elif cd == "NO": _no += 1
+        drift_pct = m.get("price_drift") or 0
+        if m.get("drift_flag"):
+            if drift_pct < 0: _yes += 1
+            else:             _no  += 1
+        wh = (m.get("whale_data") or {})
+        wd = wh.get("whale_direction")
+        if wh.get("whale_detected") and wd == "YES": _yes += 1
+        elif wh.get("whale_detected") and wd == "NO": _no += 1
+        if m.get("ob_direction") == "YES" and m.get("ob_flag"): _yes += 1
+        elif m.get("ob_direction") == "NO"  and m.get("ob_flag"): _no  += 1
+
+        convergence = max(_yes, _no)
+        if convergence >= 3: sc += 3   # strong multi-source convergence
+        elif convergence == 2: sc += 1  # moderate convergence
+
+        # Short-horizon penalty: if weak signal AND closes within 7 days,
+        # deprioritise relative to long-horizon markets with more evidence.
+        if m.get("short_horizon") and sc < 5:
+            sc -= 2
+
         return sc
 
     # Sort: time-sensitive first (INTRADAY before LONG), then by pre-signal quality,
