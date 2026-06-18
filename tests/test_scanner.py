@@ -1461,6 +1461,28 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will Ethereum price exceed $5000 in 2026?", 0.50),
     # "bitcoin" alone must still hit crypto block (0.50), not upgrade block
     ("Will Bitcoin reach $200,000 by end of 2026?", 0.50),
+    # OPEC / oil production decisions (~40%)
+    ("Will OPEC cut oil production at the December 2026 meeting?", 0.40),
+    ("Will OPEC+ agree to reduce output quotas in Q4 2026?", 0.40),
+    ("Will OPEC increase production at the next meeting?", 0.40),
+    ("Will the oil production quota be maintained by OPEC?", 0.40),
+    # Semiconductor / chip export restriction (~45%)
+    ("Will the US impose new chip export restrictions on China in 2026?", 0.45),
+    ("Will the Commerce Department add Nvidia chips to the export ban list?", 0.45),
+    ("Will the US expand semiconductor export controls in Q3 2026?", 0.45),
+    # Filibuster reform (~10%)
+    ("Will the Senate eliminate the filibuster before the midterms?", 0.10),
+    ("Will Democrats end the filibuster for voting rights legislation?", 0.10),
+    ("Will there be a filibuster reform vote in 2026?", 0.10),
+    # Housing starts / permits data (~50%)
+    ("Will US housing starts exceed 1.5 million in March 2026?", 0.50),
+    ("Will housing permits fall below 1.3 million units in February?", 0.50),
+    ("Will building permits data show an increase in Q2 2026?", 0.50),
+    # False positive guards
+    # "oil price" must still hit commodity block (0.40), not OPEC block — no conflict but verify
+    ("Will oil prices rise above $100 per barrel in 2026?", 0.40),
+    # "chip" in a non-export context should return None
+    ("Will the chip shortage end by Q3 2026?", None),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)

@@ -567,6 +567,29 @@ def estimate_base_rate(market: dict) -> float | None:
           "interest rates rise", "interest rates fall", "interest rates exceed",
           "interest rates drop", "interest rates above", "interest rates below",
           "rates rise above", "rates fall below", "rates exceed"], 0.50),
+        # OPEC / oil cartel production decision — OPEC+ commonly holds or cuts; hikes are rare → ~40%
+        # Any specific meeting outcome is uncertain; "cut" and "increase" are both possible
+        # Placed BEFORE generic economic blocks to avoid "oil" hitting commodity price blocks
+        (["opec", "opec+", "opec cut", "opec increase", "opec production",
+          "oil production cut", "oil production hike", "oil production increase",
+          "oil production quota", "opec meeting", "opec decision",
+          "saudi aramco production", "opec+ alliance",
+          "reduce oil production", "increase oil production",
+          "oil cartel", "opec agreement", "opec deal",
+          "production quota", "production ceiling"], 0.40),
+        # Semiconductor / chip export restriction — US has been imposing restrictions frequently → ~45%
+        # Any given chip restriction announcement is moderately likely within a 3-6 month window
+        # Must come BEFORE antitrust and generic "ban" blocks to avoid misclassification
+        (["chip export", "semiconductor export", "chip ban",
+          "export restriction on chips", "export ban on semiconductors",
+          "chip restriction", "semiconductor restriction",
+          "advanced chip", "export control on ai chips",
+          "chip to china", "semiconductor to china",
+          "entity list chips", "export license for chips",
+          "nvidia chip export", "chip embargo",
+          "semiconductor embargo", "advanced computing export",
+          "export ban list", "export control list",
+          "chip export ban", "add to the entity list"], 0.45),
         # Quantitative easing / tightening — central bank balance sheet policy → ~40%
         # Fed announced QE/QT is fairly common during stress periods; specific timing uncertain
         (["quantitative easing", "quantitative tightening",
@@ -593,6 +616,14 @@ def estimate_base_rate(market: dict) -> float | None:
         (["treasury yield", "10-year yield", "bond yield", "yield on the",
           "10-year treasury", "2-year treasury", "30-year treasury",
           "yield curve", "bund yield", "gilt yield"], 0.50),
+        # Housing permits / housing starts — economic data release threshold questions → ~50%
+        # Specific monthly threshold questions are near 50/50 like other macro releases
+        # Placed BEFORE housing market crash (0.15) to catch data-release questions specifically
+        (["housing permits", "housing starts", "building permits",
+          "new home permits", "residential permits",
+          "home starts", "new construction permits",
+          "housing completions", "housing units started",
+          "housing units permitted", "residential starts"], 0.50),
         # Economic indicators — near 50/50 for specific threshold questions
         (["unemployment rate", "unemployment", "jobless rate", "nonfarm payroll",
           "jobs report", "labor market", "labor force"], 0.50),
@@ -798,6 +829,13 @@ def estimate_base_rate(market: dict) -> float | None:
         (["bank failure", "bank collapse", "banking crisis",
           "bank run", "bank bailout", "bank insolvency",
           "financial institution fail", "savings and loan"], 0.15),
+        # Filibuster reform / Senate rule change — requires 67 votes; historically rare → ~10%
+        # Placed BEFORE generic "senate" legislative blocks (0.35) to prevent false-match
+        (["filibuster reform", "end the filibuster", "eliminate the filibuster",
+          "abolish the filibuster", "filibuster rule", "nuclear option",
+          "carve out the filibuster", "filibuster carve-out",
+          "senate rules change", "senate procedural reform",
+          "60-vote threshold", "simple majority in the senate"], 0.10),
         # Gun control / firearms legislation — rare Congressional action → ~20%
         (["gun control", "gun legislation", "firearms legislation",
           "assault weapons ban", "red flag law", "background check legislation",
