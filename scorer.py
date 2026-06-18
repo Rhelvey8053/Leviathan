@@ -328,6 +328,31 @@ def build_prompt(markets: list[dict]) -> str:
                 f"Default to PASS unless you find a very recent, specific, primary-source catalyst."
             )
 
+        # Cross-market conflict warnings — explicitly flag when key sources disagree.
+        _hd  = m.get("heuristic_direction")
+        _pg  = float((m.get("poly") or {}).get("price_gap") or 0)
+        _cg  = float((m.get("ext_consensus") or {}).get("consensus_gap") or 0)
+        _cdir = (m.get("ext_consensus") or {}).get("consensus_dir")
+        if _hd in ("YES", "NO") and abs(_pg) >= 0.05:
+            _poly_dir = "YES" if _pg > 0 else "NO"
+            if _hd != _poly_dir:
+                lines.append(
+                    f"   [!] HEURISTIC vs POLYMARKET CONFLICT: Base rate says {_hd} is "
+                    f"underpriced; Polymarket says {_poly_dir}. Polymarket reflects real money "
+                    f"and current information — weight it heavily. Require primary-source "
+                    f"evidence to side against Polymarket."
+                )
+        elif _hd in ("YES", "NO") and abs(_cg) >= 0.05 and _cdir and _hd != _cdir:
+            n_opp = ((m.get("ext_consensus") or {}).get("sources_higher", 0)
+                     if _cdir == "YES" else
+                     (m.get("ext_consensus") or {}).get("sources_lower", 0))
+            if n_opp >= 2:
+                lines.append(
+                    f"   [!] HEURISTIC vs CONSENSUS CONFLICT: Base rate says {_hd}; "
+                    f"{n_opp} external platform(s) say {_cdir}. Treat multi-platform "
+                    f"divergence from the heuristic as a caution signal."
+                )
+
         # Signal alignment summary — show how many independent sources agree on direction.
         # Only appears when ≥2 sources have a directional opinion (≥5pp from neutral).
         _s_yes = 0
