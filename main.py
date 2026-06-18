@@ -455,6 +455,19 @@ def main():
             signal["confidence"] = "MED"
             signal["confidence_downgraded"] = True
 
+        # Short-horizon HIGH confidence gate: downgrade to MED when market closes within 7 days
+        # and no strong corroborating signal exists (no whale, no watchlist, no Polymarket divergence).
+        # Heuristic base rates are long-run averages that are unreliable over 1-7 day windows.
+        if signal.get("short_horizon") and signal.get("confidence") == "HIGH":
+            _has_corroboration = (
+                signal.get("watchlist_signal") or
+                (signal.get("whale_data") or signal.get("whale_detected")) or
+                abs(((signal.get("poly") or {}).get("price_gap") or 0)) >= 0.10
+            )
+            if not _has_corroboration:
+                signal["confidence"] = "MED"
+                signal["confidence_downgraded"] = True
+
         if conf_threshold_rank.get(signal.get("confidence", "LOW"), 2) <= threshold_rank and signal.get("direction", "PASS") != "PASS":
             final_signals.append(signal)
         elif whale.get("whale_detected"):
