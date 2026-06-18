@@ -2,6 +2,47 @@
 
 ---
 
+## Session 13 — 2026-06-18 (autonomous continuation)
+
+### Commits 50–53: Signal quality and calibration improvements
+
+**Commit 50 — Net Edge column in weekly digest**
+- `report.py compile_weekly_digest()`: added `{'Net':>7}` column to MARKETS FLAGGED table
+- Each row shows `net_edge` formatted as `+X.Xpp` or `--` when absent
+- `_week_row()` test helper updated to accept `net_edge` param
+- 4 new tests (882 total)
+
+**Commit 51 — Signal persistence tracking**
+- `logger.py`: `get_signal_history_batch(tickers, days=14)` — single DB query for all tickers,
+  returns prior paper signal rows per ticker (direction, market_price, timestamp)
+- `main.py`: enriches all flagged markets with `prior_appearances`, `prior_yes`, `prior_no`,
+  `direction_consistent`, `first_flagged_price` before pre-sort
+- `_pre_sort_score()`: persistent + consistent 3+ day signals get +3 boost; 2-day consistent +2
+- `scorer.py build_prompt()`: "Signal history" block shows days-seen, YES/NO split with
+  [CONSISTENT]/[MIXED] tag, and price drift since first flag with mispricing deepening/converging note
+- `report.py _signal_block()`: "Nd/14d: xY/yN — consistent/mixed" persistence line
+- 17 new tests (899 total)
+
+**Commit 52 — Calibration feedback loop**
+- `scorer.py build_system_prompt(calibration)`: appends CALIBRATION FEEDBACK section to system
+  prompt when resolved data exists. HIGH win rate < 65% → Claude instructed to downgrade
+  borderline HIGH calls. MED < 55% → more conservative base rates.
+- `scorer.py score_markets()`: accepts `calibration=` param; uses `build_system_prompt()` instead
+  of bare `SYSTEM_PROMPT`
+- `main.py`: calls `logger.get_stats_by_confidence()` and passes to scorer before each Claude run
+- 5 new tests (904 total)
+
+**Commit 53 — Close time tracking + close-horizon calibration**
+- `logger.py`: ADD COLUMN `close_time TEXT` (additive migration)
+  - `log_signal()`: stores `m["close_time"] || m["expiration_time"]`
+  - `get_stats_by_close_horizon()`: buckets resolved paper signals by actual days-to-close at
+    signal time (urgent <1d, short 1-7d, medium 7-30d, long 30d+, no_close)
+- `main.py`: passes `close_time` in both first-pass and second-pass signal dicts
+- `analysis/calibration.py`: BY ACTUAL DAYS-TO-CLOSE section + key question #6
+- 13 new tests (909 total)
+
+---
+
 ## Session 8 — 2026-06-17 (autonomous continuation)
 
 ### Cross-market force-flag + polymarket test suite
