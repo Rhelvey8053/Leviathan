@@ -505,11 +505,15 @@ def main():
         if flagged_markets:
             # Pass historical calibration so Claude can self-correct if overconfident
             try:
-                _cal = logger.get_stats_by_confidence()
+                _cal      = logger.get_stats_by_confidence()
+                _flag_cal = logger.get_stats_by_flag_path()
             except Exception:
-                _cal = None
-            claude_scores, token_info = scorer.score_markets(flagged_markets, config,
-                                                             calibration=_cal)
+                _cal      = None
+                _flag_cal = None
+            claude_scores, token_info = scorer.score_markets(
+                flagged_markets, config,
+                calibration=_cal, flag_cal=_flag_cal,
+            )
             print(f"      Scored {len(claude_scores)} markets via claude CLI")
         else:
             print("      No flagged markets to score.")
