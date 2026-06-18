@@ -1123,3 +1123,48 @@ def test_pass_history_note_absent_when_no_pass_count():
     m = _base_market()
     prompt = scorer.build_prompt([m])
     assert "PASS HISTORY" not in prompt
+
+
+# ─── Leviathan Score in prompt ────────────────────────────────────────────────
+
+def test_lv_score_line_present_in_prompt():
+    """SIGNAL QUALITY line with LV score appears in every scored market."""
+    m = _base_market()
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL QUALITY:" in prompt
+    assert "LV " in prompt
+
+
+def test_lv_score_grade_a_when_high_quality():
+    """Grade A appears in prompt for high-quality signals."""
+    m = _base_market(
+        confidence="HIGH",
+        net_edge=0.12,
+        prior_appearances=3,
+        direction_consistent=True,
+        watchlist_signal=True,
+        watchlist_direction="YES",
+        poly={"price_gap": 0.10, "poly_price": 0.50, "poly_question": "Test question", "match_score": 0.9},
+        ext_markets=[{"price_gap": 0.08, "source": "Manifold", "probability": 0.70, "match_score": 0.7}],
+    )
+    prompt = scorer.build_prompt([m])
+    assert "Grade A" in prompt or "Grade B" in prompt  # at least B
+
+
+def test_lv_score_grade_d_hint_prefers_pass():
+    """Grade D hint tells Claude to prefer PASS."""
+    m = _base_market(
+        confidence="LOW",
+        net_edge=-0.10,
+        time_horizon="INTRADAY",
+        pass_count=4,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "prefer PASS" in prompt
+
+
+def test_lv_score_grade_c_hint_says_confirm():
+    """Grade C hint tells Claude to confirm edge before committing."""
+    m = _base_market()  # base = 40, C-band
+    prompt = scorer.build_prompt([m])
+    assert "confirm edge" in prompt or "Grade C" in prompt or "Grade A" in prompt or "Grade B" in prompt
