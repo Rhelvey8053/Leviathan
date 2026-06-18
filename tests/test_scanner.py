@@ -1100,7 +1100,8 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will unemployment rise above 5% before Q4?", 0.50),
     # Price levels — "hit $" form
     ('Will Nvidia stock hit $200 before year end?', 0.35),
-    ('Will gold top $3,000 in 2026?', 0.35),
+    # "gold top" now correctly classified as commodity price level (0.40), not generic (0.35)
+    ('Will gold top $3,000 in 2026?', 0.40),
     # IPO — "go public" form
     ("Will OpenAI go public before end of 2026?", 0.25),
     # Legislative — senate/house pass reversed ordering
@@ -1593,6 +1594,35 @@ def test_heuristic_label(title, expected_label):
     label = scanner.get_heuristic_label(m)
     assert label == expected_label, (
         f"title={title!r}: expected {expected_label!r}, got {label!r}"
+    )
+
+
+@pytest.mark.parametrize("title,expected_rate", [
+    # Gold price — "gold reach/hit/top" without dollar sign still hits commodity block
+    ("Will gold reach 4000 dollars before year end?",          0.40),
+    ("Will gold hit 5000 dollars per ounce in Q1 2026?",       0.40),
+    # Consumer price inflation — alt phrasing for CPI block
+    ("Will consumer price inflation exceed 3% in 2026?",       0.50),
+    ("Will price inflation return to the Fed target?",         0.50),
+    # Housing market price questions
+    ("Will the housing market see price appreciation exceed 5%?", 0.50),
+    ("Will house prices rise in Q3 2026?",                     0.50),
+    ("Will house price declines exceed 10% in 2027?",          0.50),
+    # General strike — should hit labor strike block (0.30), not None
+    ("Will there be a general strike in France in 2026?",      0.30),
+    ("Will a nationwide strike shut down the railways?",        0.30),
+    ("Will transit workers announce a general strike?",         0.30),
+    # City insolvency phrasing — should hit municipal bankruptcy (0.10)
+    ("Will the city declare insolvency before 2027?",           0.10),
+    ("Will a major US city declare bankruptcy due to pension debt?", 0.10),
+    # Veto is still 0.20 with "tax" in title (veto block comes first)
+    ("Will the president veto the income tax bill?",            0.20),
+])
+def test_base_rate_gap_fixes(title, expected_rate):
+    m = _market(title=title)
+    rate = scanner.estimate_base_rate(m)
+    assert rate == pytest.approx(expected_rate), (
+        f"title={title!r}: expected {expected_rate}, got {rate}"
     )
 
 
