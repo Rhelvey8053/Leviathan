@@ -237,6 +237,71 @@ def log_signal(signal: dict) -> None:
         print(f"  [logger] Failed to log signal: {e}")
 
 
+def log_pass(signal: dict) -> None:
+    """
+    Log a PASS decision (Claude found no actionable edge) for scanner calibration.
+    Stored as source='paper', direction='PASS' — never enters outcome/result pipeline.
+    Used by get_pass_tickers() to identify systematic scanner false-positives.
+    """
+    try:
+        with _db() as conn:
+            conn.execute("""
+                INSERT OR IGNORE INTO signals
+                (call_id,timestamp,ticker,title,market_price,our_estimate,
+                 edge,direction,confidence,whale_detected,whale_direction,
+                 outcome,result,pnl_if_traded,run_id,source,
+                 flag_path,base_rate,net_edge,heuristic_direction,
+                 short_horizon,time_horizon,close_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                str(uuid.uuid4())[:8],
+                datetime.now(timezone.utc).isoformat(),
+                signal.get("ticker", ""),
+                signal.get("title", ""),
+                _to_float(signal.get("market_price")),
+                _to_float(signal.get("our_estimate")),
+                _to_float(signal.get("edge")),
+                "PASS",
+                signal.get("confidence", ""),
+                0,
+                None,
+                "", "",  # outcome, result — never filled for PASSes
+                None,
+                signal.get("run_id", ""),
+                "paper",
+                signal.get("flag_path"),
+                _to_float(signal.get("base_rate")),
+                _to_float(signal.get("net_edge")),
+                signal.get("heuristic_direction"),
+                1 if signal.get("short_horizon") else 0,
+                signal.get("time_horizon"),
+                signal.get("close_time"),
+            ))
+    except Exception as e:
+        print(f"  [logger] Failed to log pass: {e}")
+
+
+def get_pass_tickers(days: int = 14) -> dict:
+    """
+    Return tickers that consistently got PASS in the last N days.
+    Returns {ticker: pass_count} for all paper PASS rows in the window.
+    Used to deprioritize repeat false-positives in the scoring queue.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT ticker, COUNT(*) as cnt FROM signals "
+                "WHERE direction='PASS' AND (source='paper' OR source IS NULL) "
+                "AND timestamp >= ? AND ticker != '' "
+                "GROUP BY ticker ORDER BY cnt DESC",
+                (cutoff,),
+            ).fetchall()
+        return {r["ticker"]: r["cnt"] for r in rows}
+    except Exception:
+        return {}
+
+
 def log_run(run_data: dict) -> None:
     try:
         with _db() as conn:
@@ -398,7 +463,7 @@ def get_signal_history_batch(tickers: list, days: int = 14) -> dict:
             rows = conn.execute(
                 f"SELECT ticker, timestamp, direction, market_price, our_estimate, edge "
                 f"FROM signals WHERE ticker IN ({placeholders}) AND timestamp >= ? "
-                f"AND ({_PAPER}) "
+                f"AND ({_PAPER}) AND direction IN ('YES','NO') "
                 f"ORDER BY timestamp DESC",
                 (*tickers, cutoff),
             ).fetchall()
@@ -516,26 +581,27 @@ _PAPER = "source = 'paper' OR source IS NULL"
 
 def get_stats() -> dict:
     """Stats for paper (simulated) signals only — never blends with real fills."""
+    _NO_PASS = f"({_PAPER}) AND direction != 'PASS'"
     try:
         with _db() as conn:
-            total     = conn.execute(f"SELECT COUNT(*) FROM signals WHERE {_PAPER}").fetchone()[0]
+            total     = conn.execute(f"SELECT COUNT(*) FROM signals WHERE {_NO_PASS}").fetchone()[0]
             resolved  = conn.execute(
-                f"SELECT COUNT(*) FROM signals WHERE ({_PAPER}) AND outcome != '' AND outcome IS NOT NULL"
+                f"SELECT COUNT(*) FROM signals WHERE {_NO_PASS} AND outcome != '' AND outcome IS NOT NULL"
             ).fetchone()[0]
             wins      = conn.execute(
-                f"SELECT COUNT(*) FROM signals WHERE ({_PAPER}) AND result = 'WIN'"
+                f"SELECT COUNT(*) FROM signals WHERE {_NO_PASS} AND result = 'WIN'"
             ).fetchone()[0]
             avg_edge  = conn.execute(
-                f"SELECT AVG(edge) FROM signals WHERE ({_PAPER}) AND edge IS NOT NULL"
+                f"SELECT AVG(edge) FROM signals WHERE {_NO_PASS} AND edge IS NOT NULL"
             ).fetchone()[0]
             total_pnl = conn.execute(
-                f"SELECT SUM(pnl_if_traded) FROM signals WHERE ({_PAPER}) AND pnl_if_traded IS NOT NULL"
+                f"SELECT SUM(pnl_if_traded) FROM signals WHERE {_NO_PASS} AND pnl_if_traded IS NOT NULL"
             ).fetchone()[0]
             best  = conn.execute(
-                f"SELECT * FROM signals WHERE ({_PAPER}) AND edge IS NOT NULL ORDER BY edge DESC LIMIT 1"
+                f"SELECT * FROM signals WHERE {_NO_PASS} AND edge IS NOT NULL ORDER BY edge DESC LIMIT 1"
             ).fetchone()
             worst = conn.execute(
-                f"SELECT * FROM signals WHERE ({_PAPER}) AND edge IS NOT NULL ORDER BY edge ASC LIMIT 1"
+                f"SELECT * FROM signals WHERE {_NO_PASS} AND edge IS NOT NULL ORDER BY edge ASC LIMIT 1"
             ).fetchone()
     except Exception:
         return {"total_calls": 0, "resolved": 0, "win_rate": None,

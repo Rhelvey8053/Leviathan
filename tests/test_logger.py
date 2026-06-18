@@ -1159,6 +1159,62 @@ def test_get_ticker_day_count_ignores_old_entries(tmp_db):
     assert logger.get_ticker_day_count("KXOLD2", days=14) == 0
 
 
+# ─── log_pass / get_pass_tickers ─────────────────────────────────────────────
+
+def test_log_pass_stores_direction_pass(tmp_db):
+    """log_pass inserts a row with direction='PASS'."""
+    logger.log_pass({
+        "ticker": "KXPASS1", "title": "T", "market_price": 0.45,
+        "our_estimate": 0.50, "edge": 0.05, "confidence": "LOW",
+        "run_id": "rpass1", "flag_path": "HEURISTIC",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT direction, source FROM signals WHERE ticker='KXPASS1'"
+        ).fetchone()
+    assert row is not None
+    assert row["direction"] == "PASS"
+    assert row["source"] == "paper"
+
+
+def test_log_pass_does_not_appear_in_get_stats(tmp_db):
+    """PASS rows must be excluded from win-rate stats."""
+    logger.log_pass({
+        "ticker": "KXPASS2", "title": "T", "market_price": 0.45,
+        "our_estimate": 0.50, "edge": 0.05, "confidence": "LOW", "run_id": "rpass2",
+    })
+    stats = logger.get_stats()
+    assert stats["total_calls"] == 0  # PASS rows don't count as paper signals
+
+
+def test_get_pass_tickers_returns_counts(tmp_db):
+    """get_pass_tickers returns ticker→count dict from recent PASS rows."""
+    for i in range(3):
+        logger.log_pass({
+            "ticker": "KXPASSCOUNT", "title": "T", "market_price": 0.45,
+            "our_estimate": 0.50, "edge": 0.05, "confidence": "LOW",
+            "run_id": f"rpc{i}",
+        })
+    result = logger.get_pass_tickers(days=14)
+    assert "KXPASSCOUNT" in result
+    assert result["KXPASSCOUNT"] == 3
+
+
+def test_get_pass_tickers_empty_when_no_passes(tmp_db):
+    result = logger.get_pass_tickers(days=14)
+    assert result == {}
+
+
+def test_get_pass_tickers_excludes_old_passes(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source) "
+            "VALUES ('oldpass','2020-01-01T00:00:00+00:00','KXOLDPASS','PASS',0.40,'paper')"
+        )
+    result = logger.get_pass_tickers(days=14)
+    assert "KXOLDPASS" not in result
+
+
 # ─── get_signal_history_batch ─────────────────────────────────────────────────
 
 def test_signal_history_batch_empty_tickers_returns_empty(tmp_db):
