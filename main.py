@@ -343,7 +343,18 @@ def main():
         ext  = m.get("ext_markets") or []
         if any(abs(e.get("price_gap", 0)) >= 0.05 for e in ext): sc += 1
 
+        # Recent activity signals: evidence of fresh information flowing in.
+        vol_total = float(m.get("volume_fp") or m.get("volume") or 0)
+        vol_24h   = float(m.get("volume_24h_fp") or 0)
+        if vol_total > 0 and vol_24h > 0 and (vol_24h / vol_total) >= 0.20:
+            sc += 1  # volume spike — recent elevated trading activity
+        prev_p = float(m.get("previous_price_dollars") or 0)
+        last_p = float(m.get("last_price_dollars") or 0)
+        if prev_p > 0 and last_p > 0 and abs((last_p - prev_p) / prev_p) >= 0.20:
+            sc += 2  # price jump — ≥20% move signals a specific catalyst
+
         # Signal convergence: count directional sources that agree.
+        # Multi-platform external consensus: weight by platform count (cap 3 votes).
         # Strong convergence (3+ sources) = much more likely a real mispricing.
         _yes = _no = 0
         hd = m.get("heuristic_direction")
@@ -355,9 +366,12 @@ def main():
             else:      _no  += 1
         cons = (m.get("ext_consensus") or {})
         if abs(cons.get("consensus_gap", 0) or 0) >= 0.05:
-            cd = cons.get("consensus_dir")
-            if cd == "YES": _yes += 1
-            elif cd == "NO": _no += 1
+            cd     = cons.get("consensus_dir")
+            # Number of platforms agreeing — cap at 3 to bound total contribution
+            n_plat = min(3, (cons.get("sources_higher", 0) if cd == "YES"
+                             else cons.get("sources_lower", 0)))
+            if cd == "YES":   _yes += n_plat
+            elif cd == "NO":  _no  += n_plat
         drift_pct = m.get("price_drift") or 0
         if m.get("drift_flag"):
             if drift_pct < 0: _yes += 1

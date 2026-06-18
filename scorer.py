@@ -342,8 +342,12 @@ def build_prompt(markets: list[dict]) -> str:
             else:                                           _s_no  += 1
         _cons = (m.get("ext_consensus") or {})
         if abs(_cons.get("consensus_gap", 0) or 0) >= 0.05:
-            if _cons.get("consensus_dir") == "YES":         _s_yes += 1
-            elif _cons.get("consensus_dir") == "NO":        _s_no  += 1
+            _cdir  = _cons.get("consensus_dir")
+            # Weight by platform count (cap 3): 3 platforms agreeing = 3 votes
+            _n_plt = min(3, (_cons.get("sources_higher", 0) if _cdir == "YES"
+                              else _cons.get("sources_lower", 0)))
+            if _cdir == "YES":                              _s_yes += _n_plt
+            elif _cdir == "NO":                             _s_no  += _n_plt
         _drift_pct = m.get("price_drift") or 0
         if m.get("drift_flag"):
             if _drift_pct < 0:                              _s_yes += 1
@@ -368,9 +372,20 @@ def build_prompt(markets: list[dict]) -> str:
 
         _total_s = _s_yes + _s_no
         if _total_s >= 2:
-            _lean = "YES" if _s_yes > _s_no else ("NO" if _s_no > _s_yes else "MIXED")
+            _lean  = "YES" if _s_yes > _s_no else ("NO" if _s_no > _s_yes else "MIXED")
             _align = "ALL" if (_s_yes == 0 or _s_no == 0) else f"{max(_s_yes, _s_no)}/{_total_s}"
-            lines.append(f"   SIGNAL SUMMARY: {_total_s} independent source(s) → {_align} lean {_lean}")
+            # Append recent-activity flags to summary line when present
+            _recent = []
+            _vt = float(m.get("volume_fp") or m.get("volume") or 0)
+            _v24 = float(m.get("volume_24h_fp") or 0)
+            if _vt > 0 and _v24 > 0 and (_v24 / _vt) >= 0.20:
+                _recent.append("VOL_SPIKE")
+            _pp = float(m.get("previous_price_dollars") or 0)
+            _lp = float(m.get("last_price_dollars") or 0)
+            if _pp > 0 and _lp > 0 and abs((_lp - _pp) / _pp) >= 0.20:
+                _recent.append("PRICE_JUMP")
+            _extra = f"  [{', '.join(_recent)}]" if _recent else ""
+            lines.append(f"   SIGNAL SUMMARY: {_total_s} source(s) → {_align} lean {_lean}{_extra}")
 
         if whale and whale.get("whale_detected"):
             lines.append(
