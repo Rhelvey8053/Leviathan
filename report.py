@@ -195,10 +195,8 @@ def _qualifying(signals: list[dict], threshold_rank: int) -> list[dict]:
     ]
     out.sort(key=lambda s: (
         CONFIDENCE_ORDER.get(s.get("confidence", "LOW"), 2),
-        -_signal_strength(s),
-        # Positive net_edge (tradeable) ranks above zero/negative (spread consumes edge)
-        0 if (s.get("net_edge") or 0) > 0 else 1,
-        -(abs(float(s.get("edge") or 0)))
+        -compute_leviathan_score(s),   # composite: strength + net_edge + persistence + smart money
+        -(abs(float(s.get("edge") or 0))),  # raw edge as final tiebreaker
     ))
     return out
 

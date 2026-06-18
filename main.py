@@ -464,6 +464,16 @@ def main():
             if not has_corroboration:
                 sc -= 2  # counter-evidence from a liquid market weakens the signal
 
+        # Net edge: realizable edge after bid-ask spread. Positive = tradeable.
+        # Markets with net_edge ≤ 0 would be underwater on entry — deprioritise
+        # them so Claude slots go to actually tradeable opportunities first.
+        ne = m.get("net_edge")
+        if ne is not None:
+            if ne > 0.10:   sc += 3   # wide, tradeable edge
+            elif ne > 0.05: sc += 2   # solid post-spread edge
+            elif ne > 0:    sc += 1   # marginally tradeable
+            else:           sc -= 4   # spread consumes edge entirely
+
         # Short-horizon penalty: if weak signal AND closes within 7 days,
         # deprioritise relative to long-horizon markets with more evidence.
         if m.get("short_horizon") and sc < 5:
