@@ -105,6 +105,7 @@ def _init_db() -> None:
             "time_horizon          TEXT",
             "close_time            TEXT",
             "leviathan_score       INTEGER",
+            "heuristic_label       TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -204,8 +205,8 @@ def log_signal(signal: dict) -> None:
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
                  base_rate,net_edge,heuristic_direction,short_horizon,time_horizon,
-                 close_time,leviathan_score)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 close_time,leviathan_score,heuristic_label)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -234,6 +235,7 @@ def log_signal(signal: dict) -> None:
                 signal.get("time_horizon"),
                 signal.get("close_time"),
                 _to_int(signal.get("leviathan_score")),
+                signal.get("heuristic_label"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -253,8 +255,8 @@ def log_pass(signal: dict) -> None:
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,base_rate,net_edge,heuristic_direction,
-                 short_horizon,time_horizon,close_time,leviathan_score)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 short_horizon,time_horizon,close_time,leviathan_score,heuristic_label)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -279,6 +281,7 @@ def log_pass(signal: dict) -> None:
                 signal.get("time_horizon"),
                 signal.get("close_time"),
                 _to_int(signal.get("leviathan_score")),
+                signal.get("heuristic_label"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")
@@ -1420,4 +1423,53 @@ def get_stats_by_leviathan_score() -> dict:
             result[b]["total_pnl"] = pnl_sum[b]
             result[b]["avg_edge"]  = edge_sum[b] / edge_n[b] if edge_n[b] else None
 
+    return result
+
+
+def get_stats_by_heuristic_label() -> list[dict]:
+    """
+    Win rate and P&L grouped by heuristic_label for resolved paper signals.
+
+    Answers: "which heuristic categories have the best calibration and win rate?"
+    Only includes paper signals that have a resolved outcome and a non-NULL heuristic_label.
+    Returns list of dicts sorted by win_rate descending:
+      heuristic_label, total, wins, losses, win_rate (float|None),
+      total_pnl (float|None), avg_edge (float|None)
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    heuristic_label,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) AS losses,
+                    AVG(edge) AS avg_edge,
+                    SUM(pnl_if_traded) AS total_pnl
+                FROM signals
+                WHERE ({_PAPER})
+                  AND outcome != '' AND outcome IS NOT NULL
+                  AND heuristic_label IS NOT NULL
+                  AND direction IN ('YES','NO')
+                GROUP BY heuristic_label
+                ORDER BY (SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)) DESC
+                """
+            ).fetchall()
+    except Exception:
+        return []
+
+    result = []
+    for r in rows:
+        total = r["total"] or 0
+        wins  = r["wins"]  or 0
+        result.append({
+            "heuristic_label": r["heuristic_label"],
+            "total":           total,
+            "wins":            wins,
+            "losses":          r["losses"] or 0,
+            "win_rate":        round(wins / total * 100, 1) if total else None,
+            "avg_edge":        r["avg_edge"],
+            "total_pnl":       r["total_pnl"],
+        })
     return result
