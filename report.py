@@ -145,6 +145,35 @@ def compute_leviathan_score(s: dict) -> int:
     if pc >= 3:   pts -= 8
     elif pc >= 2: pts -= 3
 
+    # Heuristic specificity bonus — categories with empirically calibrated, precise
+    # base rates get extra weight because the heuristic is less noisy than generic ones.
+    # HIGH_SPEC: base rates are very well-known and far from 50% (strong prior conviction).
+    # MED_SPEC:  base rates are reasonably calibrated (moderate specificity uplift).
+    _hl = (s.get("heuristic_label") or "").lower()
+    _HIGH_SPEC = {
+        "pdufa date",                   # ~85-90% approval rate — gold-standard calibration
+        "government shutdown avoided",  # ~85% Congress avoids shutdown historically
+        "fda clinical hold",            # ~10% approval while hold is active
+        "constitutional amendment",     # ~5% — almost never passes in any given year
+        "nato article 5",               # ~5% — never used in combat historically
+        "martial law",                  # ~5% — extremely rare in modern democracies
+        "volcanic eruption",            # ~5% — geologically rare per year
+        "25th amendment",               # ~5% — never successfully used non-voluntarily
+    }
+    _MED_SPEC = {
+        "crypto protocol upgrade",      # ~65% post-testnet — better than generic tech launches
+        "debt ceiling resolution",      # ~70% Congress always resolves eventually
+        "cabinet departure",            # ~65% based on historical turnover data
+        "ceo retention",                # ~65% — most CEOs stay
+        "credit rating change",         # ~40% with watch — agency watches are strong predictors
+        "opec production decision",     # ~40% well-calibrated from historical meetings
+        "chip export restriction",      # ~45% — active US policy area, better calibrated
+        "bond/debt issuance",           # ~65% — routine auctions nearly always complete
+        "fda complete response letter", # ~60% on resubmission — well-tracked statistic
+    }
+    if _hl in _HIGH_SPEC:   pts += 8
+    elif _hl in _MED_SPEC:  pts += 4
+
     return max(0, min(100, pts))
 
 
