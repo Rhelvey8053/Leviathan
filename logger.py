@@ -1213,6 +1213,150 @@ def get_stats_by_close_horizon() -> dict:
     return result
 
 
+def get_stats_by_whale() -> dict:
+    """
+    Win rate for paper signals where whale activity was detected vs not.
+
+    Returns dict with keys 'whale' and 'no_whale'; each has:
+      total, wins, win_rate, total_pnl, avg_edge
+    Only includes resolved paper signals with direction YES or NO.
+    """
+    result = {k: {"total": 0, "wins": 0, "win_rate": None,
+                  "total_pnl": None, "avg_edge": None}
+              for k in ("whale", "no_whale")}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT whale_detected, result, pnl_if_traded, edge
+                FROM signals
+                WHERE ({_NO_PASS})
+                  AND result IS NOT NULL AND result != ''
+                  AND direction IN ('YES','NO')
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    pnl_sum  = {k: 0.0 for k in result}
+    edge_sum = {k: 0.0 for k in result}
+    edge_n   = {k: 0   for k in result}
+
+    for r in rows:
+        k = "whale" if r["whale_detected"] else "no_whale"
+        result[k]["total"] += 1
+        if r["result"] == "WIN":
+            result[k]["wins"] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[k] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[k] += float(r["edge"])
+            edge_n[k]   += 1
+
+    for k in result:
+        n = result[k]["total"]
+        if n:
+            result[k]["win_rate"]  = result[k]["wins"] / n * 100
+            result[k]["total_pnl"] = pnl_sum[k]
+            result[k]["avg_edge"]  = edge_sum[k] / edge_n[k] if edge_n[k] else None
+
+    return result
+
+
+def get_stats_by_watchlist() -> dict:
+    """
+    Win rate for paper signals with smart money (watchlist) alignment vs without.
+
+    Returns dict with keys 'watchlist' and 'no_watchlist'; each has:
+      total, wins, win_rate, total_pnl, avg_edge
+    Only includes resolved paper signals with direction YES or NO.
+    """
+    result = {k: {"total": 0, "wins": 0, "win_rate": None,
+                  "total_pnl": None, "avg_edge": None}
+              for k in ("watchlist", "no_watchlist")}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT watchlist_signal, result, pnl_if_traded, edge
+                FROM signals
+                WHERE ({_NO_PASS})
+                  AND result IS NOT NULL AND result != ''
+                  AND direction IN ('YES','NO')
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    pnl_sum  = {k: 0.0 for k in result}
+    edge_sum = {k: 0.0 for k in result}
+    edge_n   = {k: 0   for k in result}
+
+    for r in rows:
+        k = "watchlist" if r["watchlist_signal"] else "no_watchlist"
+        result[k]["total"] += 1
+        if r["result"] == "WIN":
+            result[k]["wins"] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[k] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[k] += float(r["edge"])
+            edge_n[k]   += 1
+
+    for k in result:
+        n = result[k]["total"]
+        if n:
+            result[k]["win_rate"]  = result[k]["wins"] / n * 100
+            result[k]["total_pnl"] = pnl_sum[k]
+            result[k]["avg_edge"]  = edge_sum[k] / edge_n[k] if edge_n[k] else None
+
+    return result
+
+
+def get_pass_rate_by_flag_path() -> list[dict]:
+    """
+    For each flag_path bucket, shows the total number of signals and what fraction
+    Claude PASSed vs acted on (YES/NO). Identifies which scanner categories generate
+    the most false positives (high PASS rate).
+
+    Includes all paper signals regardless of resolution status.
+    Returns list of dicts sorted by pass_rate descending:
+      flag_path, total, passed, acted, pass_rate (0-100), act_rate (0-100)
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    COALESCE(flag_path, 'UNKNOWN') AS path,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN direction = 'PASS' THEN 1 ELSE 0 END) AS passed
+                FROM signals
+                WHERE ({_PAPER})
+                  AND direction IS NOT NULL AND direction != ''
+                GROUP BY flag_path
+                ORDER BY (SUM(CASE WHEN direction = 'PASS' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)) DESC
+                """
+            ).fetchall()
+    except Exception:
+        return []
+
+    result = []
+    for r in rows:
+        total  = r["total"] or 0
+        passed = r["passed"] or 0
+        acted  = total - passed
+        result.append({
+            "flag_path": r["path"],
+            "total":     total,
+            "passed":    passed,
+            "acted":     acted,
+            "pass_rate": round(passed / total * 100, 1) if total else None,
+            "act_rate":  round(acted / total * 100, 1)  if total else None,
+        })
+    return result
+
+
 def get_stats_by_leviathan_score() -> dict:
     """
     Win rate grouped by stored Leviathan Score band (A/B/C/D).

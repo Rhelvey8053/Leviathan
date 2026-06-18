@@ -243,6 +243,82 @@ def main():
     else:
         print("  No resolved data yet (close_time field added recently).")
 
+    # Whale detection breakdown
+    print()
+    print(_rule("="))
+    print("BY WHALE ACTIVITY  (does whale detection predict wins?)")
+    print(_rule("-"))
+    print()
+    wh = logger.get_stats_by_whale()
+    wh_rows = [
+        {"flag_path": "Whale detected",  **wh["whale"]},
+        {"flag_path": "No whale signal", **wh["no_whale"]},
+    ]
+    wh_rows = [r for r in wh_rows if r.get("total", 0) > 0]
+    if wh_rows:
+        _print_table(wh_rows, key_label="Whale Group", key_col="flag_path")
+        w_wr  = wh["whale"]["win_rate"]
+        nw_wr = wh["no_whale"]["win_rate"]
+        if w_wr is not None and nw_wr is not None:
+            delta   = w_wr - nw_wr
+            verdict = "whale detection predictive (keep scan)" if delta > 5 else (
+                      "no whale edge (scan may not be worth cost)" if delta < -5 else
+                      "no meaningful difference yet")
+            print(f"\n  Whale vs No-whale win-rate: {w_wr:.0f}% vs {nw_wr:.0f}%  --> {verdict}")
+    else:
+        print("  No resolved data.")
+
+    # Watchlist / smart money breakdown
+    print()
+    print(_rule("="))
+    print("BY WATCHLIST / SMART MONEY  (do top-trader positions predict wins?)")
+    print(_rule("-"))
+    print()
+    wl = logger.get_stats_by_watchlist()
+    wl_rows = [
+        {"flag_path": "Watchlist aligned",    **wl["watchlist"]},
+        {"flag_path": "No watchlist signal",  **wl["no_watchlist"]},
+    ]
+    wl_rows = [r for r in wl_rows if r.get("total", 0) > 0]
+    if wl_rows:
+        _print_table(wl_rows, key_label="Smart Money", key_col="flag_path")
+        wl_wr  = wl["watchlist"]["win_rate"]
+        nwl_wr = wl["no_watchlist"]["win_rate"]
+        if wl_wr is not None and nwl_wr is not None:
+            delta   = wl_wr - nwl_wr
+            verdict = "smart money predictive (keep watchlist)" if delta > 5 else (
+                      "watchlist underperforms (re-examine tracking criteria)" if delta < -5 else
+                      "no meaningful difference yet")
+            print(f"\n  Watchlist vs No-watchlist win-rate: {wl_wr:.0f}% vs {nwl_wr:.0f}%  --> {verdict}")
+    else:
+        print("  No resolved data.")
+
+    # PASS rate by flag path (false-positive detector)
+    print()
+    print(_rule("="))
+    print("PASS RATE BY FLAG PATH  (which scanner categories are false-positive factories?)")
+    print(_rule("-"))
+    print()
+    pr = logger.get_pass_rate_by_flag_path()
+    if pr:
+        print(f"  {'Flag Path':<18}  {'Total':>5}  {'Passed':>6}  {'Acted':>5}  {'Pass%':>6}  {'Act%':>5}")
+        print(f"  {'-'*18}  {'-'*5}  {'-'*6}  {'-'*5}  {'-'*6}  {'-'*5}")
+        for r in pr:
+            fp  = str(r.get("flag_path") or "?")
+            tot = r.get("total", 0)
+            pas = r.get("passed", 0)
+            act = r.get("acted", 0)
+            pct = r.get("pass_rate")
+            apt = r.get("act_rate")
+            pct_s = f"{pct:.0f}%" if pct is not None else "--"
+            apt_s = f"{apt:.0f}%" if apt is not None else "--"
+            print(f"  {fp:<18}  {tot:>5}  {pas:>6}  {act:>5}  {pct_s:>6}  {apt_s:>5}")
+        print()
+        print("  High PASS rate (>70%) = scanner is generating lots of noise in this category.")
+        print("  If a category consistently has >80% PASS rate, consider tightening its filter.")
+    else:
+        print("  No signal data yet.")
+
     # Leviathan Score band breakdown
     print()
     print(_rule("="))
@@ -300,6 +376,12 @@ def main():
     print("       (Long-horizon mispricings may reflect structural anchoring vs. short-horizon is just noise)")
     print("    7. Do LV-band-A signals have higher win rates than band-D signals?")
     print("       (Validates composite scoring rubric — if not, reweight the rubric components)")
+    print("    8. Does whale detection add win rate above the no-whale baseline?")
+    print("       (If whale signals do NOT outperform, the whale scan cost is not justified)")
+    print("    9. Does watchlist/smart money alignment predict wins above the base rate?")
+    print("       (If no meaningful lift, reconsider watchlist tracking criteria)")
+    print("   10. Which flag paths have the highest PASS rate?")
+    print("       (PASS rate >80% in a category = scanner noise; consider tightening that filter)")
     print()
     print(_rule())
     print()

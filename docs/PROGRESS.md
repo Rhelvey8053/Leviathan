@@ -47,6 +47,14 @@
   release qualifies as HIGH confidence
 - 9 new tests (1021 total)
 
+**Commit 60 — Calibration analytics: whale, watchlist, PASS-rate breakdowns**
+- `logger.py get_stats_by_whale()`: win rate for whale-detected vs non-whale signals
+- `logger.py get_stats_by_watchlist()`: win rate for watchlist-aligned vs non-watchlist signals
+- `logger.py get_pass_rate_by_flag_path()`: PASS% per flag path bucket — identifies which
+  scanner categories are false-positive factories (high PASS rate → noisy category)
+- `analysis/calibration.py`: 3 new sections (whale, watchlist, PASS rate) + 3 new key
+  questions (#8-10) validating whether whale/smart-money costs are justified by win-rate lift
+
 **Commit 59 — 5 more heuristic categories + Rules 37-38**
 - New scanner heuristics:
   - Blockchain/crypto protocol upgrade (0.65) — testnet-cleared upgrades nearly always activate;
