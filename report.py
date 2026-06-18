@@ -738,8 +738,8 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
     out.append("MARKETS FLAGGED THIS WEEK")
     out.append(_rule("="))
     out.append("")
-    out.append(f"  {'First Seen':<12}  {'Ticker':<26}  {'Conf':<4}  {'Dir':<3}  {'Edge':>7}  Title")
-    out.append(f"  {'-'*12}  {'-'*26}  {'-'*4}  {'-'*3}  {'-'*7}  -----")
+    out.append(f"  {'First Seen':<12}  {'Ticker':<26}  {'Conf':<4}  {'Dir':<3}  {'Edge':>7}  {'Net':>7}  Title")
+    out.append(f"  {'-'*12}  {'-'*26}  {'-'*4}  {'-'*3}  {'-'*7}  {'-'*7}  -----")
 
     for row in sorted(unique_markets, key=lambda r: r.get("timestamp", ""), reverse=True):
         ts_raw = row.get("timestamp", "")
@@ -754,9 +754,14 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
         try:
             edge_s = f"{float(row.get('edge', 0))*100:+.1f}pp"
         except Exception:
-            edge_s = "—"
-        title  = (row.get("title") or "")[:40]
-        out.append(f"  {ts_s:<12}  {ticker:<26}  {conf:<4}  {dir_:<3}  {edge_s:>7}  {title}")
+            edge_s = "--"
+        try:
+            ne = row.get("net_edge")
+            net_s = f"{float(ne)*100:+.1f}pp" if ne is not None else "--"
+        except Exception:
+            net_s = "--"
+        title  = (row.get("title") or "")[:36]
+        out.append(f"  {ts_s:<12}  {ticker:<26}  {conf:<4}  {dir_:<3}  {edge_s:>7}  {net_s:>7}  {title}")
 
     out.append("")
 
