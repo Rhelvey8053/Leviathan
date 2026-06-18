@@ -711,6 +711,19 @@ def score_markets(flagged_markets: list[dict], config: dict,
     if not flagged_markets:
         return [], {}
 
+    # Pre-Claude LV gate: drop markets whose pre-scoring LV (computed with LOW
+    # confidence = 0 bonus) is so weak that even HIGH confidence (+20) couldn't
+    # lift them to Grade C (LV ≥ 40). Default threshold: pre_lv < 20.
+    # These consume a slot without realistic path to an actionable signal.
+    min_pre_lv = int(config.get("scoring", {}).get("min_pre_claude_lv", 20))
+    if min_pre_lv > 0:
+        flagged_markets = [
+            m for m in flagged_markets
+            if compute_leviathan_score(m) >= min_pre_lv
+        ]
+        if not flagged_markets:
+            return [], {}
+
     max_markets = config.get("scoring", {}).get("max_markets_per_run", 20)
     batch       = flagged_markets[:max_markets]
     user_prompt = build_prompt(batch)

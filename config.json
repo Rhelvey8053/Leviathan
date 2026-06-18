@@ -78,7 +78,8 @@
     "max_probe_markets": 10,
     "max_probe_days_to_close": 365,
     "min_high_confidence_edge": 0.1,
-    "min_report_lv": 40
+    "min_report_lv": 40,
+    "min_pre_claude_lv": 20
   },
   "accounts": {
     "enabled": true,
