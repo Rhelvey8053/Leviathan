@@ -678,6 +678,47 @@ def estimate_base_rate(market: dict) -> float | None:
           "forward stock split", "split its stock", "announce a split"], 0.20),
         (["bankruptcy", "file for bankruptcy", "goes bankrupt",
           "go bankrupt", "declare bankruptcy", "seek bankruptcy"], 0.15),
+        # Corporate partnership / licensing / supply deal — common but announcements slip → ~35%
+        # Placed BEFORE bankruptcy; "talks" ≠ "signed deal" — similar to Rule 3/5 in scorer
+        (["announce a partnership", "announce a deal with",
+          "sign a partnership", "sign a deal with",
+          "enter a partnership", "enter into a partnership",
+          "licensing agreement with", "licensing deal with",
+          "partnership with", "supply agreement with",
+          "supply deal with", "commercial agreement with",
+          "joint venture with", "collaboration agreement",
+          "strategic partnership", "strategic alliance",
+          "distribution deal", "distribution agreement"], 0.35),
+        # S&P 500 / major index inclusion — when criteria are met, timing is uncertain (~50%)
+        # Once eligible, companies are added within 1-12 months → ~50% for any 6-month window
+        (["added to the s&p", "added to the s&p 500", "join the s&p 500",
+          "included in the s&p", "included in the s&p 500",
+          "s&p 500 inclusion", "s&p 500 addition", "added to s&p 500",
+          "s&p index inclusion", "added to the index",
+          "dow jones inclusion", "nasdaq 100 inclusion",
+          "russell 1000 addition", "russell 2000 addition",
+          "enter the s&p", "enter the dow"], 0.50),
+        # Event attendance — planned/scheduled attendance has high base rate (~65%)
+        # "will attend" is more likely than "will cancel appearance"
+        (["will attend", "will appear at", "will speak at",
+          "will be present at", "appear at the summit",
+          "appear at the conference", "appear at the nato",
+          "appear at the g7", "appear at the g20",
+          "appear at davos", "appear at the un",
+          "attend the summit", "attend the conference",
+          "attend the g7", "attend the g20", "attend the nato",
+          "attend the un general assembly", "attend the davos",
+          "attend the world economic forum", "attend the apec",
+          "attend the cop", "attend the wef"], 0.65),
+        # Company facility / headquarters announcement — new office/factory plans ~40%
+        # Executive announcements of new locations often materialize, but timing slips
+        (["open a new factory", "open a new plant", "open a new facility",
+          "announce a new factory", "announce a factory", "announce a plant",
+          "build a factory in", "build a plant in", "build a facility in",
+          "establish a factory", "open its factory",
+          "new headquarters", "new campus", "open a data center",
+          "build a data center", "announce a data center",
+          "open a fulfillment center", "announce a fulfillment center"], 0.40),
         # Stock buyback / share repurchase — common corporate capital allocation action → ~40%
         # Placed BEFORE bankruptcy; companies with cash return it fairly regularly
         (["stock buyback", "share buyback", "share repurchase", "buyback program",
@@ -832,7 +873,9 @@ def estimate_base_rate(market: dict) -> float | None:
           "pixel phone", "new pixel",
           "ar glasses", "ar headset", "vr headset", "smart glasses",
           "mixed reality headset", "vision pro", "next-gen headset",
-          "product announcement", "product reveal", "announce a new"], 0.55),
+          "product announcement", "product reveal",
+          "announce a new iphone", "announce a new mac",
+          "announce a new samsung", "announce a new pixel"], 0.55),
         # Media / entertainment — very low: release dates often slip
         # "release" and "show" excluded — too broad (hits Fed minutes, data reports, etc.)
         # "season" kept but specific entertainment-flavored phrases handle most cases

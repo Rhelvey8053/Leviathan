@@ -1880,3 +1880,59 @@ def test_social_media_post_precedes_entertainment():
     """Social media post (0.75) takes priority over generic entertainment (0.25)."""
     br = scanner.estimate_base_rate({"title": "Will Taylor Swift post about her new album on Instagram?"})
     assert br == 0.75
+
+
+# ─── New heuristics: corporate partnership / S&P inclusion / attendance ───────
+
+def test_corporate_partnership_base_rate():
+    """Corporate partnership announcements get ~35% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Apple announce a partnership with OpenAI before Q4?"})
+    assert br == 0.35
+
+
+def test_strategic_alliance_base_rate():
+    """Strategic alliance gets ~35% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Microsoft enter a strategic alliance with Mistral AI?"})
+    assert br == 0.35
+
+
+def test_licensing_agreement_base_rate():
+    """Licensing deal gets ~35% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Meta sign a licensing agreement with a major record label?"})
+    assert br == 0.35
+
+
+def test_sp500_inclusion_base_rate():
+    """S&P 500 inclusion markets get ~50% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Palantir be added to the S&P 500 before October?"})
+    assert br == 0.50
+
+
+def test_sp500_index_inclusion_base_rate():
+    """S&P 500 addition phrasing gets ~50% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Robinhood be included in the S&P 500 by year-end?"})
+    assert br == 0.50
+
+
+def test_event_attendance_summit_base_rate():
+    """Event attendance (summit) gets ~65% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Putin attend the G20 summit in 2026?"})
+    assert br == 0.65
+
+
+def test_event_attendance_conference_base_rate():
+    """Event attendance (conference) gets ~65% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Zelensky appear at the NATO summit before July?"})
+    assert br == 0.65
+
+
+def test_corporate_facility_base_rate():
+    """Corporate facility announcements get ~40% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Tesla announce a new factory in India by 2027?"})
+    assert br == 0.40
+
+
+def test_data_center_announcement_base_rate():
+    """Data center opening gets ~40% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Amazon open a data center in Saudi Arabia before 2027?"})
+    assert br == 0.40
