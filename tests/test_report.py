@@ -1050,3 +1050,138 @@ def test_weekly_digest_brier_absent_when_param_omitted():
     """compile_weekly_digest still works when brier= is not passed at all."""
     text = report.compile_weekly_digest([], _make_weekly_stats(), {})
     assert "Brier Score:" not in text
+
+
+# ─── compute_leviathan_score ──────────────────────────────────────────────────
+
+def test_leviathan_score_base_low_confidence_no_edge():
+    """BASE=40, LOW conf, no net_edge → 40 pts."""
+    s = _signal(confidence="LOW")
+    assert report.compute_leviathan_score(s) == 40
+
+
+def test_leviathan_score_high_confidence_adds_20():
+    """HIGH confidence adds 20 pts to base."""
+    s = _signal(confidence="HIGH")
+    assert report.compute_leviathan_score(s) == 60
+
+
+def test_leviathan_score_med_confidence_adds_10():
+    """MED confidence adds 10 pts to base."""
+    s = _signal(confidence="MED")
+    assert report.compute_leviathan_score(s) == 50
+
+
+def test_leviathan_score_net_edge_large_adds_10():
+    """net_edge > 10pp adds +10."""
+    s = _signal(confidence="LOW", net_edge=0.11)
+    assert report.compute_leviathan_score(s) == 50
+
+
+def test_leviathan_score_net_edge_medium_adds_6():
+    """net_edge 5-10pp adds +6."""
+    s = _signal(confidence="LOW", net_edge=0.07)
+    assert report.compute_leviathan_score(s) == 46
+
+
+def test_leviathan_score_net_edge_small_positive_adds_2():
+    """net_edge 0-5pp adds +2."""
+    s = _signal(confidence="LOW", net_edge=0.03)
+    assert report.compute_leviathan_score(s) == 42
+
+
+def test_leviathan_score_net_edge_zero_or_negative_subtracts_8():
+    """net_edge ≤ 0 subtracts 8."""
+    s = _signal(confidence="LOW", net_edge=-0.02)
+    assert report.compute_leviathan_score(s) == 32
+
+
+def test_leviathan_score_short_horizon_penalty():
+    """INTRADAY time horizon subtracts 5."""
+    s = _signal(confidence="LOW", time_horizon="INTRADAY")
+    assert report.compute_leviathan_score(s) == 35
+
+
+def test_leviathan_score_weekly_horizon_penalty():
+    """WEEKLY time horizon subtracts 5."""
+    s = _signal(confidence="LOW", time_horizon="WEEKLY")
+    assert report.compute_leviathan_score(s) == 35
+
+
+def test_leviathan_score_pass_count_3_subtracts_8():
+    """pass_count >= 3 subtracts 8."""
+    s = _signal(confidence="LOW", pass_count=3)
+    assert report.compute_leviathan_score(s) == 32
+
+
+def test_leviathan_score_pass_count_2_subtracts_3():
+    """pass_count == 2 subtracts 3."""
+    s = _signal(confidence="LOW", pass_count=2)
+    assert report.compute_leviathan_score(s) == 37
+
+
+def test_leviathan_score_persistence_3_consistent_adds_5():
+    """3+ prior appearances + direction_consistent adds +5."""
+    s = _signal(confidence="LOW", prior_appearances=3, direction_consistent=True)
+    assert report.compute_leviathan_score(s) == 45
+
+
+def test_leviathan_score_persistence_2_adds_2():
+    """2 prior appearances (regardless of consistent) adds +2."""
+    s = _signal(confidence="LOW", prior_appearances=2, direction_consistent=False)
+    assert report.compute_leviathan_score(s) == 42
+
+
+def test_leviathan_score_clamps_to_100():
+    """Score never exceeds 100."""
+    s = _signal(
+        confidence="HIGH", net_edge=0.15, time_horizon="LONG",
+        prior_appearances=4, direction_consistent=True,
+        watchlist_signal=True, watchlist_direction="YES",
+        ob_flag=True, whale_data={"whale_detected": True},
+        poly={"price_gap": 0.10},
+        ext_markets=[{"price_gap": 0.08}, {"price_gap": 0.07}],
+    )
+    score = report.compute_leviathan_score(s)
+    assert score <= 100
+
+
+def test_leviathan_score_clamps_to_zero():
+    """Score never goes below 0."""
+    s = _signal(
+        confidence="LOW", net_edge=-0.20,
+        time_horizon="INTRADAY", pass_count=5,
+    )
+    assert report.compute_leviathan_score(s) >= 0
+
+
+def test_leviathan_score_shown_in_signal_block_header():
+    """[LV:XX] label appears in the header line of _signal_block."""
+    s = _signal(confidence="HIGH", net_edge=0.12)
+    header = report._signal_block(s, index=1)[0]
+    assert "[LV:" in header
+
+
+def test_leviathan_score_header_value_matches_function():
+    """[LV:XX] value in header matches compute_leviathan_score() output."""
+    s = _signal(confidence="HIGH", net_edge=0.12)
+    expected = report.compute_leviathan_score(s)
+    header = report._signal_block(s, index=1)[0]
+    assert f"[LV:{expected}]" in header
+
+
+def test_leviathan_score_shown_in_weekly_digest():
+    """LV column header appears in weekly digest MARKETS FLAGGED table."""
+    row = _signal(confidence="HIGH", net_edge=0.10)
+    row["timestamp"] = "2026-06-01T10:00:00+00:00"
+    text = report.compile_weekly_digest([row], _make_weekly_stats(), {})
+    assert "LV" in text
+
+
+def test_leviathan_score_value_in_weekly_digest_row():
+    """Each market row in weekly digest shows the computed LV score."""
+    row = _signal(confidence="HIGH", net_edge=0.10)
+    row["timestamp"] = "2026-06-01T10:00:00+00:00"
+    expected = report.compute_leviathan_score(row)
+    text = report.compile_weekly_digest([row], _make_weekly_stats(), {})
+    assert str(expected) in text
