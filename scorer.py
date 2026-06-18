@@ -568,6 +568,16 @@ def build_prompt(markets: list[dict]) -> str:
                         _edge_str += "  [thin net edge — spread-sensitive]"
                 lines.append(_edge_str)
 
+        # PASS history — let Claude know if it has repeatedly declined this market
+        pc = m.get("pass_count", 0)
+        if pc >= 2:
+            lines.append(
+                f"   [NOTE: PASS HISTORY] This market has been scored {pc} time(s) in the past "
+                f"14 days and returned PASS each time. This may indicate a systematic scanner "
+                f"false-positive, OR that conditions have now changed. Re-examine carefully — "
+                f"if nothing has meaningfully changed since the last PASS, prefer PASS again."
+            )
+
         # Signal persistence — longitudinal view from DB history
         pa = m.get("prior_appearances", 0)
         if pa > 0:

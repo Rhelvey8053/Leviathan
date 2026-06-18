@@ -347,6 +347,16 @@ def main():
         if (m["whale_reversal"] or m.get("ob_flag")) and not m.get("flag"):
             m["flag"] = True
 
+    # PASS history: markets Claude has repeatedly declined get deprioritized.
+    # Single batch lookup to avoid N DB queries.
+    _pass_tickers = {}
+    try:
+        _pass_tickers = logger.get_pass_tickers(days=14)
+    except Exception:
+        pass
+    for m in flagged_markets:
+        m["pass_count"] = _pass_tickers.get(m.get("ticker", ""), 0)
+
     # Signal persistence: query DB for prior paper signals on these tickers.
     # Runs in one batch query. Gives Claude longitudinal context: "flagged 4 days
     # in a row, all YES" is much stronger than a single-day appearance.
@@ -459,6 +469,12 @@ def main():
         if m.get("short_horizon") and sc < 5:
             sc -= 2
 
+        # PASS penalty: markets Claude has repeatedly declined are likely
+        # scanner false-positives — move them toward the back of the queue.
+        pc = m.get("pass_count", 0)
+        if pc >= 3:   sc -= 3
+        elif pc >= 2: sc -= 1
+
         return sc
 
     # Sort: time-sensitive first (INTRADAY before LONG), then by pre-signal quality,
@@ -562,8 +578,12 @@ def main():
 
         if conf_threshold_rank.get(signal.get("confidence", "LOW"), 2) <= threshold_rank and signal.get("direction", "PASS") != "PASS":
             final_signals.append(signal)
-        elif whale.get("whale_detected"):
-            whale_only.append({**whale, "title": m.get("title", "")})
+        else:
+            # Log PASS decisions for scanner calibration (identify systematic false-positives)
+            if signal.get("direction", "PASS") == "PASS":
+                logger.log_pass(signal)
+            if whale.get("whale_detected"):
+                whale_only.append({**whale, "title": m.get("title", "")})
 
     # Second pass: if nothing cleared the threshold, include LOW confidence rather than returning empty
     # Guard: require minimum market price to avoid acting on tail-probability markets

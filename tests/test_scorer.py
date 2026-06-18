@@ -1089,3 +1089,37 @@ def test_persistence_price_delta_omitted_when_small():
     m["market_price"] = 0.454  # only 0.4pp delta — below threshold
     prompt = scorer.build_prompt([m])
     assert "Price since first flag" not in prompt
+
+
+# ─── PASS history note ────────────────────────────────────────────────────────
+
+def test_pass_history_note_shown_when_two_passes():
+    """[NOTE: PASS HISTORY] appears when pass_count >= 2."""
+    m = _base_market()
+    m["pass_count"] = 2
+    prompt = scorer.build_prompt([m])
+    assert "PASS HISTORY" in prompt
+
+
+def test_pass_history_note_shown_when_three_passes():
+    """PASS HISTORY note appears for 3+ passes."""
+    m = _base_market()
+    m["pass_count"] = 3
+    prompt = scorer.build_prompt([m])
+    assert "PASS HISTORY" in prompt
+    assert "3 time(s)" in prompt
+
+
+def test_pass_history_note_absent_when_one_pass():
+    """No PASS HISTORY note when pass_count == 1 (single occurrence, not a pattern)."""
+    m = _base_market()
+    m["pass_count"] = 1
+    prompt = scorer.build_prompt([m])
+    assert "PASS HISTORY" not in prompt
+
+
+def test_pass_history_note_absent_when_no_pass_count():
+    """No PASS HISTORY note when pass_count is absent or zero."""
+    m = _base_market()
+    prompt = scorer.build_prompt([m])
+    assert "PASS HISTORY" not in prompt
