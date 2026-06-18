@@ -569,6 +569,7 @@ def compile_report(
     signals, whale_only, stats, run_meta, config,
     all_filtered=None, new_signals=None, repeat_signals=None,
     smart_money_result=None, probe_stats=None, flag_path_stats=None,
+    lv_stats=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
@@ -751,6 +752,29 @@ def compile_report(
                 out.append(f"    {r['flag_path']:<14}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
             out.append("")
 
+    if lv_stats:
+        _BAND_ORDER = ("A", "B", "C", "D", "unscored")
+        _lv_rows = [(b, lv_stats[b]) for b in _BAND_ORDER
+                    if b in lv_stats and lv_stats[b].get("total", 0) > 0]
+        if _lv_rows:
+            out.append("  Win Rate by LV Grade  (resolved only — validates scoring rubric):")
+            out.append(f"    {'Grade':<10}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'AvgEdge':>8}")
+            out.append(f"    {'-'*10}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}")
+            for band, d in _lv_rows:
+                wr_s  = f"{d['win_rate']:.0f}%" if d.get("win_rate") is not None else "—"
+                ae_s  = f"{d['avg_edge']*100:.1f}pp" if d.get("avg_edge") is not None else "—"
+                label = {"A": "A (≥70)", "B": "B (55-69)", "C": "C (40-54)",
+                         "D": "D (<40)", "unscored": "unscored"}.get(band, band)
+                out.append(f"    {label:<10}  {d['total']:>5}  {d.get('wins',0):>4}  {wr_s:>6}  {ae_s:>8}")
+            # Verdict: A vs D delta (when both have data)
+            a_d = lv_stats.get("A", {})
+            d_d = lv_stats.get("D", {})
+            if a_d.get("win_rate") is not None and d_d.get("win_rate") is not None:
+                delta = a_d["win_rate"] - d_d["win_rate"]
+                arrow = "✓ scoring predicts win rate" if delta >= 10 else "⚠ grade delta small — review rubric"
+                out.append(f"    Grade A vs D delta: {delta:+.0f}pp  {arrow}")
+            out.append("")
+
     # ── Run stats ─────────────────────────────────────────────────────────
     out.append(_rule("="))
     out.append("RUN STATISTICS")
@@ -774,7 +798,8 @@ def compile_report(
 
 def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
                           flag_path_stats: list | None = None,
-                          brier: dict | None = None) -> str:
+                          brier: dict | None = None,
+                          lv_stats: dict | None = None) -> str:
     now_utc  = datetime.now(timezone.utc)
     week_ago = now_utc - timedelta(days=7)
     date_str = now_utc.strftime("%B %d, %Y")
@@ -874,6 +899,22 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
                 wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
                 pnl_s = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
                 out.append(f"    {r['flag_path']:<14}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
+            out.append("")
+
+    if lv_stats:
+        _BAND_ORDER = ("A", "B", "C", "D", "unscored")
+        _lv_rows = [(b, lv_stats[b]) for b in _BAND_ORDER
+                    if b in lv_stats and lv_stats[b].get("total", 0) > 0]
+        if _lv_rows:
+            out.append("  Win Rate by LV Grade  (resolved only):")
+            out.append(f"    {'Grade':<10}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'AvgEdge':>8}")
+            out.append(f"    {'-'*10}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}")
+            for band, d in _lv_rows:
+                wr_s  = f"{d['win_rate']:.0f}%" if d.get("win_rate") is not None else "—"
+                ae_s  = f"{d['avg_edge']*100:.1f}pp" if d.get("avg_edge") is not None else "—"
+                label = {"A": "A (≥70)", "B": "B (55-69)", "C": "C (40-54)",
+                         "D": "D (<40)", "unscored": "unscored"}.get(band, band)
+                out.append(f"    {label:<10}  {d['total']:>5}  {d.get('wins',0):>4}  {wr_s:>6}  {ae_s:>8}")
             out.append("")
 
     out.append(_rule("="))
