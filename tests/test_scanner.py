@@ -1498,6 +1498,43 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will Detroit face another city bankruptcy?", 0.10),
     # False positive guard — regular corporate bankruptcy still returns 0.15
     ("Will the retailer file for bankruptcy before Q4 2026?", 0.15),
+    # Tax legislation (~35%)
+    ("Will Congress pass a capital gains tax increase in 2026?", 0.35),
+    ("Will income taxes be cut under the new administration?", 0.35),
+    ("Will there be a major tax reform bill signed into law?", 0.35),
+    ("Will the TCJA extension pass before the December deadline?", 0.35),
+    ("Will corporate tax rates rise above 28% in 2026?", 0.35),
+    # False positive guard — "tax reform bill" + "veto" → veto block (0.20) fires first
+    ("Will Biden veto the tax reform bill?", 0.20),
+    # Supply chain disruption (~30%)
+    ("Will there be a major supply chain disruption in 2026?", 0.30),
+    ("Will a port strike shut down the West Coast ports in Q3?", 0.30),
+    ("Will port congestion at LA/Long Beach exceed 2021 levels?", 0.30),
+    ("Will shipping delays cause consumer goods shortages in Q4?", 0.30),
+    ("Will global container shortage persist through 2026?", 0.30),
+    # EV adoption milestones (~45%)
+    ("Will EV sales exceed 20% of new car sales in the US in 2026?", 0.45),
+    ("Will total electric vehicle sales top 1 million in Q1 2026?", 0.45),
+    ("Will EV market share surpass 15% globally by year end?", 0.45),
+    ("Will electric vehicle adoption reach 25% in Norway by Q4?", 0.45),
+    ("Will EV penetration exceed 10% in the US auto market?", 0.45),
+    # Bond / debt issuance (~65%)
+    ("Will the US Treasury complete its 10-year bond auction in March?", 0.65),
+    ("Will Company X complete its $2B bond offering by year end?", 0.65),
+    ("Will the sovereign bond issuance by France close before Q3?", 0.65),
+    ("Will the corporate bond sale be successfully priced this week?", 0.65),
+    ("Will Argentina successfully complete a bond auction in Q2?", 0.65),
+    # Unionization vote (~40%)
+    ("Will Amazon workers at the Staten Island warehouse vote to unionize?", 0.40),
+    ("Will Starbucks baristas win the union election in Seattle?", 0.40),
+    ("Will the NLRB election at the Apple Store result in union victory?", 0.40),
+    ("Will the union drive at the tech company lead to unionization?", 0.40),
+    ("Will workers vote on unionization before the end of Q3?", 0.40),
+    # False positive guard — veto block must still match correctly
+    ("Will Trump veto the spending bill before the deadline?", 0.20),
+    # False positive guard — "supply chain" in a title about a company's supply chain
+    # (same 0.30 rate is appropriate for disruption threshold questions)
+    ("Will Apple's supply chain disruption impact iPhone production?", 0.30),
 ])
 def test_base_rate_new_categories(title, expected_rate):
     m = _market(title=title)
@@ -1505,6 +1542,72 @@ def test_base_rate_new_categories(title, expected_rate):
     assert rate == pytest.approx(expected_rate), (
         f"title={title!r}: expected {expected_rate}, got {rate}"
     )
+
+
+# ─── get_heuristic_label: category label lookup ───────────────────────────────
+
+@pytest.mark.parametrize("title,expected_label", [
+    # FDA / drug categories — critical for Rules 31 and 37
+    ("Will Wegovy receive FDA approval at its PDUFA date in June?", "PDUFA date"),
+    ("Will the FDA lift the clinical hold on the drug?",            "FDA clinical hold"),
+    ("Will the company respond to the FDA complete response letter?","FDA complete response letter"),
+    ("Will the FDA advisory committee vote favorably?",             "FDA advisory committee"),
+    ("Will the FDA approve the new cancer treatment?",              "FDA approval"),
+    # Crypto protocol upgrade — Rule 37
+    ("Will Ethereum complete the Pectra network upgrade by Q2?",    "crypto protocol upgrade"),
+    ("Will the Bitcoin hard fork activate by August?",              "crypto protocol upgrade"),
+    ("Will the scheduled blockchain upgrade complete on time?",     "crypto protocol upgrade"),
+    # OPEC / chip export — Rule 39
+    ("Will OPEC cut production at the December meeting?",           "OPEC production decision"),
+    ("Will the US impose chip export restrictions on China?",       "chip export restriction"),
+    ("Will semiconductor export controls be expanded in Q3?",       "chip export restriction"),
+    # Credit rating / secondary offering — Rule 38
+    ("Will the US credit rating downgrade by Moody's happen?",     "credit rating change"),
+    ("Will the company complete a follow-on offering by year end?", "secondary equity offering"),
+    # New categories — Rules 40-42
+    ("Will Amazon workers vote to unionize in Q2 2026?",            "unionization vote"),
+    ("Will the NLRB election at the Tesla factory succeed?",        "unionization vote"),
+    ("Will Congress pass a tax cut bill before year end?",          "tax legislation"),
+    ("Will income taxes be reduced under the new plan?",            "tax legislation"),
+    ("Will there be a major supply chain disruption in 2026?",      "supply chain disruption"),
+    ("Will West Coast port congestion worsen in Q3?",               "supply chain disruption"),
+    ("Will EV sales exceed 20% of new car sales in 2026?",         "EV adoption milestone"),
+    ("Will the Treasury complete its bond auction in March?",       "bond/debt issuance"),
+    ("Will the company complete a bond offering by Q4?",            "bond/debt issuance"),
+    # Other specific categories
+    ("Will the Senate eliminate the filibuster before midterms?",   "filibuster reform"),
+    ("Will there be a recall election for the California governor?", "recall election"),
+    ("Will municipal bankruptcy be filed by the city in 2026?",    "municipal bankruptcy"),
+    ("Will Lake Mead reservoir levels hit a new low?",              "water crisis"),
+    ("Will the short seller report tank the stock?",                "short seller report"),
+    ("Will Hindenburg Research publish a report on Tesla?",         "short seller report"),
+    ("Will housing permits fall below 1.3 million units?",         "housing permits data"),
+    ("Will the government shutdown end before March?",              "government shutdown"),
+    ("Will Congress avoid a shutdown by the CR deadline?",          "government shutdown avoided"),
+    # None — no matching heuristic
+    ("Will this highly unusual unique event happen?",               None),
+    ("Will the Nobel conference attract more attendees in 2026?",   None),
+])
+def test_heuristic_label(title, expected_label):
+    m = _market(title=title)
+    label = scanner.get_heuristic_label(m)
+    assert label == expected_label, (
+        f"title={title!r}: expected {expected_label!r}, got {label!r}"
+    )
+
+
+def test_heuristic_label_on_score_market_result():
+    """score_market() passes heuristic_label through to the result dict."""
+    m = _market(title="Will Ethereum complete the Pectra network upgrade by Q2 2026?")
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["heuristic_label"] == "crypto protocol upgrade"
+
+
+def test_heuristic_label_none_when_no_match():
+    """score_market() heuristic_label is None for markets with no heuristic."""
+    m = _market(title="Will this completely novel unknown event happen?")
+    result = scanner.score_market(m, BASE_CFG)
+    assert result["heuristic_label"] is None
 
 
 # ─── score_market: heuristic_direction ───────────────────────────────────────
