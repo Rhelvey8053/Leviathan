@@ -279,7 +279,7 @@ def test_schema_new_columns_present(tmp_db):
                 "contract_type", "segment", "resolution_date", "logged_under",
                 "flag_path", "watchlist_signal",
                 "sig_edge", "sig_drift", "sig_br_none",
-                "base_rate", "heuristic_direction", "short_horizon"):
+                "base_rate", "heuristic_direction", "short_horizon", "time_horizon"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -650,6 +650,75 @@ def test_log_signal_stores_short_horizon_false_default(tmp_db):
             "SELECT short_horizon FROM signals WHERE ticker='KXSH-0'"
         ).fetchone()
     assert row["short_horizon"] == 0
+
+
+def test_log_signal_stores_time_horizon(tmp_db):
+    """log_signal persists time_horizon into the signals table."""
+    logger.log_signal({
+        "ticker": "KXTH-1", "title": "Monthly Market", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "time_horizon": "MONTHLY", "run_id": "r11",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT time_horizon FROM signals WHERE ticker='KXTH-1'"
+        ).fetchone()
+    assert row["time_horizon"] == "MONTHLY"
+
+
+# ─── get_stats_by_time_horizon ────────────────────────────────────────────────
+
+def _insert_horizon(call_id, time_horizon, result_val, pnl, edge=0.12):
+    """Insert a resolved paper signal with time_horizon for stats tests."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, result, outcome, pnl_if_traded, source, time_horizon)
+            VALUES (?,datetime('now'),?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, f"KX{call_id}", "YES", 0.40, 0.55,
+            edge, result_val, "YES", pnl, "paper", time_horizon,
+        ))
+
+
+def test_get_stats_by_time_horizon_empty(tmp_db):
+    """Empty DB → all buckets have total=0, win_rate=None."""
+    stats = logger.get_stats_by_time_horizon()
+    for bucket in ("INTRADAY", "WEEKLY", "MONTHLY", "QUARTERLY", "LONG"):
+        assert stats[bucket]["total"]    == 0
+        assert stats[bucket]["win_rate"] is None
+
+
+def test_get_stats_by_time_horizon_counts_per_bucket(tmp_db):
+    """Signals are counted in the correct time horizon bucket."""
+    _insert_horizon("th1", "MONTHLY",   "WIN",  0.60)
+    _insert_horizon("th2", "MONTHLY",   "LOSS", -0.40)
+    _insert_horizon("th3", "WEEKLY",    "WIN",  0.60)
+    _insert_horizon("th4", "QUARTERLY", "WIN",  0.60)
+    stats = logger.get_stats_by_time_horizon()
+    assert stats["MONTHLY"]["total"]   == 2
+    assert stats["MONTHLY"]["wins"]    == 1
+    assert stats["WEEKLY"]["total"]    == 1
+    assert stats["QUARTERLY"]["total"] == 1
+    assert stats["INTRADAY"]["total"]  == 0
+
+
+def test_get_stats_by_time_horizon_excludes_real_fills(tmp_db):
+    """Real fill rows must not contaminate horizon stats."""
+    _insert_horizon("th5", "MONTHLY", "WIN", 0.60)
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price,
+             result, outcome, pnl_if_traded, source, time_horizon)
+            VALUES ('rf4',datetime('now'),'KXrf','YES',0.40,
+                    'WIN','YES',0.60,'real_fill','MONTHLY')
+        """)
+    stats = logger.get_stats_by_time_horizon()
+    assert stats["MONTHLY"]["total"] == 1  # only paper row
 
 
 def _insert_with_flag_path(call_id, ticker, direction, market_price,

@@ -233,6 +233,26 @@ def main(resolve: bool = True):
                     pnl_s = _fmt_pnl(r["total_pnl"]) if r["total_pnl"] is not None else "—"
                     print(f"  {label:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
+    # ── Time-horizon breakdown ────────────────────────────────────────────────
+    horizon_stats = logger.get_stats_by_time_horizon()
+    any_horizon = any(horizon_stats[b]["total"] > 0 for b in ("INTRADAY", "WEEKLY", "MONTHLY", "QUARTERLY", "LONG"))
+    if any_horizon:
+        print()
+        print(_rule("="))
+        print("TIME HORIZON BREAKDOWN  (paper signals, resolved only)")
+        print(_rule("-"))
+        print()
+        print(f"  {'Horizon':<12}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        print(f"  {'-'*12}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
+        for bucket in ("INTRADAY", "WEEKLY", "MONTHLY", "QUARTERLY", "LONG"):
+            d = horizon_stats[bucket]
+            if not d["total"]:
+                continue
+            wr_s   = f"{d['win_rate']:.0f}%"   if d["win_rate"]  is not None else "—"
+            pnl_s  = _fmt_pnl(d["total_pnl"])  if d["total_pnl"] is not None else "—"
+            edge_s = f"{d['avg_edge']*100:.1f}pp" if d["avg_edge"] is not None else "—"
+            print(f"  {bucket:<12}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
+
     # ── Heuristic alignment breakdown ────────────────────────────────────────
     align_stats = logger.get_stats_by_heuristic_alignment()
     any_align = any(align_stats[k]["total"] > 0 for k in ("aligned", "override"))

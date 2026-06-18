@@ -101,6 +101,7 @@ def _init_db() -> None:
             "base_rate             REAL",
             "heuristic_direction   TEXT",
             "short_horizon         INTEGER DEFAULT 0",
+            "time_horizon          TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -199,8 +200,8 @@ def log_signal(signal: dict) -> None:
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
-                 base_rate,heuristic_direction,short_horizon)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 base_rate,heuristic_direction,short_horizon,time_horizon)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -225,6 +226,7 @@ def log_signal(signal: dict) -> None:
                 _to_float(signal.get("base_rate")),
                 signal.get("heuristic_direction"),
                 1 if signal.get("short_horizon") else 0,
+                signal.get("time_horizon"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -792,6 +794,58 @@ def get_brier_score() -> dict:
         label = "POOR"
 
     return {"brier_score": round(brier, 4), "n": len(rows), "label": label}
+
+
+def get_stats_by_time_horizon() -> dict:
+    """
+    Win rate and P&L grouped by time_horizon bucket for resolved paper signals.
+
+    Returns a dict keyed by bucket name (INTRADAY/WEEKLY/MONTHLY/QUARTERLY/LONG/None),
+    each with: total, wins, losses, win_rate, total_pnl, avg_edge.
+    """
+    BUCKETS = ("INTRADAY", "WEEKLY", "MONTHLY", "QUARTERLY", "LONG")
+    result = {b: {"total": 0, "wins": 0, "losses": 0, "win_rate": None,
+                  "total_pnl": None, "avg_edge": None}
+              for b in BUCKETS + ("OTHER",)}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT time_horizon, result, pnl_if_traded, edge
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    pnl_sum  = {k: 0.0 for k in result}
+    edge_sum = {k: 0.0 for k in result}
+    edge_n   = {k: 0   for k in result}
+
+    for r in rows:
+        th = r["time_horizon"] or "OTHER"
+        if th not in result:
+            th = "OTHER"
+        result[th]["total"] += 1
+        if r["result"] == "WIN":
+            result[th]["wins"] += 1
+        elif r["result"] == "LOSS":
+            result[th]["losses"] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[th] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[th] += float(r["edge"])
+            edge_n[th]   += 1
+
+    for th, d in result.items():
+        n = d["total"]
+        d["win_rate"] = d["wins"] / n * 100 if n else None
+        d["total_pnl"] = pnl_sum[th] if n else None
+        d["avg_edge"]  = edge_sum[th] / edge_n[th] if edge_n[th] else None
+
+    return result
 
 
 def get_stats_by_heuristic_alignment() -> dict:
