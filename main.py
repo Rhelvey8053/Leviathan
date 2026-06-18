@@ -144,12 +144,25 @@ def main():
                 _sig_data        = _json.load(open(_sig_cache, encoding="utf-8"))
                 _sm_tickers      = set(_sig_data.get("kalshi_tickers", []))
                 _ticker_details  = _sig_data.get("ticker_details", {})
-                scanner.tag_watchlist_overlap(filtered, _sm_tickers, _ticker_details)
+                # Staleness check: positions from >24h ago may have changed
+                _run_at_str = _sig_data.get("run_at", "")
+                _stale = False
+                if _run_at_str:
+                    try:
+                        from datetime import timezone as _tz
+                        _run_at = datetime.fromisoformat(_run_at_str.replace("Z", "+00:00"))
+                        _hours_old = (datetime.now(_tz.utc) - _run_at).total_seconds() / 3600
+                        _stale = _hours_old > 24
+                    except Exception:
+                        pass
+                scanner.tag_watchlist_overlap(filtered, _sm_tickers, _ticker_details,
+                                              stale=_stale)
                 n_boost = sum(1 for m in filtered if m.get("watchlist_signal"))
                 if n_boost:
+                    _stale_note = " [STALE >24h]" if _stale else ""
                     print(f"      Smart money boost: {n_boost} market(s) matched watchlist tickers "
                           f"(from {_sig_data.get('signal_count', 0)} X-refs, "
-                          f"run {_sig_data.get('run_at', '')[:10]})")
+                          f"run {_sig_data.get('run_at', '')[:10]}{_stale_note})")
         except Exception as _e:
             print(f"      [warn] Smart money tag failed: {_e}")
 
@@ -338,7 +351,8 @@ def main():
         """Pre-Claude signal quality score: higher = more evidence of real edge."""
         sc = 0
         fp = m.get("flag_path")
-        if m.get("watchlist_signal"):                         sc += 10
+        if m.get("watchlist_signal"):
+            sc += 5 if m.get("watchlist_stale") else 10   # stale >24h = half weight
         if (m.get("whale_data") or {}).get("whale_detected"): sc += 3
         if m.get("whale_reversal"):                           sc += 2
         if fp in ("HEURISTIC", "EDGE"):                       sc += 2
