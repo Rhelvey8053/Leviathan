@@ -825,6 +825,44 @@ def estimate_base_rate(market: dict) -> float | None:
         # Geopolitical — low base rate for dramatic events
         (["declare war", "invade", "military strike", "launch attack"], 0.15),
         (["coup", "overthrow", "regime change"], 0.10),
+        # Legalization markets — state-level or federal legalization votes → ~30%
+        # Cannabis/gambling/drug legalization: ballot initiatives pass at ~40%,
+        # but with state and timing uncertainty, 30% is a reasonable prior
+        (["legalize cannabis", "legalize marijuana", "legalize recreational",
+          "marijuana legalization", "cannabis legalization",
+          "legalize gambling", "legalize sports gambling", "sports gambling",
+          "gambling legalization", "gambling legislation",
+          "legalize drugs", "drug legalization",
+          "decriminalize marijuana", "decriminalize cannabis",
+          "pass cannabis legislation", "recreational marijuana bill",
+          "recreational cannabis bill", "gambling bill",
+          "sports betting", "online gambling", "legal gambling",
+          "legal cannabis", "legal marijuana"], 0.30),
+        # Event cancellation / postponement markets — rare; events usually proceed → ~10%
+        # Placed BEFORE entertainment (0.25) to prevent misclassification
+        (["be cancelled", "be canceled", "be postponed", "gets cancelled",
+          "gets canceled", "gets postponed", "cancel the event",
+          "postpone the event", "cancel the summit",
+          "cancel the conference", "cancel the olympics",
+          "cancel the world cup", "cancel the games",
+          "call off the", "called off"], 0.10),
+        # Athletic record-breaking — records are set by definition of record-holding → ~30%
+        # Per season/year, a specific record in a sport breaks ~25-35% of the time
+        (["break the record", "breaks the record", "set a new record",
+          "sets a new record", "beat the record", "shatter the record",
+          "world record", "all-time record in", "record-breaking performance",
+          "olympic record", "personal record"], 0.30),
+        # Wealth tax / wealth levy — very rare; most proposals fail in legislature → ~15%
+        (["wealth tax", "wealth levy", "tax on wealth",
+          "billionaire tax", "millionaire tax", "ultra-rich tax",
+          "tax on assets", "net worth tax",
+          "wealth surtax", "mega-wealthy tax"], 0.15),
+        # Product / drug recall — specific product recalls happen but are uncertain → ~25%
+        (["product recall", "drug recall", "safety recall",
+          "fda recall", "voluntary recall",
+          "issue a recall", "announce a recall",
+          "pull the product", "withdraw the drug",
+          "market withdrawal", "device recall"], 0.25),
         # Nobel Prize — single winner from hundreds of candidates worldwide → ~5-10%
         # Must come BEFORE generic " win " catch-all and entertainment awards
         (["nobel prize", "nobel peace prize", "nobel laureate",

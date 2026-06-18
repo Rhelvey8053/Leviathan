@@ -1980,3 +1980,59 @@ def test_defamation_settlement_base_rate():
     """Defamation settlement gets ~45% base rate."""
     br = scanner.estimate_base_rate({"title": "Will there be a defamation settlement between the parties?"})
     assert br == 0.45
+
+
+# ─── New heuristics: legalization / cancellation / records / recall ───────────
+
+def test_cannabis_legalization_base_rate():
+    """Cannabis legalization markets get ~30% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Texas legalize recreational marijuana before 2028?"})
+    assert br == 0.30
+
+
+def test_gambling_legalization_base_rate():
+    """Gambling legalization gets ~30% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Florida legalize sports gambling by 2027?"})
+    assert br == 0.30
+
+
+def test_event_cancellation_base_rate():
+    """Event cancellation markets get ~10% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the 2026 World Cup be cancelled or postponed?"})
+    assert br == 0.10
+
+
+def test_event_called_off_base_rate():
+    """'Called off' phrasing gets ~10% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the NATO summit be called off before July?"})
+    assert br == 0.10
+
+
+def test_athletic_record_base_rate():
+    """Athletic record-breaking markets get ~30% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Usain Bolt's 100m world record be broken in 2026?"})
+    assert br == 0.30
+
+
+def test_world_record_phrasing_base_rate():
+    """'World record' phrasing gets ~30% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the 100m world record be set at the Paris Grand Prix?"})
+    assert br == 0.30
+
+
+def test_wealth_tax_base_rate():
+    """Wealth tax markets get ~15% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Congress pass a wealth tax on billionaires in 2026?"})
+    assert br == 0.15
+
+
+def test_product_recall_base_rate():
+    """Product recall markets get ~25% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will Tesla issue a major safety recall before Q3 2026?"})
+    assert br == 0.25
+
+
+def test_fda_recall_base_rate():
+    """FDA drug recall gets ~25% base rate."""
+    br = scanner.estimate_base_rate({"title": "Will the FDA issue a drug recall for the new weight-loss pill?"})
+    assert br == 0.25
