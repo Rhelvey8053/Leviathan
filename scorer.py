@@ -9,6 +9,8 @@ import re
 import shutil
 import subprocess
 
+from report import compute_leviathan_score
+
 SYSTEM_PROMPT = (
     "You are a prediction market analyst. For each market provided, estimate the true "
     "probability of the YES outcome occurring. Use web search to find relevant recent "
@@ -353,6 +355,17 @@ def build_prompt(markets: list[dict]) -> str:
                 f"Polymarket question is priced {gap_pct:.0f}% {direction} than Kalshi. "
                 f"Determine whether Kalshi or Polymarket is better calibrated for this event."
             )
+
+        # Pre-computed Leviathan Score — composite signal quality (0-100, A-D band)
+        _lv = compute_leviathan_score(m)
+        _lv_band = "A" if _lv >= 70 else "B" if _lv >= 55 else "C" if _lv >= 40 else "D"
+        _lv_hint = {
+            "A": "strong pre-signal conviction — proceed with careful web research",
+            "B": "solid pre-signal — verify the key assumption with web search",
+            "C": "marginal — confirm edge is real before committing to YES/NO",
+            "D": "weak signal stack — high bar for YES/NO; prefer PASS unless evidence is clear",
+        }[_lv_band]
+        lines.append(f"   SIGNAL QUALITY: LV {_lv}/100 (Grade {_lv_band}) — {_lv_hint}")
 
         # Short-horizon warning — reinforce Rule 28 in context.
         if m.get("short_horizon"):
