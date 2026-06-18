@@ -89,6 +89,65 @@ def _signal_strength(s: dict) -> int:
     return score
 
 
+def compute_leviathan_score(s: dict) -> int:
+    """
+    Composite signal quality score (0–100) combining confidence, net edge,
+    convergence, and persistence.
+
+    Rubric:
+      BASE 40
+      + Confidence:    HIGH +20, MED +10, LOW 0
+      + Net edge:      >10pp +10, 5-10pp +6, 0-5pp +2, ≤0 -8
+      + Convergence:   ≥3 sources +10, 2 sources +5
+      + Persistence:   3+ consistent days +5, 2 days +2
+      + Smart money:   watchlist aligned +4
+      + Whale + OB:    both firing +3
+      - Short horizon: INTRADAY/WEEKLY -5
+      - PASS history:  pass_count ≥3 -8, ≥2 -3
+
+    Clamps to [0, 100].
+    """
+    pts = 40
+
+    conf = s.get("confidence", "")
+    if conf == "HIGH":    pts += 20
+    elif conf == "MED":   pts += 10
+
+    ne = s.get("net_edge")
+    if ne is not None:
+        ne = float(ne)
+        if ne > 0.10:      pts += 10
+        elif ne > 0.05:    pts += 6
+        elif ne > 0:       pts += 2
+        else:              pts -= 8
+
+    conv = _signal_strength(s)
+    if conv >= 3:   pts += 10
+    elif conv >= 2: pts += 5
+
+    pa = s.get("prior_appearances", 0)
+    consistent = s.get("direction_consistent")
+    if pa >= 3 and consistent:   pts += 5
+    elif pa >= 2:                pts += 2
+
+    wl_dir = (s.get("watchlist_direction") or "").upper()
+    if s.get("watchlist_signal") and wl_dir in ("YES", "NO"):
+        pts += 4
+
+    whale = s.get("whale_data") or {}
+    if whale.get("whale_detected") and s.get("ob_flag"):
+        pts += 3
+
+    if s.get("time_horizon") in ("INTRADAY", "WEEKLY"):
+        pts -= 5
+
+    pc = s.get("pass_count", 0)
+    if pc >= 3:   pts -= 8
+    elif pc >= 2: pts -= 3
+
+    return max(0, min(100, pts))
+
+
 def _kelly_fraction(direction: str, market_price: float, estimate: float) -> tuple[float, float] | None:
     """
     Full and quarter-Kelly bet fraction for a binary Kalshi contract.
@@ -191,7 +250,9 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     str_label  = f"  ★×{strength}" if strength >= 2 else ""
     repeat_cnt  = s.get("repeat_count", 0) or 0
     rep_label   = f"  [REPEAT x{repeat_cnt}]" if repeat_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
-    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{dg_label}{fp_label}{sh_label}{str_label}")
+    lv_score    = compute_leviathan_score(s)
+    lv_label    = f"  [LV:{lv_score}]"
+    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{dg_label}{fp_label}{sh_label}{str_label}{lv_label}")
     lines.append(f"{ticker}  ·  {close_fmt}{urgency}{rep_label}" if close_fmt else f"{ticker}{urgency}{rep_label}")
     lines.append("")
 
@@ -746,8 +807,8 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
     out.append("MARKETS FLAGGED THIS WEEK")
     out.append(_rule("="))
     out.append("")
-    out.append(f"  {'First Seen':<12}  {'Ticker':<26}  {'Conf':<4}  {'Dir':<3}  {'Edge':>7}  {'Net':>7}  Title")
-    out.append(f"  {'-'*12}  {'-'*26}  {'-'*4}  {'-'*3}  {'-'*7}  {'-'*7}  -----")
+    out.append(f"  {'First Seen':<12}  {'Ticker':<26}  {'Conf':<4}  {'Dir':<3}  {'Edge':>7}  {'Net':>7}  {'LV':>4}  Title")
+    out.append(f"  {'-'*12}  {'-'*26}  {'-'*4}  {'-'*3}  {'-'*7}  {'-'*7}  {'-'*4}  -----")
 
     for row in sorted(unique_markets, key=lambda r: r.get("timestamp", ""), reverse=True):
         ts_raw = row.get("timestamp", "")
@@ -768,8 +829,9 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
             net_s = f"{float(ne)*100:+.1f}pp" if ne is not None else "--"
         except Exception:
             net_s = "--"
+        lv_s   = str(compute_leviathan_score(row))
         title  = (row.get("title") or "")[:36]
-        out.append(f"  {ts_s:<12}  {ticker:<26}  {conf:<4}  {dir_:<3}  {edge_s:>7}  {net_s:>7}  {title}")
+        out.append(f"  {ts_s:<12}  {ticker:<26}  {conf:<4}  {dir_:<3}  {edge_s:>7}  {net_s:>7}  {lv_s:>4}  {title}")
 
     out.append("")
 
