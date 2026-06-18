@@ -180,6 +180,42 @@ def main():
     else:
         print("  No resolved data.")
 
+    # Net-of-spread edge breakdown
+    print()
+    print(_rule("="))
+    print("BY NET EDGE  (does realizable edge predict win rate?)")
+    print(_rule("-"))
+    print()
+    ne = logger.get_stats_by_net_edge()
+    bucket_labels = {
+        "spread_dominant": "spread > edge",
+        "thin":            "0-5pp net edge",
+        "good":            "5-10pp net edge",
+        "strong":          ">10pp net edge",
+        "no_data":         "no spread data",
+    }
+    ne_rows = [
+        {"flag_path": bucket_labels[b], **ne[b]}
+        for b in ("spread_dominant", "thin", "good", "strong", "no_data")
+        if ne[b]["total"] > 0
+    ]
+    if ne_rows:
+        _print_table(ne_rows, key_label="Net Edge Bucket", key_col="flag_path")
+        thin_plus = {b: ne[b] for b in ("thin", "good", "strong")}
+        sd = ne["spread_dominant"]
+        tp_total = sum(d["total"] for d in thin_plus.values())
+        tp_wins  = sum(d["wins"]  for d in thin_plus.values())
+        if tp_total and sd["total"] and sd["win_rate"] is not None:
+            tp_wr   = tp_wins / tp_total * 100
+            sd_wr   = sd["win_rate"]
+            delta   = tp_wr - sd_wr
+            verdict = "positive net-edge wins more (spread filter justified)" if delta > 5 else (
+                      "spread-dominant wins more (spread filter may be too harsh)" if delta < -5 else
+                      "no meaningful difference yet")
+            print(f"\n  Tradeable (net>0) vs Spread-dominant: {tp_wr:.0f}% vs {sd_wr:.0f}%  --> {verdict}")
+    else:
+        print("  No resolved data.")
+
     # Brier score by confidence
     print()
     print(_rule("="))
@@ -200,6 +236,7 @@ def main():
     print("    2. Do Aligned signals beat Override signals?")
     print("    3. Do MONTHLY+ signals outperform WEEKLY/INTRADAY?")
     print("    4. Is HIGH confidence actually higher win-rate than MED?")
+    print("    5. Do signals with positive net_edge (tradeable) outperform spread-dominant?")
     print()
     print(_rule())
     print()

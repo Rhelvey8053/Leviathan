@@ -700,6 +700,68 @@ def test_log_signal_net_edge_none_when_absent(tmp_db):
     assert row["net_edge"] is None
 
 
+# ─── get_stats_by_net_edge ────────────────────────────────────────────────────
+
+def _insert_net_edge(call_id, net_edge, result_val, pnl, edge=0.12):
+    """Insert a resolved paper signal with net_edge for stats tests."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, net_edge, result, outcome, pnl_if_traded, source)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, "2026-01-01T00:00:00+00:00",
+            f"TKR-{call_id}", "YES", 0.40, 0.55,
+            edge, net_edge,
+            result_val, "YES_WIN" if result_val == "WIN" else "YES_LOSS",
+            pnl, "paper",
+        ))
+
+
+def test_get_stats_by_net_edge_empty_db(tmp_db):
+    """Empty DB returns all zeroes — no errors."""
+    result = logger.get_stats_by_net_edge()
+    for bucket in ("spread_dominant", "thin", "good", "strong", "no_data"):
+        assert result[bucket]["total"] == 0
+        assert result[bucket]["win_rate"] is None
+
+
+def test_get_stats_by_net_edge_buckets(tmp_db):
+    """Each net_edge value lands in the correct bucket."""
+    _insert_net_edge("ne1", -0.02, "WIN",  0.6)   # spread_dominant
+    _insert_net_edge("ne2",  0.03, "LOSS", -0.4)  # thin
+    _insert_net_edge("ne3",  0.07, "WIN",  0.6)   # good
+    _insert_net_edge("ne4",  0.15, "WIN",  0.6)   # strong
+    _insert_net_edge("ne5",  None, "LOSS", -0.4)  # no_data
+
+    result = logger.get_stats_by_net_edge()
+    assert result["spread_dominant"]["total"] == 1
+    assert result["spread_dominant"]["wins"]  == 1
+    assert result["thin"]["total"]   == 1
+    assert result["thin"]["losses"]  == 1
+    assert result["good"]["total"]   == 1
+    assert result["strong"]["total"] == 1
+    assert result["no_data"]["total"] == 1
+
+
+def test_get_stats_by_net_edge_boundary_zero(tmp_db):
+    """net_edge=0 goes to spread_dominant (not thin)."""
+    _insert_net_edge("ne0", 0.0, "WIN", 0.6)
+    result = logger.get_stats_by_net_edge()
+    assert result["spread_dominant"]["total"] == 1
+    assert result["thin"]["total"] == 0
+
+
+def test_get_stats_by_net_edge_excludes_real_fills(tmp_db):
+    """Real fills are excluded from net_edge calibration."""
+    _insert_net_edge("ne-real", 0.12, "WIN", 0.6)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET source='real_fill' WHERE call_id='ne-real'")
+    result = logger.get_stats_by_net_edge()
+    assert result["strong"]["total"] == 0
+
+
 # ─── get_stats_by_time_horizon ────────────────────────────────────────────────
 
 def _insert_horizon(call_id, time_horizon, result_val, pnl, edge=0.12):

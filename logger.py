@@ -961,3 +961,74 @@ def get_stats_by_confidence() -> dict:
             d["win_rate"] = d["wins"] / d["total"] * 100
 
     return result
+
+
+def get_stats_by_net_edge() -> dict:
+    """
+    Win rate and P&L grouped by net_edge (realizable edge after spread).
+
+    Buckets:
+      spread_dominant  — net_edge <= 0 (spread consumes all theoretical edge)
+      thin             — 0 < net_edge <= 0.05 (tradeable but thin)
+      good             — 0.05 < net_edge <= 0.10 (solid tradeable edge)
+      strong           — net_edge > 0.10 (strong realizable edge)
+      no_data          — net_edge IS NULL (spread not available)
+
+    Only includes paper signals with a resolved outcome.
+    Returns a dict keyed by those bucket names; each value has:
+      total, wins, losses, win_rate (float|None), total_pnl (float|None), avg_edge (float|None)
+    """
+    buckets = ("spread_dominant", "thin", "good", "strong", "no_data")
+    result  = {b: {"total": 0, "wins": 0, "losses": 0,
+                   "win_rate": None, "total_pnl": None, "avg_edge": None}
+               for b in buckets}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT net_edge, result, pnl_if_traded, edge
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                  AND direction IN ('YES','NO')
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    pnl_sum  = {b: 0.0 for b in buckets}
+    edge_sum = {b: 0.0 for b in buckets}
+    edge_n   = {b: 0   for b in buckets}
+
+    for r in rows:
+        ne = r["net_edge"]
+        if ne is None:
+            b = "no_data"
+        elif ne <= 0:
+            b = "spread_dominant"
+        elif ne <= 0.05:
+            b = "thin"
+        elif ne <= 0.10:
+            b = "good"
+        else:
+            b = "strong"
+
+        result[b]["total"] += 1
+        if r["result"] == "WIN":
+            result[b]["wins"] += 1
+        elif r["result"] == "LOSS":
+            result[b]["losses"] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[b] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[b] += float(r["edge"])
+            edge_n[b]   += 1
+
+    for b in buckets:
+        n = result[b]["total"]
+        if n:
+            result[b]["win_rate"]  = result[b]["wins"] / n * 100
+            result[b]["total_pnl"] = pnl_sum[b]
+            result[b]["avg_edge"]  = edge_sum[b] / edge_n[b] if edge_n[b] else None
+
+    return result
