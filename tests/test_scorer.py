@@ -828,3 +828,75 @@ def test_net_edge_absent_when_no_base_rate():
     m = _base_market()  # no base_rate
     prompt = scorer.build_prompt([m])
     assert "net-of-spread" not in prompt
+
+
+# ─── SIGNAL SUMMARY: recent activity tags ─────────────────────────────────────
+
+def test_signal_summary_vol_spike_tag():
+    """[VOL_SPIKE] appears in SIGNAL SUMMARY when 24h vol >= 20% of total."""
+    m = _base_market(
+        heuristic_direction="YES",
+        heuristic_direction2=None,  # ignored
+        # Need >=2 directional sources for SIGNAL SUMMARY to appear
+    )
+    # Give it two directional sources so SIGNAL SUMMARY fires
+    m["heuristic_direction"] = "YES"
+    m["poly"] = {"price_gap": 0.10, "poly_price": 0.60, "poly_question": "Test question", "match_score": 0.8}
+    m["volume_fp"] = 1000
+    m["volume_24h_fp"] = 250   # 25% of total → vol_spike
+    prompt = scorer.build_prompt([m])
+    assert "VOL_SPIKE" in prompt
+
+
+def test_signal_summary_price_jump_tag():
+    """[PRICE_JUMP] appears in SIGNAL SUMMARY when price moved >=20%."""
+    m = _base_market(heuristic_direction="YES")
+    m["poly"] = {"price_gap": 0.10, "poly_price": 0.60, "poly_question": "Test question", "match_score": 0.8}
+    m["previous_price_dollars"] = 0.30
+    m["last_price_dollars"] = 0.40   # +33% move → PRICE_JUMP
+    prompt = scorer.build_prompt([m])
+    assert "PRICE_JUMP" in prompt
+
+
+def test_signal_summary_no_activity_tag_when_below_threshold():
+    """No VOL_SPIKE or PRICE_JUMP when activity is below thresholds."""
+    m = _base_market(heuristic_direction="YES")
+    m["poly"] = {"price_gap": 0.10, "poly_price": 0.60, "poly_question": "Test question", "match_score": 0.8}
+    m["volume_fp"] = 1000
+    m["volume_24h_fp"] = 100   # 10% — below 20% threshold
+    m["previous_price_dollars"] = 0.30
+    m["last_price_dollars"] = 0.31   # <5% move — below 20% threshold
+    prompt = scorer.build_prompt([m])
+    assert "VOL_SPIKE" not in prompt
+    assert "PRICE_JUMP" not in prompt
+
+
+# ─── SIGNAL SUMMARY: multi-platform consensus weighting ───────────────────────
+
+def test_signal_summary_multi_platform_three_sources():
+    """3 external platforms agreeing adds 3 votes to SIGNAL SUMMARY (capped at 3)."""
+    m = _base_market(heuristic_direction="YES")
+    m["ext_consensus"] = {
+        "consensus_gap": 0.10,
+        "consensus_dir": "YES",
+        "sources_higher": 3,
+        "sources_lower": 0,
+    }
+    prompt = scorer.build_prompt([m])
+    # heuristic=YES (1) + 3 platforms=YES (3) = 4 total YES sources → SIGNAL SUMMARY present
+    assert "SIGNAL SUMMARY" in prompt
+    assert "YES" in prompt
+
+
+def test_signal_summary_single_platform_adds_one_vote():
+    """1 external platform adds only 1 vote (not an outsized weight)."""
+    m = _base_market(heuristic_direction="YES")
+    m["ext_consensus"] = {
+        "consensus_gap": 0.10,
+        "consensus_dir": "YES",
+        "sources_higher": 1,
+        "sources_lower": 0,
+    }
+    prompt = scorer.build_prompt([m])
+    # heuristic=YES (1) + 1 platform=YES (1) = 2 total → SIGNAL SUMMARY fires
+    assert "SIGNAL SUMMARY" in prompt
