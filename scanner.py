@@ -1014,6 +1014,12 @@ def score_market(market: dict, config: dict) -> dict:
     else:
         raw_edge = None
 
+    # Net-of-spread edge: subtract half the bid-ask spread from raw_edge.
+    # Entering at ask (not mid) means you pay half the spread on entry.
+    # net_edge < 0 means the spread consumes the entire theoretical edge.
+    half_spread = (yes_ask - yes_bid) / 2 if (yes_bid > 0 and yes_ask > 0) else 0
+    net_edge = round(raw_edge - half_spread, 6) if raw_edge is not None else None
+
     spread = compute_spread_signal(yes_bid, yes_ask, mid_price or 0)
     drift  = compute_drift_signal(mid_price or 0, market, drift_min_abs, drift_min_pct)
 
@@ -1076,6 +1082,7 @@ def score_market(market: dict, config: dict) -> dict:
         "mid_price":           mid_price,
         "base_rate":           base_rate,
         "raw_edge":            raw_edge,
+        "net_edge":            net_edge,
         "heuristic_direction": heuristic_direction,
         "flag":                flag,
         "flag_path":           flag_path,

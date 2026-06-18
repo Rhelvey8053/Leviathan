@@ -99,6 +99,7 @@ def _init_db() -> None:
             "sig_drift             INTEGER DEFAULT 0",
             "sig_br_none           INTEGER DEFAULT 0",
             "base_rate             REAL",
+            "net_edge              REAL",
             "heuristic_direction   TEXT",
             "short_horizon         INTEGER DEFAULT 0",
             "time_horizon          TEXT",
@@ -200,8 +201,8 @@ def log_signal(signal: dict) -> None:
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
-                 base_rate,heuristic_direction,short_horizon,time_horizon)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 base_rate,net_edge,heuristic_direction,short_horizon,time_horizon)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -224,6 +225,7 @@ def log_signal(signal: dict) -> None:
                 1 if signal.get("sig_drift") else 0,
                 1 if signal.get("sig_br_none") else 0,
                 _to_float(signal.get("base_rate")),
+                _to_float(signal.get("net_edge")),
                 signal.get("heuristic_direction"),
                 1 if signal.get("short_horizon") else 0,
                 signal.get("time_horizon"),

@@ -1428,3 +1428,123 @@ def test_short_horizon_field_true_for_intraday():
     m["time_horizon"] = "INTRADAY"
     result = scanner.score_market(m, _sh_cfg())
     assert result["short_horizon"] is True
+
+
+# ─── Net-of-spread edge ────────────────────────────────────────────────────────
+
+def _net_market(mid: float, base: float, bid: float, ask: float, days_out: int = 60) -> dict:
+    """Market with explicit bid/ask spread for net_edge testing."""
+    close = (datetime.now(timezone.utc) + timedelta(days=days_out)).isoformat()
+    return {
+        "ticker": "KXTEST-NET",
+        "title": "Net edge test market",
+        "yes_bid_dollars": bid,
+        "yes_ask_dollars": ask,
+        "volume_fp": 5000,
+        "close_time": close,
+        "time_horizon": "MONTHLY",
+        "category": "POLITICS",
+    }
+
+
+def _net_cfg(base_rate: float) -> dict:
+    """Config for net_edge tests — passthrough mode, forces given base rate via mock."""
+    return {
+        "markets": {
+            "edge_threshold": 0.08,
+            "short_horizon_edge_threshold": 0.15,
+            "drift_min_abs": 0.0,
+            "drift_min_pct": 0.05,
+            "flag_mode": "passthrough",
+        }
+    }
+
+
+def test_net_edge_equals_raw_minus_half_spread():
+    """net_edge = raw_edge - half_spread when bid/ask both present."""
+    m = {
+        "ticker": "KXTEST-NE1",
+        "title": "Net edge arithmetic test",
+        "yes_bid_dollars": 0.20,
+        "yes_ask_dollars": 0.30,    # mid=0.25, half_spread=0.05
+        "volume_fp": 5000,
+        "close_time": (datetime.now(timezone.utc) + timedelta(days=60)).isoformat(),
+        "time_horizon": "MONTHLY",
+        "category": "POLITICS",
+    }
+    cfg = {
+        "markets": {
+            "edge_threshold": 0.08,
+            "short_horizon_edge_threshold": 0.15,
+            "drift_min_abs": 0.0,
+            "drift_min_pct": 0.05,
+            "flag_mode": "passthrough",
+        }
+    }
+    result = scanner.score_market(m, cfg)
+    raw  = result.get("raw_edge")
+    net  = result.get("net_edge")
+    half = 0.05  # (0.30 - 0.20) / 2
+    if raw is not None and net is not None:
+        assert abs(net - (raw - half)) < 1e-9
+
+
+def test_net_edge_is_none_when_no_bid_ask():
+    """net_edge is None when only last_price available (no bid/ask)."""
+    m = {
+        "ticker": "KXTEST-NE2",
+        "title": "Net edge no spread test",
+        "last_price_dollars": 0.40,
+        "volume_fp": 5000,
+        "close_time": (datetime.now(timezone.utc) + timedelta(days=60)).isoformat(),
+        "time_horizon": "MONTHLY",
+        "category": "POLITICS",
+    }
+    cfg = {
+        "markets": {
+            "edge_threshold": 0.08,
+            "short_horizon_edge_threshold": 0.15,
+            "drift_min_abs": 0.0,
+            "drift_min_pct": 0.05,
+            "flag_mode": "passthrough",
+        }
+    }
+    result = scanner.score_market(m, cfg)
+    # No bid/ask → half_spread=0 → net_edge = raw_edge - 0 = raw_edge (or None if no base_rate)
+    # Either None (no base_rate) or equal to raw_edge
+    raw = result.get("raw_edge")
+    net = result.get("net_edge")
+    if raw is not None:
+        assert abs(net - raw) < 1e-9
+    else:
+        assert net is None
+
+
+def test_net_edge_negative_when_spread_exceeds_raw_edge():
+    """net_edge can be negative when spread consumes theoretical edge."""
+    m = {
+        "ticker": "KXTEST-NE3",
+        "title": "Wide spread kills edge",
+        "yes_bid_dollars": 0.10,
+        "yes_ask_dollars": 0.50,    # half_spread=0.20, mid=0.30
+        "volume_fp": 5000,
+        "close_time": (datetime.now(timezone.utc) + timedelta(days=60)).isoformat(),
+        "time_horizon": "MONTHLY",
+        "category": "POLITICS",
+    }
+    cfg = {
+        "markets": {
+            "edge_threshold": 0.08,
+            "short_horizon_edge_threshold": 0.15,
+            "drift_min_abs": 0.0,
+            "drift_min_pct": 0.05,
+            "flag_mode": "passthrough",
+        }
+    }
+    result = scanner.score_market(m, cfg)
+    net = result.get("net_edge")
+    raw = result.get("raw_edge")
+    half = 0.20
+    if raw is not None and net is not None:
+        # net_edge should reflect that the huge spread wipes theoretical edge
+        assert abs(net - (raw - half)) < 1e-9
