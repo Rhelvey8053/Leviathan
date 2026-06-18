@@ -216,6 +216,33 @@ def main():
     else:
         print("  No resolved data.")
 
+    # Close-horizon breakdown
+    print()
+    print(_rule("="))
+    print("BY ACTUAL DAYS-TO-CLOSE  (when did we signal relative to resolution?)")
+    print(_rule("-"))
+    print()
+    ch = logger.get_stats_by_close_horizon()
+    ch_labels = {
+        "urgent":   "<1 day to close",
+        "short":    "1-7 days to close",
+        "medium":   "7-30 days to close",
+        "long":     "30+ days to close",
+        "no_close": "no close_time recorded",
+    }
+    ch_rows = [
+        {"flag_path": ch_labels[b], **ch[b]}
+        for b in ("urgent", "short", "medium", "long", "no_close")
+        if ch[b]["total"] > 0
+    ]
+    if ch_rows:
+        _print_table(ch_rows, key_label="Close Horizon", key_col="flag_path")
+        print()
+        print("  Key question #6: Do shorter-horizon signals (urgent/short) have")
+        print("  higher win rates than long-horizon signals — or vice versa?")
+    else:
+        print("  No resolved data yet (close_time field added recently).")
+
     # Brier score by confidence
     print()
     print(_rule("="))
@@ -237,6 +264,8 @@ def main():
     print("    3. Do MONTHLY+ signals outperform WEEKLY/INTRADAY?")
     print("    4. Is HIGH confidence actually higher win-rate than MED?")
     print("    5. Do signals with positive net_edge (tradeable) outperform spread-dominant?")
+    print("    6. Do urgent (<1d) or short (1-7d) signals have better win rates than long (30d+)?")
+    print("       (Long-horizon mispricings may reflect structural anchoring vs. short-horizon is just noise)")
     print()
     print(_rule())
     print()

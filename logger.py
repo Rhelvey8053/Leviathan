@@ -103,6 +103,7 @@ def _init_db() -> None:
             "heuristic_direction   TEXT",
             "short_horizon         INTEGER DEFAULT 0",
             "time_horizon          TEXT",
+            "close_time            TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -201,8 +202,9 @@ def log_signal(signal: dict) -> None:
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
-                 base_rate,net_edge,heuristic_direction,short_horizon,time_horizon)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 base_rate,net_edge,heuristic_direction,short_horizon,time_horizon,
+                 close_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -229,6 +231,7 @@ def log_signal(signal: dict) -> None:
                 signal.get("heuristic_direction"),
                 1 if signal.get("short_horizon") else 0,
                 signal.get("time_horizon"),
+                signal.get("close_time"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -1055,6 +1058,82 @@ def get_stats_by_net_edge() -> dict:
             edge_n[b]   += 1
 
     for b in buckets:
+        n = result[b]["total"]
+        if n:
+            result[b]["win_rate"]  = result[b]["wins"] / n * 100
+            result[b]["total_pnl"] = pnl_sum[b]
+            result[b]["avg_edge"]  = edge_sum[b] / edge_n[b] if edge_n[b] else None
+
+    return result
+
+
+def get_stats_by_close_horizon() -> dict:
+    """
+    Win rate grouped by actual days-to-close at the time the signal was logged.
+
+    Computes (close_time - timestamp) in days for each resolved paper signal.
+    Buckets:
+      urgent   — closes within 1 day of signal
+      short    — 1-7 days
+      medium   — 7-30 days
+      long     — 30+ days
+      no_close — close_time not recorded
+
+    Returns dict keyed by bucket name; each value: total, wins, win_rate, total_pnl, avg_edge.
+    """
+    BUCKETS = ("urgent", "short", "medium", "long", "no_close")
+    result = {b: {"total": 0, "wins": 0, "win_rate": None,
+                  "total_pnl": None, "avg_edge": None}
+              for b in BUCKETS}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT timestamp, close_time, result, pnl_if_traded, edge
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    pnl_sum  = {b: 0.0 for b in BUCKETS}
+    edge_sum = {b: 0.0 for b in BUCKETS}
+    edge_n   = {b: 0   for b in BUCKETS}
+
+    for r in rows:
+        ts  = r["timestamp"]
+        ct  = r["close_time"]
+        if not ts or not ct:
+            b = "no_close"
+        else:
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                t_sig  = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+                t_cls  = _dt.fromisoformat(ct.replace("Z", "+00:00"))
+                days   = (t_cls - t_sig).total_seconds() / 86400
+                if days < 1:
+                    b = "urgent"
+                elif days < 7:
+                    b = "short"
+                elif days < 30:
+                    b = "medium"
+                else:
+                    b = "long"
+            except Exception:
+                b = "no_close"
+
+        result[b]["total"] += 1
+        if r["result"] == "WIN":
+            result[b]["wins"] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[b] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[b] += float(r["edge"])
+            edge_n[b]   += 1
+
+    for b in BUCKETS:
         n = result[b]["total"]
         if n:
             result[b]["win_rate"]  = result[b]["wins"] / n * 100

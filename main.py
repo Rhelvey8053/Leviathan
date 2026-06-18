@@ -537,6 +537,7 @@ def main():
             "sig_edge":             m.get("sig_edge", False),
             "sig_drift":            m.get("sig_drift", False),
             "sig_br_none":          m.get("sig_br_none", False),
+            "close_time":           m.get("close_time") or m.get("expiration_time"),
             "run_id":               run_id,
         }
 
@@ -607,6 +608,7 @@ def main():
                     "sig_edge":             m.get("sig_edge", False),
                     "sig_drift":            m.get("sig_drift", False),
                     "sig_br_none":          m.get("sig_br_none", False),
+                    "close_time":           m.get("close_time") or m.get("expiration_time"),
                     "run_id":               run_id,
                     "second_pass":          True,
                 }
