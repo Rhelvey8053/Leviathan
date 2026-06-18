@@ -111,6 +111,9 @@ def dedup_by_event(markets: list[dict]) -> list[dict]:
     When multiple markets share the same event_ticker, keep only the one with
     the highest volume. Prevents the same underlying event (e.g. 10 Prison Break
     expiry tickers) from consuming the entire Claude scoring budget.
+
+    For scored markets (after score_markets()), prefer dedup_by_event_scored()
+    which uses realizable edge as the selection criterion instead of volume.
     """
     by_event: dict[str, dict] = {}
     no_event: list[dict]      = []
@@ -125,6 +128,49 @@ def dedup_by_event(markets: list[dict]) -> list[dict]:
             by_event[ev].get("volume_fp") or by_event[ev].get("volume") or 0
         ) if ev in by_event else -1
         if vol > existing_vol:
+            by_event[ev] = m
+
+    return list(by_event.values()) + no_event
+
+
+def _event_priority(m: dict) -> tuple:
+    """
+    Priority key for dedup_by_event_scored(): higher tuple = better market.
+    1. watchlist_signal (smart money confirmation wins outright)
+    2. net_edge (realizable edge after spread — None treated as -inf)
+    3. raw_edge (theoretical edge fallback)
+    4. volume (liquidity tiebreaker)
+    """
+    return (
+        1 if m.get("watchlist_signal") else 0,
+        m.get("net_edge") if m.get("net_edge") is not None else -1.0,
+        m.get("raw_edge") if m.get("raw_edge") is not None else 0.0,
+        float(m.get("volume_fp") or m.get("volume") or 0),
+    )
+
+
+def dedup_by_event_scored(markets: list[dict]) -> list[dict]:
+    """
+    Post-scoring event dedup: keeps the market with the best signal per event.
+
+    Selection priority (see _event_priority):
+    1. Watchlist signal (smart money confirmation)
+    2. Net-of-spread edge (realizable edge after bid-ask cost)
+    3. Raw edge
+    4. Volume (fallback)
+
+    This is strictly better than the pre-scoring volume-only dedup when
+    scored fields are available.
+    """
+    by_event: dict[str, dict] = {}
+    no_event: list[dict]      = []
+
+    for m in markets:
+        ev = m.get("event_ticker", "").strip()
+        if not ev:
+            no_event.append(m)
+            continue
+        if ev not in by_event or _event_priority(m) > _event_priority(by_event[ev]):
             by_event[ev] = m
 
     return list(by_event.values()) + no_event

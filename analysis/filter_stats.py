@@ -173,19 +173,20 @@ def main(use_snapshot: bool = False):
             print(f"      {cnt:>4}  {kw}")
     print()
 
-    # Stage 2: dedup
+    # Stage 2: score (needed before dedup so we can pick by net_edge)
+    pre_scored = scanner.score_markets(filtered, config)
+
+    # Stage 3: post-scoring dedup — keeps best-signal market per event
     if mkt_cfg.get("dedup_by_event", False):
-        before = len(filtered)
-        deduped = scanner.dedup_by_event(filtered)
-        print(f"  After dedup_by_event:   {len(deduped):>5}  ({before - len(deduped)} duplicates removed)")
+        before = len(pre_scored)
+        scored = scanner.dedup_by_event_scored(pre_scored)
+        print(f"  After dedup_by_event:   {len(scored):>5}  ({before - len(scored)} duplicates removed, best-signal kept)")
     else:
-        deduped = filtered
+        scored = pre_scored
         print(f"  dedup_by_event: OFF")
 
-    # Stage 3: score + flag
-    scored = scanner.score_markets(deduped, config)
     flagged = [m for m in scored if m.get("flag")]
-    print(f"  After score+flag:       {len(flagged):>5}  ({len(deduped) - len(flagged)} unflagged)")
+    print(f"  After score+flag:       {len(flagged):>5}  ({len(scored) - len(flagged)} unflagged)")
 
     # Flag path breakdown
     path_counts: dict[str, int] = {}
@@ -233,8 +234,8 @@ def main(use_snapshot: bool = False):
         import json as _j
         sm_data  = _j.load(open(sig_cache, encoding="utf-8"))
         sm_tickers = set(sm_data.get("kalshi_tickers", []))
-        scanner.tag_watchlist_overlap(deduped, sm_tickers)
-        n_boost = sum(1 for m in deduped if m.get("watchlist_signal"))
+        scanner.tag_watchlist_overlap(scored, sm_tickers)
+        n_boost = sum(1 for m in scored if m.get("watchlist_signal"))
         print()
         print(f"  Watchlist overlap:      {n_boost:>5}  markets match smart money positions")
 
