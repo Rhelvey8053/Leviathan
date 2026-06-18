@@ -2,6 +2,37 @@
 
 ---
 
+## Session 14 — 2026-06-18 (autonomous continuation)
+
+### Commits 54–60: Profitability hardening — heuristics, calibration, actionability
+
+**Commit 54 — Iran/geopolitical heuristics + test fix**
+- `scanner.py estimate_base_rate()`: uranium enrichment 20%, regime change 10%, Abraham Accords 20%
+- Extended Abraham Accords patterns to catch "Israel and Saudi Arabia normalize relations" title variant
+- Fixed `test_base_rate_new_categories`: Saudi-Israel normalization now correctly 0.20 (not 0.30)
+- 15 new tests (977 total)
+
+**Commit 55 — Actionability filter + 6 new heuristic categories + Rule 33**
+- `filter_markets()`: `min_hours_to_close` param (default 6h) — markets closing within 6h excluded
+- `config.json`: added `"min_hours_to_close": 6` under markets
+- New scanner heuristics: stock buyback/dividend (0.40), treaty withdrawal (0.20),
+  formal candidacy announcement (0.35), martial law declaration (0.05),
+  social media post/tweet markets (0.75)
+- Treaty patterns placed BEFORE political withdrawal to prevent "withdraw from the [treaty]" false-match
+- Political withdrawal block: restored "withdraw from the" with treaty-specific names catching first
+- `scorer.py` Rule 33: social media post markets — Trump/Musk active-user base rate 85-90%
+- 19 new tests (996 total)
+
+**Commit 56 — 5 more heuristic categories + Rule 34**
+- New scanner heuristics: corporate partnership/licensing (0.35), S&P 500 inclusion (0.50),
+  event attendance (0.65), corporate facility/HQ announcement (0.40)
+- Narrowed tech product "announce a new" pattern — was too broad, now uses specific product names
+- `scorer.py` Rule 34: corporate partnership markets — 'in talks'/'exploring'/'discussions' ≠ signed
+  deal; only official joint press release / regulatory filing qualifies as HIGH confidence
+- 9 new tests (1005 total)
+
+---
+
 ## Session 13 — 2026-06-18 (autonomous continuation)
 
 ### Commits 50–53: Signal quality and calibration improvements
