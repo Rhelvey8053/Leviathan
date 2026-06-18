@@ -351,6 +351,30 @@ def main():
     else:
         print("  No resolved data yet (leviathan_score field added recently).")
 
+    # Heuristic label breakdown
+    print()
+    print(_rule("="))
+    print("BY HEURISTIC LABEL  (which category has the best calibration?)")
+    print(_rule("-"))
+    print()
+    hl = logger.get_stats_by_heuristic_label()
+    if hl:
+        print(f"  {'Heuristic Label':<30}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        print(f"  {'-'*30}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
+        for r in hl:
+            lbl   = str(r.get("heuristic_label") or "?")[:30]
+            total = r.get("total", 0)
+            wins  = r.get("wins", 0)
+            if not total:
+                continue
+            print(f"  {lbl:<30}  {total:>5}  {wins:>4}  {_wr(r.get('win_rate')):>6}"
+                  f"  {_pnl(r.get('total_pnl')):>10}  {_edge(r.get('avg_edge')):>8}")
+        print()
+        print("  Labels with >=3 resolved signals and win_rate >60% are well-calibrated categories.")
+        print("  Labels with win_rate <40% suggest base rate may need adjustment for that category.")
+    else:
+        print("  No resolved data with heuristic labels yet.")
+
     # Brier score by confidence
     print()
     print(_rule("="))

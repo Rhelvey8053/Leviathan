@@ -280,7 +280,7 @@ def test_schema_new_columns_present(tmp_db):
                 "flag_path", "watchlist_signal",
                 "sig_edge", "sig_drift", "sig_br_none",
                 "base_rate", "net_edge", "heuristic_direction", "short_horizon", "time_horizon",
-                "close_time"):
+                "close_time", "heuristic_label"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -1607,3 +1607,167 @@ def test_get_stats_by_leviathan_score_excludes_pass(tmp_db):
         """)
     stats = logger.get_stats_by_leviathan_score()
     assert stats["A"]["total"] == 0  # PASS row excluded
+
+
+# ─── heuristic_label: schema + persistence ────────────────────────────────────
+
+def test_schema_includes_heuristic_label(tmp_db):
+    """heuristic_label column exists in the signals table after migration."""
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "heuristic_label" in cols
+
+
+def test_log_signal_stores_heuristic_label(tmp_db):
+    """log_signal persists heuristic_label when provided."""
+    logger.log_signal({
+        "ticker": "KXHL-1", "title": "PDUFA test", "market_price": 0.30,
+        "our_estimate": 0.85, "edge": 0.55, "direction": "YES",
+        "confidence": "HIGH", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "base_rate": 0.85, "heuristic_direction": "YES",
+        "heuristic_label": "PDUFA date",
+        "run_id": "rhl1",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT heuristic_label FROM signals WHERE ticker='KXHL-1'"
+        ).fetchone()
+    assert row is not None
+    assert row["heuristic_label"] == "PDUFA date"
+
+
+def test_log_signal_heuristic_label_none_when_absent(tmp_db):
+    """heuristic_label is NULL when not provided in signal dict."""
+    logger.log_signal({
+        "ticker": "KXHL-2", "title": "No label", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rhl2",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT heuristic_label FROM signals WHERE ticker='KXHL-2'"
+        ).fetchone()
+    assert row is not None
+    assert row["heuristic_label"] is None
+
+
+def test_log_pass_stores_heuristic_label(tmp_db):
+    """log_pass persists heuristic_label for PASS rows."""
+    logger.log_pass({
+        "ticker": "KXHLPASS-1", "title": "T", "market_price": 0.45,
+        "our_estimate": 0.50, "edge": 0.05, "confidence": "LOW",
+        "flag_path": "HEURISTIC", "heuristic_label": "crypto ETF",
+        "run_id": "rhlp1",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT heuristic_label, direction FROM signals WHERE ticker='KXHLPASS-1'"
+        ).fetchone()
+    assert row is not None
+    assert row["direction"] == "PASS"
+    assert row["heuristic_label"] == "crypto ETF"
+
+
+# ─── get_stats_by_heuristic_label ─────────────────────────────────────────────
+
+def _insert_hl_signal(call_id, heuristic_label, direction, result_val, pnl, edge=0.12):
+    """Insert a resolved paper signal with heuristic_label for stats tests."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, result, outcome, pnl_if_traded, source, heuristic_label)
+            VALUES (?,datetime('now'),?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, f"KX{call_id}", direction, 0.40, 0.55,
+            edge, result_val, "YES" if result_val == "WIN" else "NO",
+            pnl, "paper", heuristic_label,
+        ))
+
+
+def test_get_stats_by_heuristic_label_empty_db(tmp_db):
+    """Empty DB returns empty list — no errors."""
+    result = logger.get_stats_by_heuristic_label()
+    assert result == []
+
+
+def test_get_stats_by_heuristic_label_groups_by_label(tmp_db):
+    """Signals with same label are grouped together."""
+    _insert_hl_signal("hl1", "PDUFA date",         "YES", "WIN",  0.60)
+    _insert_hl_signal("hl2", "PDUFA date",         "YES", "WIN",  0.60)
+    _insert_hl_signal("hl3", "PDUFA date",         "YES", "LOSS", -0.40)
+    _insert_hl_signal("hl4", "crypto protocol upgrade", "YES", "WIN",  0.60)
+
+    result = logger.get_stats_by_heuristic_label()
+    labels = {r["heuristic_label"] for r in result}
+    assert "PDUFA date"              in labels
+    assert "crypto protocol upgrade" in labels
+
+    pdufa = next(r for r in result if r["heuristic_label"] == "PDUFA date")
+    assert pdufa["total"]    == 3
+    assert pdufa["wins"]     == 2
+    assert pdufa["losses"]   == 1
+    assert abs(pdufa["win_rate"] - 66.7) < 0.1
+
+
+def test_get_stats_by_heuristic_label_excludes_null_label(tmp_db):
+    """Signals with NULL heuristic_label are excluded from the grouped result."""
+    _insert_hl_signal("hl5", "PDUFA date", "YES", "WIN",  0.60)
+    # Insert a resolved signal with no label
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id,timestamp,ticker,direction,market_price,result,outcome,
+             pnl_if_traded,source,heuristic_label)
+            VALUES ('hl-null',datetime('now'),'KXNULL','YES',0.40,'WIN','YES',0.60,'paper',NULL)
+        """)
+    result = logger.get_stats_by_heuristic_label()
+    # Only the labelled signal should appear
+    assert len(result) == 1
+    assert result[0]["heuristic_label"] == "PDUFA date"
+
+
+def test_get_stats_by_heuristic_label_excludes_unresolved(tmp_db):
+    """Unresolved signals (empty outcome) are not counted."""
+    _insert_hl_signal("hl6", "credit rating change", "YES", "WIN", 0.60)
+    # Unresolved row with same label
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id,timestamp,ticker,direction,market_price,source,heuristic_label,
+             outcome,result)
+            VALUES ('hl-unres',datetime('now'),'KXUNRES','YES',0.40,'paper',
+                    'credit rating change','','')
+        """)
+    result = logger.get_stats_by_heuristic_label()
+    assert len(result) == 1
+    assert result[0]["total"] == 1  # only the resolved row
+
+
+def test_get_stats_by_heuristic_label_excludes_real_fills(tmp_db):
+    """Real fill rows are never included even if labelled."""
+    _insert_hl_signal("hl7", "FDA approval", "YES", "WIN", 0.60)
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id,timestamp,ticker,direction,market_price,result,outcome,
+             pnl_if_traded,source,heuristic_label)
+            VALUES ('hl-rf',datetime('now'),'KXRF','YES',0.40,'WIN','YES',0.60,
+                    'real_fill','FDA approval')
+        """)
+    result = logger.get_stats_by_heuristic_label()
+    fda = next((r for r in result if r["heuristic_label"] == "FDA approval"), None)
+    assert fda is not None
+    assert fda["total"] == 1  # only paper row
+
+
+def test_get_stats_by_heuristic_label_sorted_by_win_rate(tmp_db):
+    """Result list is sorted descending by win_rate."""
+    _insert_hl_signal("hl8", "bond/debt issuance",  "YES", "WIN",  0.60)
+    _insert_hl_signal("hl9", "bond/debt issuance",  "YES", "WIN",  0.60)
+    _insert_hl_signal("hl10", "unionization vote",  "YES", "LOSS", -0.40)
+    result = logger.get_stats_by_heuristic_label()
+    if len(result) >= 2:
+        assert result[0]["win_rate"] >= result[1]["win_rate"]

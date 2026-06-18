@@ -2,6 +2,51 @@
 
 ---
 
+## Session 15 — 2026-06-18 (autonomous continuation)
+
+### Commits 63–66: Heuristic labels, LV specificity bonus, DB persistence
+
+**Commit 63 — Heuristic labels + 5 new categories + Rules 40-42**
+- `scanner.py get_heuristic_label(market)` — new function (~200 rules) mapping market title
+  patterns to human-readable category strings ("PDUFA date", "crypto ETF", "credit rating change" etc.)
+  Mirrors estimate_base_rate() ordering; first-match wins
+- `scanner.py score_market()`: now computes and returns `heuristic_label` field
+- `scorer.py build_prompt()`: FLAG REASON line now includes `[heuristic label]` suffix
+  (e.g. "FLAG REASON: HEURISTIC — base rate 85% [PDUFA date] leans YES vs market price")
+- New heuristic categories: veto (0.20), tax legislation (0.35), supply chain disruption (0.30),
+  EV adoption milestone (0.45), bond/debt issuance (0.65), unionization/NLRB vote (0.40)
+- Gap fills: gold price ("gold reach/hit/top"), CPI ("consumer price inflation"),
+  housing ("house price/prices"), labor strikes (general/national/transit/teachers/nurses/rail/airline),
+  municipal bankruptcy ("city declare insolvency"), national debt threshold block (0.50)
+- Rule 40: unionization/NLRB elections — pre-election ~35%, scheduled election ~55-65%
+- Rule 41: tax legislation — reconciliation/unified govt ~60-65%, TCJA extension ~55%
+- Rule 42: bond/debt issuance — routine sovereign ~90-95%, shelf active ~80%, exploring ~45%
+- 76 new tests (1072 → 1148 total)
+
+**Commit 64 — LV score heuristic specificity bonus**
+- `report.py compute_leviathan_score()`: adds +8 for HIGH_SPEC labels (PDUFA date,
+  government shutdown avoided, FDA clinical hold, constitutional amendment, NATO Article 5,
+  martial law, volcanic eruption, 25th Amendment) and +4 for MED_SPEC labels (crypto protocol
+  upgrade, debt ceiling resolution, cabinet departure, CEO retention, credit rating change,
+  OPEC production decision, chip export restriction, bond/debt issuance, FDA complete response letter)
+- Rationale: specific, empirically calibrated heuristics deserve higher composite signal quality
+  even with the same net edge as a generic legislative market
+- 8 new tests (1148 total)
+
+**Commit 65 — heuristic_label DB persistence + get_stats_by_heuristic_label()**
+- `logger.py _init_db()`: ADD COLUMN `heuristic_label TEXT` (additive migration, idempotent)
+- `logger.py log_signal()`: persists `heuristic_label` from signal dict
+- `logger.py log_pass()`: persists `heuristic_label` for PASS rows
+- `logger.py get_stats_by_heuristic_label()`: win rate / P&L / avg edge grouped by label
+  (only resolved paper signals with non-NULL label, sorted by win_rate desc)
+  Answers: "which heuristic categories have the best win rate?" — enables post-hoc calibration
+  to validate whether category base rates match observed outcomes
+- `analysis/calibration.py`: BY HEURISTIC LABEL section — table of top-performing categories
+  with colour commentary on calibration quality (≥3 resolved, >60% = well-calibrated)
+- 10 new tests (1148 → 1158 total)
+
+---
+
 ## Session 14 — 2026-06-18 (autonomous continuation)
 
 ### Commits 54–60: Profitability hardening — heuristics, calibration, actionability
