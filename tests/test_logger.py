@@ -279,7 +279,8 @@ def test_schema_new_columns_present(tmp_db):
                 "contract_type", "segment", "resolution_date", "logged_under",
                 "flag_path", "watchlist_signal",
                 "sig_edge", "sig_drift", "sig_br_none",
-                "base_rate", "net_edge", "heuristic_direction", "short_horizon", "time_horizon"):
+                "base_rate", "net_edge", "heuristic_direction", "short_horizon", "time_horizon",
+                "close_time"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -760,6 +761,98 @@ def test_get_stats_by_net_edge_excludes_real_fills(tmp_db):
         conn.execute("UPDATE signals SET source='real_fill' WHERE call_id='ne-real'")
     result = logger.get_stats_by_net_edge()
     assert result["strong"]["total"] == 0
+
+
+# ─── close_time logging ───────────────────────────────────────────────────────
+
+def test_log_signal_stores_close_time(tmp_db):
+    """close_time is stored when provided in signal dict."""
+    logger.log_signal({
+        "ticker": "KXCLOSE1", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rct1",
+        "close_time": "2026-07-01T00:00:00+00:00",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT close_time FROM signals WHERE ticker='KXCLOSE1'"
+        ).fetchone()
+    assert row is not None
+    assert row["close_time"] == "2026-07-01T00:00:00+00:00"
+
+
+def test_log_signal_close_time_none_when_absent(tmp_db):
+    """close_time is NULL when not provided."""
+    logger.log_signal({
+        "ticker": "KXCLOSE2", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rct2",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT close_time FROM signals WHERE ticker='KXCLOSE2'"
+        ).fetchone()
+    assert row is not None
+    assert row["close_time"] is None
+
+
+# ─── get_stats_by_close_horizon ───────────────────────────────────────────────
+
+def _insert_close_horizon(call_id, ts_iso, close_iso, result_val, pnl=0.5, edge=0.12):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, result, outcome, pnl_if_traded, source, close_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (call_id, ts_iso, f"KX{call_id}", "YES", 0.40, 0.60,
+              edge, result_val, "YES" if result_val == "WIN" else "NO",
+              pnl, "paper", close_iso))
+
+
+def test_get_stats_by_close_horizon_empty(tmp_db):
+    result = logger.get_stats_by_close_horizon()
+    for b in ("urgent", "short", "medium", "long", "no_close"):
+        assert result[b]["total"] == 0
+        assert result[b]["win_rate"] is None
+
+
+def test_get_stats_by_close_horizon_buckets(tmp_db):
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    sig_ts = now.isoformat()
+
+    # urgent: closes in 6 hours
+    _insert_close_horizon("ch-urgent", sig_ts, (now + timedelta(hours=6)).isoformat(), "WIN")
+    # short: closes in 3 days
+    _insert_close_horizon("ch-short", sig_ts, (now + timedelta(days=3)).isoformat(), "WIN")
+    # medium: closes in 14 days
+    _insert_close_horizon("ch-medium", sig_ts, (now + timedelta(days=14)).isoformat(), "LOSS")
+    # long: closes in 60 days
+    _insert_close_horizon("ch-long", sig_ts, (now + timedelta(days=60)).isoformat(), "WIN")
+
+    result = logger.get_stats_by_close_horizon()
+    assert result["urgent"]["total"] == 1
+    assert result["urgent"]["wins"] == 1
+    assert result["short"]["total"] == 1
+    assert result["medium"]["total"] == 1
+    assert result["medium"]["wins"] == 0
+    assert result["long"]["total"] == 1
+
+
+def test_get_stats_by_close_horizon_no_close_bucket(tmp_db):
+    """Signal with no close_time goes to no_close bucket."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, result, outcome,
+             pnl_if_traded, source, close_time)
+            VALUES ('noc','2026-06-01T00:00:00+00:00','KXNOC','YES',0.40,'WIN','YES',0.5,'paper',NULL)
+        """)
+    result = logger.get_stats_by_close_horizon()
+    assert result["no_close"]["total"] == 1
 
 
 # ─── get_stats_by_time_horizon ────────────────────────────────────────────────
