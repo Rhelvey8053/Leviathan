@@ -1211,6 +1211,71 @@ def test_leviathan_score_value_in_weekly_digest_row():
     assert str(expected) in text
 
 
+# ─── LV heuristic specificity bonus ──────────────────────────────────────────
+
+def test_lv_high_spec_pdufa_adds_8():
+    """PDUFA date label (HIGH_SPEC) adds +8 to LV score."""
+    base = _signal(confidence="LOW")  # base LV = 40
+    spec = _signal(confidence="LOW", heuristic_label="PDUFA date")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 8
+
+
+def test_lv_high_spec_shutdown_avoided_adds_8():
+    """Government shutdown avoided (HIGH_SPEC) adds +8."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="government shutdown avoided")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 8
+
+
+def test_lv_med_spec_crypto_upgrade_adds_4():
+    """Crypto protocol upgrade (MED_SPEC) adds +4."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="crypto protocol upgrade")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_lv_med_spec_bond_issuance_adds_4():
+    """Bond/debt issuance (MED_SPEC) adds +4."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="bond/debt issuance")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_lv_no_spec_generic_no_bonus():
+    """Generic heuristic label (not in any spec set) adds 0."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="legislative passage")
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base)
+
+
+def test_lv_none_label_no_bonus():
+    """heuristic_label=None does not affect LV score."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label=None)
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base)
+
+
+def test_lv_spec_bonus_clamps_at_100():
+    """Specificity bonus on an already-high score still clamps to 100."""
+    s = _signal(
+        confidence="HIGH", net_edge=0.12, heuristic_label="PDUFA date",
+        prior_appearances=3, direction_consistent=True,
+        watchlist_signal=True, watchlist_direction="YES",
+        whale_data={"whale_detected": True, "whale_direction": "YES"},
+        ob_flag=True,
+        poly={"price_gap": 0.10},
+        ext_markets=[{"price_gap": 0.10}, {"price_gap": 0.10}],
+    )
+    assert report.compute_leviathan_score(s) <= 100
+
+
+def test_lv_high_spec_case_insensitive():
+    """Specificity bonus is case-insensitive on heuristic_label."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", heuristic_label="PDUFA Date")  # uppercase
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 8
+
+
 # ─── _qualifying: min_lv filter ───────────────────────────────────────────────
 
 def test_qualifying_min_lv_excludes_low_score():
