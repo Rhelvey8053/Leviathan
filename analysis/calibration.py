@@ -243,6 +243,38 @@ def main():
     else:
         print("  No resolved data yet (close_time field added recently).")
 
+    # Leviathan Score band breakdown
+    print()
+    print(_rule("="))
+    print("BY LEVIATHAN SCORE BAND  (does A-grade beat D-grade?)")
+    print(_rule("-"))
+    print()
+    lv = logger.get_stats_by_leviathan_score()
+    lv_labels = {
+        "A":        "A (score >=70)",
+        "B":        "B (score 55-69)",
+        "C":        "C (score 40-54)",
+        "D":        "D (score <40)",
+        "unscored": "pre-LV (no score)",
+    }
+    lv_rows = [
+        {"flag_path": lv_labels[b], **lv[b]}
+        for b in ("A", "B", "C", "D", "unscored")
+        if lv[b]["total"] > 0
+    ]
+    if lv_rows:
+        _print_table(lv_rows, key_label="LV Band", key_col="flag_path")
+        a_wr = lv["A"]["win_rate"]
+        d_wr = lv["D"]["win_rate"]
+        if a_wr is not None and d_wr is not None:
+            delta   = a_wr - d_wr
+            verdict = "A-grade outperforms D (score validated)" if delta > 10 else (
+                      "D-grade outperforms A (re-examine score rubric)" if delta < -10 else
+                      "no meaningful difference yet")
+            print(f"\n  Grade A vs D win-rate: {a_wr:.0f}% vs {d_wr:.0f}%  --> {verdict}")
+    else:
+        print("  No resolved data yet (leviathan_score field added recently).")
+
     # Brier score by confidence
     print()
     print(_rule("="))
@@ -266,6 +298,8 @@ def main():
     print("    5. Do signals with positive net_edge (tradeable) outperform spread-dominant?")
     print("    6. Do urgent (<1d) or short (1-7d) signals have better win rates than long (30d+)?")
     print("       (Long-horizon mispricings may reflect structural anchoring vs. short-horizon is just noise)")
+    print("    7. Do LV-band-A signals have higher win rates than band-D signals?")
+    print("       (Validates composite scoring rubric — if not, reweight the rubric components)")
     print()
     print(_rule())
     print()
