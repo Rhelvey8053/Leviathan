@@ -409,6 +409,13 @@ def estimate_base_rate(market: dict) -> float | None:
         (["common currency", "shared currency", "unified currency",
           "adopt a currency", "currency union", "monetary union",
           "replace the dollar", "replace the euro", "petrodollar"], 0.10),
+        # Central bank digital currency (CBDC) — most nations are exploring; full launch is
+        # rare in any given 12-month window; major economies (US, EU) move slowly → ~15%
+        (["central bank digital currency", "cbdc", "digital dollar",
+          "digital euro", "digital yuan", "digital currency",
+          "digital renminbi", "e-cny", "programmable money",
+          "retail cbdc", "wholesale cbdc", "cbdc launch",
+          "cbdc pilot", "digital pound"], 0.15),
         # Economic performance comparisons — near 50/50 for "outperform/underperform" questions
         (["outperform", "underperform", "outgrow", "grow faster than",
           "perform better than", "exceed average", "below average growth",
@@ -644,6 +651,16 @@ def estimate_base_rate(market: dict) -> float | None:
           "ferc approve", "ferc approves", "ferc approval",
           "regulatory approval", "regulatory clearance",
           "cfpb approve", "ftc approve", "epa approve"], 0.40),
+        # Blockchain / crypto protocol upgrade / hard fork — scheduled upgrades that have
+        # passed testnet nearly always complete on the planned timeline → ~65%
+        # Must come BEFORE the generic "ethereum"/"crypto" block (0.50) to avoid downtick
+        (["network upgrade", "protocol upgrade", "hard fork", "soft fork",
+          "mainnet upgrade", "consensus upgrade",
+          "ethereum upgrade", "eth upgrade",
+          "bitcoin upgrade", "taproot upgrade",
+          "blockchain upgrade", "chain upgrade",
+          "protocol migration", "pectra", "shapella",
+          "eip-", "bip-", "scheduled upgrade"], 0.65),
         # Crypto — price-level markets are 50/50 by definition
         (["bitcoin", "btc price", "btc above", "btc below",
           "ethereum", "eth price", "eth above", "eth below",
@@ -665,6 +682,15 @@ def estimate_base_rate(market: dict) -> float | None:
           "surpass $", "cross $", "break $", "top $"], 0.35),
         (["below $", "under $", "fall below", "drop below",
           "dip below", "dip to $"], 0.35),
+        # Secondary / follow-on equity offering — companies raise equity capital regularly → ~35%
+        # Shelf registration or priced offering is highly likely to close; rumors/exploration less so
+        # Placed BEFORE IPO block; "secondary" ≠ "initial" — no overlap risk
+        (["secondary offering", "follow-on offering", "equity offering",
+          "share issuance", "stock issuance",
+          "at-the-market offering", "atm offering",
+          "registered direct offering",
+          "shelf offering", "shelf registration",
+          "capital raise", "equity raise"], 0.35),
         # Corporate events — low base rate, most announcements don't complete
         # IPO announcement timing markets: "when will X announce an IPO?"
         (["announce an ipo", "officially announce an ipo",
@@ -751,6 +777,23 @@ def estimate_base_rate(market: dict) -> float | None:
           "dividend cut", "cut its dividend", "suspend its dividend",
           "dividend announcement", "declare a dividend", "special dividend",
           "dividend payment", "announce a dividend"], 0.40),
+        # Credit rating downgrade / upgrade — agencies pre-signal via outlook changes → ~40%
+        # Once on negative/positive watch, action often follows within 6-18 months
+        # Placed BEFORE bank failure block to avoid "downgrade to junk → bank failure" collision
+        (["credit rating downgrade", "credit downgrade", "downgrade to junk",
+          "rating downgrade", "credit rating cut",
+          "moody's downgrade", "s&p downgrade", "fitch downgrade",
+          "credit rating upgrade", "rating upgrade", "credit upgrade",
+          "upgrades credit rating", "downgraded by moody", "downgraded by s&p",
+          "downgraded by fitch", "upgraded by moody", "upgraded by s&p",
+          "upgraded by fitch", "sovereign downgrade",
+          "debt downgrade", "junk status"], 0.40),
+        # Short seller report / investigative thesis — targets sometimes decline; outcome uncertain → ~30%
+        # Short attacks often lack merit; regulatory/restatement follow-through is partial
+        (["short seller report", "short seller",
+          "hindenburg research", "citron research", "muddy waters",
+          "short report on", "short thesis", "short attack",
+          "fraud allegations", "accounting fraud allegations"], 0.30),
         # Bank failure / financial crisis — systemic bank failures are rare → ~15%
         (["bank failure", "bank collapse", "banking crisis",
           "bank run", "bank bailout", "bank insolvency",
