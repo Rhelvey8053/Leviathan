@@ -546,6 +546,22 @@ def estimate_base_rate(market: dict) -> float | None:
           "miss earnings", "misses earnings", "earnings beat", "earnings miss",
           "beat on earnings", "earnings per share above", "eps above",
           "eps beat", "earnings surprise", "earnings estimate"], 0.50),
+        # FDA regulatory approval — more specific patterns must precede the general 0.40 entry.
+        # PDUFA date confirmed: ~85-90% approval rate once NDA/BLA is under active review.
+        (["pdufa", "pdufa date", "pdufa target date"], 0.85),
+        # Clinical hold / FDA pause: active safety concern; approval very unlikely short-term → ~10%
+        (["clinical hold", "clinical hold lifted", "fda clinical hold",
+          "partial clinical hold"], 0.10),
+        # Complete Response Letter (CRL) / resubmission — first review rejected; resubmission
+        # outcome uncertain (~60%); placed BEFORE generic "fda approve" to catch resubmissions
+        (["complete response letter", "crl issued", "received a crl",
+          "resubmission", "resubmitted to the fda",
+          "respond to the crl", "address the crl"], 0.60),
+        # Advisory committee (adcom) vote uncertain — favorable vote → ~80%; unfavorable → ~30%
+        # No directional signal without knowing vote outcome; use neutral 50% before FDA decision
+        (["advisory committee", "fda advisory", "adcom", "fda panel",
+          "fda panel vote", "fda panel meeting", "advisory panel",
+          "fda advisory committee"], 0.50),
         # Regulatory approvals — must come BEFORE crypto ETF block ("spot etf" → 0.50)
         # and BEFORE merger/acquisition block ("merger" → 0.35)
         (["fda approve", "fda approval", "fda approves", "fda cleared",
