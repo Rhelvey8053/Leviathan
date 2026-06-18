@@ -133,7 +133,12 @@ Human reviewer can immediately see which signals need extra evidence scrutiny.
 41. `6074aaf` — [SHORT HORIZON] label in daily report + 3 tests (836)
 42. `91acdb3` — filter_stats.py short-horizon suppression analysis + README test count (836)
 43. `54696a9` — net-of-spread edge + watchlist_direction convergence; 12 tests (855)
-44. (current) — smart dedup post-scoring: dedup_by_event_scored picks best-signal market; 7 tests (862)
+44. `67b6e08` — smart dedup post-scoring: dedup_by_event_scored picks best-signal market; 7 tests (862)
+45. `a96a8b0` — vol_spike/price_jump in pre-sort; multi-platform consensus weighting; 9 tests (867)
+46. `83340a3` — cross-market conflict detection + signal strength vol/price; 4 tests (871)
+47. `d0253e7` — net_edge calibration bucketing: get_stats_by_net_edge() + calibration.py section; 4 tests (875)
+48. `0811691` — conflict penalty in pre-sort + net_edge_analysis.py diagnostic (875)
+49. `274b310` — CROSS_MARKET net_edge from Poly gap + backtest net_edge section + config cleanup (875)
 
 ---
 
@@ -158,6 +163,26 @@ New function in `scanner.py` runs post-scoring and picks the best-signal market 
 priority: watchlist_signal > net_edge > raw_edge > volume. Previously, dedup ran pre-scoring and
 used raw volume only — could discard the highest-edge market in favour of the most liquid.
 Pipeline in `main.py` and `filter_stats.py` updated to dedup after `score_markets()`.
+
+**vol_spike/price_jump in pre-sort and SIGNAL SUMMARY:**
+`_pre_sort_score()` gets +1 for vol_spike (24h vol ≥ 20% of total) and +2 for price_jump (≥20%
+move from previous price). SIGNAL SUMMARY in `build_prompt()` appends `[VOL_SPIKE]`/`[PRICE_JUMP]`
+tags. External consensus votes now weighted by platform count (capped at 3) in both.
+
+**Cross-market conflict detection:**
+`build_prompt()` shows `[!] HEURISTIC vs POLYMARKET CONFLICT` when base rate direction and
+Polymarket disagree at ≥5pp. Shows `[!] HEURISTIC vs CONSENSUS CONFLICT` when ≥2 external
+platforms oppose the heuristic. Pre-sort penalizes (-2) markets with strong Poly/heuristic
+conflict (≥10pp opposite) and no corroboration. `_signal_strength()` in report.py now includes
+vol_spike and price_jump activity signals.
+
+**Net-of-spread calibration infrastructure:**
+`get_stats_by_net_edge()` buckets resolved paper signals by realizable edge range. Exposed in
+`analysis/calibration.py` (BY NET EDGE section) and `analysis/backtest.py`. `CROSS_MARKET`
+promoted markets get `net_edge` from Poly gap minus half-spread (previously always NULL).
+`analysis/net_edge_analysis.py` — new diagnostic showing live distribution of flagged market
+net_edge with histogram, flag-path breakdown, and top tradeable/worst spread-dominated markets.
+`config.json` — `short_horizon_edge_threshold` made explicit (was hardcoded default).
 
 ---
 
