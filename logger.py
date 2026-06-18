@@ -253,8 +253,8 @@ def log_pass(signal: dict) -> None:
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,base_rate,net_edge,heuristic_direction,
-                 short_horizon,time_horizon,close_time)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 short_horizon,time_horizon,close_time,leviathan_score)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -278,6 +278,7 @@ def log_pass(signal: dict) -> None:
                 1 if signal.get("short_horizon") else 0,
                 signal.get("time_horizon"),
                 signal.get("close_time"),
+                _to_int(signal.get("leviathan_score")),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")
