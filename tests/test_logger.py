@@ -1513,3 +1513,97 @@ def test_heuristic_alignment_excludes_real_fills(tmp_db):
         """)
     stats = logger.get_stats_by_heuristic_alignment()
     assert stats["aligned"]["total"] == 1  # only paper row
+
+
+# ─── leviathan_score: schema + stats ──────────────────────────────────────────
+
+def test_schema_includes_leviathan_score(tmp_db):
+    """leviathan_score column exists in the signals table."""
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "leviathan_score" in cols
+
+
+def test_log_signal_stores_leviathan_score(tmp_db):
+    """leviathan_score value is persisted when included in the signal dict."""
+    sig = {
+        "ticker": "KXLV1", "title": "LV test", "market_price": 0.30,
+        "our_estimate": 0.50, "edge": 0.20, "direction": "YES",
+        "confidence": "HIGH", "run_id": "test", "leviathan_score": 72,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT leviathan_score FROM signals WHERE ticker='KXLV1'"
+        ).fetchone()
+    assert row is not None
+    assert row["leviathan_score"] == 72
+
+
+def test_log_signal_leviathan_score_none_when_absent(tmp_db):
+    """leviathan_score is NULL when not provided in signal dict."""
+    sig = {
+        "ticker": "KXLV2", "title": "No score", "market_price": 0.25,
+        "our_estimate": 0.40, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "run_id": "test",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT leviathan_score FROM signals WHERE ticker='KXLV2'"
+        ).fetchone()
+    assert row["leviathan_score"] is None
+
+
+def test_get_stats_by_leviathan_score_empty(tmp_db):
+    """Empty DB → all bands have total=0, win_rate=None."""
+    stats = logger.get_stats_by_leviathan_score()
+    for band in ("A", "B", "C", "D", "unscored"):
+        assert stats[band]["total"]    == 0
+        assert stats[band]["win_rate"] is None
+
+
+def test_get_stats_by_leviathan_score_buckets_a_and_d(tmp_db):
+    """Score=75 goes to A-band; score=30 goes to D-band."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id,timestamp,ticker,direction,market_price,result,outcome,
+             pnl_if_traded,source,leviathan_score,edge)
+            VALUES
+            ('lva','2026-06-01T00:00:00+00:00','KXA','YES',0.40,'WIN','YES',0.60,'paper',75,0.20),
+            ('lvd','2026-06-01T00:00:00+00:00','KXD','YES',0.40,'LOSS','NO',-0.40,'paper',30,0.10)
+        """)
+    stats = logger.get_stats_by_leviathan_score()
+    assert stats["A"]["total"] == 1
+    assert stats["A"]["wins"]  == 1
+    assert stats["A"]["win_rate"] == pytest.approx(100.0)
+    assert stats["D"]["total"] == 1
+    assert stats["D"]["wins"]  == 0
+    assert stats["D"]["win_rate"] == pytest.approx(0.0)
+
+
+def test_get_stats_by_leviathan_score_unscored_bucket(tmp_db):
+    """NULL leviathan_score goes to the unscored bucket."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id,timestamp,ticker,direction,market_price,result,outcome,
+             pnl_if_traded,source,leviathan_score)
+            VALUES ('lvn','2026-06-01T00:00:00+00:00','KXN','YES',0.40,'WIN','YES',0.60,'paper',NULL)
+        """)
+    stats = logger.get_stats_by_leviathan_score()
+    assert stats["unscored"]["total"] == 1
+
+
+def test_get_stats_by_leviathan_score_excludes_pass(tmp_db):
+    """PASS direction rows are excluded from leviathan_score stats."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id,timestamp,ticker,direction,market_price,result,outcome,
+             pnl_if_traded,source,leviathan_score)
+            VALUES ('lvp','2026-06-01T00:00:00+00:00','KXP','PASS',0.40,'WIN','YES',0.60,'paper',70)
+        """)
+    stats = logger.get_stats_by_leviathan_score()
+    assert stats["A"]["total"] == 0  # PASS row excluded

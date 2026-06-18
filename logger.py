@@ -104,6 +104,7 @@ def _init_db() -> None:
             "short_horizon         INTEGER DEFAULT 0",
             "time_horizon          TEXT",
             "close_time            TEXT",
+            "leviathan_score       INTEGER",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -203,8 +204,8 @@ def log_signal(signal: dict) -> None:
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
                  base_rate,net_edge,heuristic_direction,short_horizon,time_horizon,
-                 close_time)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 close_time,leviathan_score)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -232,6 +233,7 @@ def log_signal(signal: dict) -> None:
                 1 if signal.get("short_horizon") else 0,
                 signal.get("time_horizon"),
                 signal.get("close_time"),
+                _to_int(signal.get("leviathan_score")),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -576,7 +578,8 @@ def resolve_outcomes(config: dict) -> int:
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 # Paper signals are source='paper' or NULL (pre-migration rows).
-_PAPER = "source = 'paper' OR source IS NULL"
+_PAPER   = "source = 'paper' OR source IS NULL"
+_NO_PASS = f"({_PAPER}) AND direction != 'PASS'"
 
 
 def get_stats() -> dict:
@@ -1200,6 +1203,72 @@ def get_stats_by_close_horizon() -> dict:
             edge_n[b]   += 1
 
     for b in BUCKETS:
+        n = result[b]["total"]
+        if n:
+            result[b]["win_rate"]  = result[b]["wins"] / n * 100
+            result[b]["total_pnl"] = pnl_sum[b]
+            result[b]["avg_edge"]  = edge_sum[b] / edge_n[b] if edge_n[b] else None
+
+    return result
+
+
+def get_stats_by_leviathan_score() -> dict:
+    """
+    Win rate grouped by stored Leviathan Score band (A/B/C/D).
+
+    Bands:
+      A — score >= 70
+      B — score 55-69
+      C — score 40-54
+      D — score  < 40
+      unscored — leviathan_score IS NULL (logged before this feature)
+
+    Returns dict keyed by band; each value: total, wins, win_rate, total_pnl, avg_edge.
+    """
+    BANDS = ("A", "B", "C", "D", "unscored")
+    result = {b: {"total": 0, "wins": 0, "win_rate": None,
+                  "total_pnl": None, "avg_edge": None}
+              for b in BANDS}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT leviathan_score, result, pnl_if_traded, edge
+                FROM signals
+                WHERE ({_NO_PASS})
+                  AND result IS NOT NULL AND result != ''
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    pnl_sum  = {b: 0.0 for b in BANDS}
+    edge_sum = {b: 0.0 for b in BANDS}
+    edge_n   = {b: 0   for b in BANDS}
+
+    for r in rows:
+        sc = r["leviathan_score"]
+        if sc is None:
+            b = "unscored"
+        elif sc >= 70:
+            b = "A"
+        elif sc >= 55:
+            b = "B"
+        elif sc >= 40:
+            b = "C"
+        else:
+            b = "D"
+
+        result[b]["total"] += 1
+        if r["result"] == "WIN":
+            result[b]["wins"] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[b] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[b] += float(r["edge"])
+            edge_n[b]   += 1
+
+    for b in BANDS:
         n = result[b]["total"]
         if n:
             result[b]["win_rate"]  = result[b]["wins"] / n * 100

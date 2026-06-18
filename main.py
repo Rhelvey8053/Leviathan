@@ -662,6 +662,7 @@ def main():
     print("[7/8] Logging signals...")
     try:
         for sig in new_signals:  # only log new signals to avoid duplicate rows
+            sig["leviathan_score"] = report.compute_leviathan_score(sig)
             logger.log_signal(sig)
         run_meta["runtime_ms"] = int((time.time() - start_time) * 1000)
         logger.log_run(run_meta)
