@@ -361,6 +361,10 @@ def build_prompt(markets: list[dict]) -> str:
             _sm_yes = sum(1 for s in (m.get("smart_money") or []) if s.get("direction") == "YES")
             if _sm_yes > _sm_n / 2:                        _s_yes += 1
             elif _sm_yes < _sm_n / 2:                      _s_no  += 1
+        if m.get("watchlist_signal"):
+            _wl_dir = (m.get("watchlist_direction") or "").upper()
+            if _wl_dir == "YES":                           _s_yes += 1
+            elif _wl_dir == "NO":                          _s_no  += 1
 
         _total_s = _s_yes + _s_no
         if _total_s >= 2:
@@ -475,6 +479,18 @@ def build_prompt(markets: list[dict]) -> str:
 
         if m.get("base_rate") is not None:
             lines.append(f"   Base rate estimate: {m['base_rate'] * 100:.1f}%")
+            _re  = m.get("raw_edge")
+            _ne  = m.get("net_edge")
+            _sp  = m.get("spread_pct")
+            if _re is not None:
+                _edge_str = f"   Edge: raw {_re*100:.1f}pp"
+                if _ne is not None:
+                    _edge_str += f"  |  net-of-spread {_ne*100:.1f}pp"
+                    if _ne <= 0:
+                        _edge_str += "  [SPREAD CONSUMES EDGE — entry at ask wipes theoretical gain]"
+                    elif _ne < 0.05:
+                        _edge_str += "  [thin net edge — spread-sensitive]"
+                lines.append(_edge_str)
 
         vol_total = float(m.get("volume_fp") or m.get("volume") or 0)
         vol_24h   = float(m.get("volume_24h_fp") or 0)

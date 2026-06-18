@@ -279,7 +279,7 @@ def test_schema_new_columns_present(tmp_db):
                 "contract_type", "segment", "resolution_date", "logged_under",
                 "flag_path", "watchlist_signal",
                 "sig_edge", "sig_drift", "sig_br_none",
-                "base_rate", "heuristic_direction", "short_horizon", "time_horizon"):
+                "base_rate", "net_edge", "heuristic_direction", "short_horizon", "time_horizon"):
         assert col in cols, f"Missing column: {col}"
 
 
@@ -666,6 +666,38 @@ def test_log_signal_stores_time_horizon(tmp_db):
             "SELECT time_horizon FROM signals WHERE ticker='KXTH-1'"
         ).fetchone()
     assert row["time_horizon"] == "MONTHLY"
+
+
+def test_log_signal_stores_net_edge(tmp_db):
+    """log_signal persists net_edge into the signals table."""
+    logger.log_signal({
+        "ticker": "KXNE-1", "title": "Net Edge Test", "market_price": 0.30,
+        "our_estimate": 0.45, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "base_rate": 0.45, "net_edge": 0.10, "run_id": "r12",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT net_edge FROM signals WHERE ticker='KXNE-1'"
+        ).fetchone()
+    assert abs(row["net_edge"] - 0.10) < 1e-9
+
+
+def test_log_signal_net_edge_none_when_absent(tmp_db):
+    """net_edge stored as NULL when not provided."""
+    logger.log_signal({
+        "ticker": "KXNE-2", "title": "No Net Edge", "market_price": 0.30,
+        "our_estimate": 0.45, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "flag_path": "HEURISTIC", "watchlist_signal": False,
+        "run_id": "r13",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT net_edge FROM signals WHERE ticker='KXNE-2'"
+        ).fetchone()
+    assert row["net_edge"] is None
 
 
 # ─── get_stats_by_time_horizon ────────────────────────────────────────────────

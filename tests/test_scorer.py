@@ -759,3 +759,72 @@ def test_short_horizon_warning_absent_by_default():
     m = _base_market(time_horizon="QUARTERLY")  # no short_horizon key
     prompt = scorer.build_prompt([m])
     assert "SHORT HORIZON" not in prompt
+
+
+# ─── SIGNAL SUMMARY: watchlist_direction counted ──────────────────────────────
+
+def test_signal_summary_includes_watchlist_yes():
+    """watchlist_direction=YES boosts YES count in SIGNAL SUMMARY."""
+    # Give the market a heuristic lean of NO + watchlist YES → shows MIXED or 1/2
+    m = _base_market(
+        heuristic_direction="NO",
+        watchlist_signal=True,
+        watchlist_direction="YES",
+    )
+    prompt = scorer.build_prompt([m])
+    assert "SIGNAL SUMMARY" in prompt
+
+
+def test_signal_summary_includes_watchlist_no():
+    """watchlist_direction=NO boosts NO count in SIGNAL SUMMARY."""
+    m = _base_market(
+        heuristic_direction="NO",
+        watchlist_signal=True,
+        watchlist_direction="NO",
+    )
+    prompt = scorer.build_prompt([m])
+    # 2 NO sources → SIGNAL SUMMARY present with ALL lean NO
+    assert "SIGNAL SUMMARY" in prompt
+    assert "NO" in prompt
+
+
+def test_signal_summary_watchlist_unknown_not_counted():
+    """watchlist_direction=UNKNOWN does not add a directional vote."""
+    m = _base_market(watchlist_signal=True, watchlist_direction="UNKNOWN")
+    # Only 1 directional source (heuristic) if heuristic fires, not 2 → no SIGNAL SUMMARY
+    # Base market has heuristic_direction=None by default, so 0 sources
+    prompt = scorer.build_prompt([m])
+    # UNKNOWN watchlist alone cannot trigger SIGNAL SUMMARY (needs >=2 sources)
+    # heuristic_direction defaults to None in _base_market, so total = 0 → no summary
+    assert "SIGNAL SUMMARY" not in prompt
+
+
+# ─── Net-of-spread edge in prompt ─────────────────────────────────────────────
+
+def test_net_edge_shown_when_base_rate_and_net_edge_present():
+    """Edge block shows net-of-spread line when base_rate and net_edge are provided."""
+    m = _base_market(base_rate=0.45, raw_edge=0.20, net_edge=0.15)
+    prompt = scorer.build_prompt([m])
+    assert "net-of-spread" in prompt
+    assert "15.0pp" in prompt
+
+
+def test_net_edge_spread_consumes_warning_shown():
+    """[SPREAD CONSUMES EDGE] warning appears when net_edge <= 0."""
+    m = _base_market(base_rate=0.45, raw_edge=0.05, net_edge=-0.02)
+    prompt = scorer.build_prompt([m])
+    assert "SPREAD CONSUMES EDGE" in prompt
+
+
+def test_net_edge_thin_warning_shown():
+    """thin net edge warning shown when 0 < net_edge < 5pp."""
+    m = _base_market(base_rate=0.45, raw_edge=0.10, net_edge=0.03)
+    prompt = scorer.build_prompt([m])
+    assert "thin net edge" in prompt
+
+
+def test_net_edge_absent_when_no_base_rate():
+    """No edge line when base_rate is not present."""
+    m = _base_market()  # no base_rate
+    prompt = scorer.build_prompt([m])
+    assert "net-of-spread" not in prompt

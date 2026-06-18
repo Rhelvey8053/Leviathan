@@ -192,6 +192,12 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     lines.append(f"  Market:       {mkt_p}")
     lines.append(f"  Our Estimate: {est_p}")
     lines.append(f"  Edge:         {edge_s}")
+    _ne = s.get("net_edge")
+    if _ne is not None:
+        _ne_str = f"  Net Edge:     {_ne*100:+.1f} pp (after spread)"
+        if _ne <= 0:
+            _ne_str += "  [SPREAD > EDGE]"
+        lines.append(_ne_str)
     if kelly_s:
         lines.append(f"  Kelly:{kelly_s}")
 

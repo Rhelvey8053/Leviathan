@@ -365,6 +365,10 @@ def main():
         elif wh.get("whale_detected") and wd == "NO": _no += 1
         if m.get("ob_direction") == "YES" and m.get("ob_flag"): _yes += 1
         elif m.get("ob_direction") == "NO"  and m.get("ob_flag"): _no  += 1
+        if m.get("watchlist_signal"):
+            wl_dir = (m.get("watchlist_direction") or "").upper()
+            if wl_dir == "YES":   _yes += 1
+            elif wl_dir == "NO":  _no  += 1
 
         convergence = max(_yes, _no)
         if convergence >= 3: sc += 3   # strong multi-source convergence
@@ -441,6 +445,7 @@ def main():
             "watchlist_signal": m.get("watchlist_signal", False),
             "flag_path":            m.get("flag_path"),
             "base_rate":            m.get("base_rate"),
+            "net_edge":             m.get("net_edge"),
             "heuristic_direction":  m.get("heuristic_direction"),
             "short_horizon":        m.get("short_horizon", False),
             "sig_edge":             m.get("sig_edge", False),
@@ -510,6 +515,7 @@ def main():
                     "watchlist_signal":     m.get("watchlist_signal", False),
                     "flag_path":            m.get("flag_path"),
                     "base_rate":            m.get("base_rate"),
+                    "net_edge":             m.get("net_edge"),
                     "heuristic_direction":  m.get("heuristic_direction"),
                     "short_horizon":        m.get("short_horizon", False),
                     "sig_edge":             m.get("sig_edge", False),

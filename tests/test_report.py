@@ -814,6 +814,33 @@ def test_short_horizon_label_absent_by_default():
     assert "SHORT HORIZON" not in header
 
 
+# ─── Net-of-spread edge in signal block ───────────────────────────────────────
+
+def test_net_edge_shown_when_present():
+    """Net Edge line appears in signal block when net_edge is provided."""
+    s = _signal(base_rate=0.45, net_edge=0.10)
+    lines = report._signal_block(s, index=1)
+    block = "\n".join(lines)
+    assert "Net Edge" in block
+    assert "+10.0 pp" in block
+
+
+def test_net_edge_spread_consumes_warning_in_report():
+    """[SPREAD > EDGE] label appears when net_edge <= 0."""
+    s = _signal(base_rate=0.45, net_edge=-0.03)
+    lines = report._signal_block(s, index=1)
+    block = "\n".join(lines)
+    assert "SPREAD > EDGE" in block
+
+
+def test_net_edge_absent_when_not_provided():
+    """No Net Edge line when net_edge is not in signal dict."""
+    s = _signal()
+    lines = report._signal_block(s, index=1)
+    block = "\n".join(lines)
+    assert "Net Edge" not in block
+
+
 # ─── _top_picks executive summary ─────────────────────────────────────────────
 
 def test_top_picks_returns_empty_for_no_signals():
