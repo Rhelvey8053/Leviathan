@@ -238,6 +238,13 @@ class TestCoinflipPatterns(unittest.TestCase):
                       "Will SpaceX launch by December?"]:
             self.assertFalse(_is_coinflip(title), f"False positive: {title}")
 
+    def test_dollar_amount_not_coinflip(self):
+        """$1M/$5M/$10M in a title must not trigger the minute-interval patterns."""
+        for title in ["Will Bitcoin reach $1M by year end?",
+                      "Will BTC reach $5M in 2027?",
+                      "Will SpaceX raise $10M?"]:
+            self.assertFalse(_is_coinflip(title), f"Dollar-amount false positive: {title}")
+
 
 if __name__ == "__main__":
     unittest.main()

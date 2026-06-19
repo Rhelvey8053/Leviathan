@@ -135,7 +135,7 @@ def _score_wallet(positions: list[dict]) -> dict | None:
 
 _COINFLIP_PATTERNS = [
     "up or down", "up/down", "bitcoin up", "btc up", "eth up",
-    "5m", "1m", "10m", "15m", "price up", "price down",
+    " 5m", " 1m", " 10m", " 15m", "price up", "price down",
     "higher or lower", "above or below",
 ]
 
