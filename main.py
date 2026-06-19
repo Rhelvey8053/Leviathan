@@ -688,6 +688,13 @@ def main():
         print(f"      FAILED: {e}")
         traceback.print_exc()
 
+    try:
+        from export_to_csv import export_csvs
+        counts = export_csvs()
+        print(f"[export] CSVs updated — {counts['signals']} signals, {counts['runs']} runs")
+    except Exception as e:
+        print(f"[export] CSV update failed (non-fatal): {e}")
+
     # Weekly digest — send on Sundays or if explicitly triggered
     now_local = datetime.now(timezone.utc)
     if now_local.weekday() == 6:  # Sunday
