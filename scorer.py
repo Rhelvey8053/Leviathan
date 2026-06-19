@@ -862,10 +862,10 @@ def build_prompt(markets: list[dict]) -> str:
             no_t  = [s for s in smart_money if s.get("direction") == "NO"]
             sm_parts = []
             if yes_t:
-                avg_pnl = sum(s["avg_pct_pnl"] for s in yes_t) / len(yes_t)
+                avg_pnl = sum(s.get("resolved_avg_pct_pnl") or 0 for s in yes_t) / len(yes_t)
                 sm_parts.append(f"{len(yes_t)} winning wallet(s) buying YES (avg portfolio +{avg_pnl:.1f}%)")
             if no_t:
-                avg_pnl = sum(s["avg_pct_pnl"] for s in no_t) / len(no_t)
+                avg_pnl = sum(s.get("resolved_avg_pct_pnl") or 0 for s in no_t) / len(no_t)
                 sm_parts.append(f"{len(no_t)} winning wallet(s) buying NO (avg portfolio +{avg_pnl:.1f}%)")
             lines.append(f"   SMART MONEY: {'; '.join(sm_parts)}")
 
