@@ -90,11 +90,13 @@ def _fetch_predictit() -> list[dict]:
 # ── Normalize ─────────────────────────────────────────────────────────────────
 
 def _norm_manifold(m: dict) -> dict:
+    # Metaculus results arrive pre-normalized with "title"/"source" already set;
+    # raw Manifold API responses use "question" and have no "source" key.
     return {
-        "title":       m.get("question", ""),
+        "title":       m.get("question") or m.get("title", ""),
         "probability": float(m["probability"]),
         "volume":      float(m.get("volume") or 0),
-        "source":      "Manifold",
+        "source":      m.get("source", "Manifold"),
         "url":         m.get("url", ""),
     }
 
