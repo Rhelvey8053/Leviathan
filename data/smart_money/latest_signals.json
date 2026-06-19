@@ -1,12 +1,12 @@
 {
-  "run_at": "2026-06-17T16:01:55.168439+00:00",
+  "run_at": "2026-06-18T15:05:04.119113+00:00",
   "kalshi_tickers": [
     "KXMAKERFIELDBY-27JAN01-GRE",
     "KXNEXTUKPM-30-ABUR",
     "KXNEXTUKPM-30-ACAR",
     "CONTROLS-2028-R",
-    "KXRTICKET-28NOV07-JVANEKIR",
     "CONTROLS-2028-D",
+    "KXRTICKET-28NOV07-JVANEKIR",
     "SENATEUT-28-R",
     "SENATEFL-28-R",
     "KXABRAHAMSY-29-JAN20",
@@ -18,19 +18,19 @@
     "KXMAKERFIELDBY-27JAN01-GRE": {
       "consensus_direction": "NO",
       "trader_count": 1,
-      "total_position_val": 253591.7129,
+      "total_position_val": 254870.5415,
       "kalshi_title": "Will Green Party win the 2026 Makerfield by-election?"
     },
     "KXNEXTUKPM-30-ABUR": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 17567.7046,
+      "total_position_val": 18112.0879,
       "kalshi_title": "Will Andy Burnham be the next Prime Minister of United Kingdom?"
     },
     "KXNEXTUKPM-30-ACAR": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 3081.7766,
+      "total_position_val": 2087.6551,
       "kalshi_title": "Will Al Carns be the next Prime Minister of United Kingdom?"
     },
     "CONTROLS-2028-R": {
@@ -39,17 +39,17 @@
       "total_position_val": 22249.9019,
       "kalshi_title": "Will the Republican party win the Senate in 2028?"
     },
-    "KXRTICKET-28NOV07-JVANEKIR": {
-      "consensus_direction": "YES",
-      "trader_count": 1,
-      "total_position_val": 21770.2921,
-      "kalshi_title": "Will JD Vance and Erika Kirk be the 2028 Republican Presidential ticket?"
-    },
     "CONTROLS-2028-D": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 21249.9674,
+      "total_position_val": 21749.9667,
       "kalshi_title": "Will the Democratic party win the Senate in 2028?"
+    },
+    "KXRTICKET-28NOV07-JVANEKIR": {
+      "consensus_direction": "YES",
+      "trader_count": 1,
+      "total_position_val": 21639.7356,
+      "kalshi_title": "Will JD Vance and Erika Kirk be the 2028 Republican Presidential ticket?"
     },
     "SENATEUT-28-R": {
       "consensus_direction": "NO",
@@ -66,19 +66,19 @@
     "KXABRAHAMSY-29-JAN20": {
       "consensus_direction": "NO",
       "trader_count": 1,
-      "total_position_val": 22437.6903,
+      "total_position_val": 23789.447399999997,
       "kalshi_title": "Will Israel and Syria normalize relations before Jan 20, 2029?"
     },
     "KXABRAHAMSA-29-JAN20": {
       "consensus_direction": "NO",
       "trader_count": 1,
-      "total_position_val": 5476.6034,
+      "total_position_val": 5576.4882,
       "kalshi_title": "Will Israel and Saudi Arabia normalize relations before Jan 20, 2029?"
     },
     "SENATEUT-28-D": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 2123.6546,
+      "total_position_val": 2225.9993,
       "kalshi_title": "Will Democratics win the Senate race in Utah?"
     }
   }
