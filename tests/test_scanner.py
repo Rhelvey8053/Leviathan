@@ -8,7 +8,7 @@ Run: python -m pytest -q
 import pytest
 from datetime import datetime, timezone, timedelta
 
-import scanner
+from core import scanner
 
 
 # ─── Config and helpers ───────────────────────────────────────────────────────

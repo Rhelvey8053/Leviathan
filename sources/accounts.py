@@ -12,7 +12,8 @@ import requests
 
 DATA_API   = "https://data-api.polymarket.com"
 POLY_URL   = "https://polymarket.com/profile"
-CACHE_FILE = os.path.join(os.path.dirname(__file__), "winning_accounts.json")
+_ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CACHE_FILE = os.path.join(_ROOT, "winning_accounts.json")
 
 
 # ── API helpers ───────────────────────────────────────────────────────────────

@@ -651,7 +651,7 @@ def compile_report(
         out.append("  No new signals this run.")
         out.append("")
     else:
-        from scanner import BUCKETS as _BUCKETS
+        from .scanner import BUCKETS as _BUCKETS
         bucket_order = [b[0] for b in _BUCKETS]
         grouped: dict[str, list] = {}
         for s in new_q:
@@ -972,7 +972,7 @@ def _unsubscribe_footer(token: str) -> str:
 
 def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
                 subject_override: str = "") -> None:
-    import subscribers as _subs
+    from . import subscribers as _subs
 
     report_cfg   = config.get("report", {})
     email_from   = report_cfg.get("email_from") or report_cfg.get("email_to", "")

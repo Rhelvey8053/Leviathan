@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
 
-import whales
+from core import whales
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ All tests are offline: no network calls.
 import pytest
 from unittest.mock import patch
 
-import polymarket
+from sources import polymarket
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

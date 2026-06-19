@@ -16,7 +16,8 @@ import sys
 import uuid
 from datetime import datetime, timezone
 
-SUBSCRIBERS_FILE = os.path.join(os.path.dirname(__file__), "subscribers.json")
+_ROOT            = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SUBSCRIBERS_FILE = os.path.join(_ROOT, "subscribers.json")
 
 
 def _load() -> list[dict]:

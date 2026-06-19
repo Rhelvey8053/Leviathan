@@ -12,9 +12,9 @@ Sources:
 """
 
 import requests
-from polymarket import _match_score  # reuse the same fuzzy matching logic
-import metaculus
-import odds_api as _odds_api
+from .polymarket import _match_score  # reuse the same fuzzy matching logic
+from . import metaculus
+from . import odds_api as _odds_api
 
 _STOP = {
     "will", "the", "a", "an", "be", "in", "on", "by", "to", "of", "or",

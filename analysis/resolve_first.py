@@ -21,8 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-import logger
-import scanner
+from core import logger
+from core import scanner
 
 SNAPSHOT_DIR = ROOT / "data" / "snapshots"
 DB_PATH      = ROOT / "leviathan.db"

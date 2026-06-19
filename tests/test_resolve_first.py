@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 
-import logger as _logger_mod
+from core import logger as _logger_mod
 _orig_db_path = _logger_mod.DB_PATH
 _logger_mod.DB_PATH = _tmp_db.name
 _logger_mod._init_db()   # initialise the tmp DB

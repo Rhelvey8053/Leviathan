@@ -21,7 +21,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL   = "https://api.the-odds-api.com/v4"
-CACHE_FILE = os.path.join(os.path.dirname(__file__), "odds_cache.json")
+_ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CACHE_FILE = os.path.join(_ROOT, "odds_cache.json")
 CACHE_TTL  = 6 * 3600  # 6 hours — odds change slowly, protect free quota
 
 DEFAULT_SPORTS = [

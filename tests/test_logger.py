@@ -10,7 +10,7 @@ import pytest
 from unittest.mock import patch, call
 from datetime import datetime, timezone
 
-import logger
+from core import logger
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ def test_payoff_math(tmp_db, direction, mp, api_result, expected, desc):
     cid = str(uuid.uuid4())[:8]
     _insert(cid, "TICKER", direction, mp)
 
-    with patch("kalshi.fetch_market", return_value={"result": api_result}):
+    with patch("core.kalshi.fetch_market", return_value={"result": api_result}):
         logger.resolve_outcomes({})
 
     with logger._db() as conn:
@@ -82,7 +82,7 @@ def test_resolve_reads_market_price_not_edge(tmp_db):
     cid = str(uuid.uuid4())[:8]
     _insert(cid, "TICKER", "YES", 0.30, edge=0.25)
 
-    with patch("kalshi.fetch_market", return_value={"result": "yes"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
         logger.resolve_outcomes({})
 
     with logger._db() as conn:
@@ -110,7 +110,7 @@ def test_resolve_skips_already_resolved(tmp_db):
         fetch_calls.append(ticker)
         return {"result": "no"}
 
-    with patch("kalshi.fetch_market", side_effect=fake_fetch):
+    with patch("core.kalshi.fetch_market", side_effect=fake_fetch):
         logger.resolve_outcomes({})
 
     # Only the pending row should trigger an API call
@@ -134,7 +134,7 @@ def test_resolve_leaves_unresolved_when_market_not_settled(tmp_db):
     _insert(cid, "OPEN", "YES", 0.40)
 
     # Market not yet settled — result field absent / empty
-    with patch("kalshi.fetch_market", return_value={"result": ""}):
+    with patch("core.kalshi.fetch_market", return_value={"result": ""}):
         count = logger.resolve_outcomes({})
 
     assert count == 0
@@ -212,7 +212,7 @@ def test_get_stats_resolved_counts_match_log_signal_blanks(tmp_db):
     assert before["resolved"] == 0
 
     # resolve_outcomes should find the row (outcome='')
-    with patch("kalshi.fetch_market", return_value={"result": "yes"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
         resolved_count = logger.resolve_outcomes({})
 
     assert resolved_count == 1
@@ -338,7 +338,7 @@ def test_fill_matching_signal_ticker_sets_from_signal(tmp_db):
     """Fill on a ticker that has a prior paper signal → from_signal=1."""
     _insert("sig-abc", "KXIPO-TEST", "YES", 0.30)
 
-    with patch("kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="YES")]):
+    with patch("core.kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="YES")]):
         summary = logger.pull_real_fills({})
 
     assert summary["pulled"]  == 1
@@ -360,7 +360,7 @@ def test_fill_direction_contradictory(tmp_db):
     """Fill side opposes signal direction → direction_aligned=0."""
     _insert("sig-xyz", "KXIPO-TEST", "YES", 0.30)
 
-    with patch("kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="NO")]):
+    with patch("core.kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="NO")]):
         summary = logger.pull_real_fills({})
 
     assert summary["contradictory"] == 1
@@ -376,7 +376,7 @@ def test_fill_unrelated_ticker_no_match(tmp_db):
     """Fill on a ticker with no prior signal → from_signal=0."""
     _insert("sig-def", "KNOWN-TICKER", "YES", 0.30)
 
-    with patch("kalshi.fetch_fills", return_value=[_mock_fill("UNKNOWN-TICKER")]):
+    with patch("core.kalshi.fetch_fills", return_value=[_mock_fill("UNKNOWN-TICKER")]):
         summary = logger.pull_real_fills({})
 
     assert summary["matched"] == 0
@@ -391,7 +391,7 @@ def test_fill_unrelated_ticker_no_match(tmp_db):
 
 def test_pull_empty_fills_returns_zero_summary(tmp_db):
     """Empty fills response → summary all zeros, no crash."""
-    with patch("kalshi.fetch_fills", return_value=[]):
+    with patch("core.kalshi.fetch_fills", return_value=[]):
         summary = logger.pull_real_fills({})
     assert summary == {"pulled": 0, "matched": 0, "aligned": 0, "contradictory": 0}
 
@@ -419,7 +419,7 @@ def test_real_fill_pnl_net_of_fees_yes_win(tmp_db):
     _insert_real_fill("fill-1", "KXTEST", "YES", 0.30, fill_count=10, fill_fee=0.10)
     # fee_per_unit = 0.10 / 10 = 0.01; gross = 1-0.30 = 0.70; net = 0.69
 
-    with patch("kalshi.fetch_market", return_value={"result": "yes"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
         count = logger.resolve_outcomes({})
 
     assert count == 1
@@ -433,7 +433,7 @@ def test_real_fill_pnl_net_of_fees_yes_loss(tmp_db):
     _insert_real_fill("fill-2", "KXTEST", "YES", 0.30, fill_count=10, fill_fee=0.10)
     # fee_per_unit = 0.01; gross = -0.30; net = -0.31
 
-    with patch("kalshi.fetch_market", return_value={"result": "no"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "no"}):
         logger.resolve_outcomes({})
 
     with logger._db() as conn:
@@ -445,7 +445,7 @@ def test_unresolved_real_fill_stays_unresolved(tmp_db):
     """Open market → real fill stays unresolved, no error."""
     _insert_real_fill("fill-open", "KXJULY", "YES", 0.40)
 
-    with patch("kalshi.fetch_market", return_value={"result": ""}):
+    with patch("core.kalshi.fetch_market", return_value={"result": ""}):
         count = logger.resolve_outcomes({})
 
     assert count == 0
@@ -462,7 +462,7 @@ def test_get_stats_excludes_real_fills(tmp_db):
     _insert_real_fill("fill-r", "REAL", "YES", 0.50)  # unresolved real fill
 
     # Resolve the real fill so it has a pnl too
-    with patch("kalshi.fetch_market", return_value={"result": "yes"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
         logger.resolve_outcomes({})
 
     stats = logger.get_stats()
@@ -475,7 +475,7 @@ def test_get_stats_real_counts_only_fills(tmp_db):
     _insert("paper-2", "PAPER", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
     _insert_real_fill("fill-s", "REAL", "NO", 0.60)
 
-    with patch("kalshi.fetch_market", return_value={"result": "no"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "no"}):
         logger.resolve_outcomes({})
 
     stats_r = logger.get_stats_real()

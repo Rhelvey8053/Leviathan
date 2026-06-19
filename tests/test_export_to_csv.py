@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from export_to_csv import export_csvs
+from core.export_to_csv import export_csvs
 
 
 def _make_db(path: str, with_data: bool = True) -> None:

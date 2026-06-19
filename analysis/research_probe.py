@@ -32,8 +32,8 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import logger
-import scanner
+from core import logger
+from core import scanner
 
 SNAPSHOT_DIR = os.path.join(ROOT, "data", "snapshots")
 CONFIG_PATH  = os.path.join(ROOT, "config.json")

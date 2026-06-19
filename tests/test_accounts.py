@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from accounts import _score_wallet, _is_winner, _is_coinflip
+from sources.accounts import _score_wallet, _is_winner, _is_coinflip
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

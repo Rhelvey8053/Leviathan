@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 
-from report import compute_leviathan_score
+from .report import compute_leviathan_score
 
 SYSTEM_PROMPT = (
     "You are a prediction market analyst. For each market provided, estimate the true "
