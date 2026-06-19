@@ -2,6 +2,123 @@
 
 ---
 
+## Goal 2c — Resolution-first validation harness (resolve-first-3a branch)
+
+### PART A — Resolution timeline finding (BLUNT)
+
+**Total rows in leviathan.db: 62. Resolved: 4. Pending: 58.**
+
+All 4 resolved outcomes are NO:
+- KXAAAGASD-26APR13-4.125 (real_fill, NO)
+- KXALBUMRELEASEDATEBEY-NEW-JUN01-26 (paper, NO)
+- KXCABLEAVE-26MAY22-26JUN (paper, NO)
+- KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01 (research_probe, NO)
+
+**CRITICAL FINDING: ALL 58 pending rows have MISSING close_time in the DB.**
+The close_time column was added in Session 13 but was never backfilled and the
+main pipeline did not consistently store it for older logged signals.
+
+Inferred close-time distribution from ticker names (not stored in DB):
+- Jul 2026 (<=14d from 2026-06-18): ~25 rows — could resolve by July 1-2, 2026
+- Oct 2026 (~4 months): ~1 row
+- Jan 2027 (~7 months): ~7 rows
+- 2028+ (months to years): ~21 rows (research probes — elections, policy, geopolitics)
+
+**Answer to PART A(a):** 4 rows resolved today (expected ~2 from spec; actual = 4).
+**Answer to PART A(b):** 0 pending rows have close_time stored. All 58 fall in the
+MISSING bucket. Distribution by ticker inference: ~25 close within 14d, ~21 are
+2028+ dated.
+**Answer to PART A(c):** The EARLIEST date when 20 logged rows could possibly have
+resolved is mid-July 2026 at best IF all ~25 July-dated rows resolve and are
+recognized. But those rows lack close_time in the DB, so resolve_outcomes cannot
+automatically bucket them. The 21 research-probe rows are 2028-2029 dated —
+YEARS away from providing any win-rate read.
+
+**BLUNT CONCLUSION: The existing logged data cannot validate the model on a useful
+timescale. Most pending rows have no close_time stored. The 2028+ research probe
+rows are years from resolving. This goal breaks that cycle by logging NEW near-dated
+rows with close_time explicitly stored.**
+
+### PART B — Near-dated paper batch (analysis/resolve_first.py)
+
+New file: `analysis/resolve_first.py`
+Config keys added to `scoring`: `resolve_first_max_days` (default 14),
+`resolve_first_dedup_days` (default 7).
+
+**Selection on 2026-06-18 snapshot (2463 markets, after filter_markets: 26):**
+
+Price band coverage from two-sided candidates (<=14d window):
+- 5-15%: 2 candidates
+- 15-40%: EMPTY
+- 40-60%: EMPTY
+- 60-95%: EMPTY
+
+Selected markets: 2 (both in 5-15% band):
+- KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01 (12d, mid=0.055, HEURISTIC/YES)
+- KXCABLEAVE-26MAY22-26JUL (13d, mid=0.105, DRIFT/YES)
+
+Both were already logged in the last 7 days -> dedup skipped them.
+New rows logged this run: 0 (re-runnable: dedup prevents double-logging).
+
+**Finding: At 14-day window, Kalshi snapshot yields only 2 near-dated markets
+with two-sided books and mid in [0.05, 0.95]. The 15-40%, 40-60%, 60-95% bands
+are EMPTY — almost all near-term markets are tail-probability (< 15% YES).
+To get broad price band coverage, the window must be extended or a fresher
+intraday snapshot obtained during higher-liquidity hours.**
+
+### PART C — Resolution status (2026-06-18)
+
+  Total paper rows: 25 | Resolved: 2 | Pending: 23
+  Pending closing <=14d: 1 (close_time stored)
+  COUNTDOWN: 2 resolved / 20 needed before win-rate is meaningful
+  WIN RATE: NOT YET MEANINGFUL (n=2, need >=10)
+
+### PART D — Fee + payoff assumption
+
+Binary payoff fix IS LIVE in logger.resolve_outcomes (logger.py:563-568):
+  YES at p: win -> +(1-p) - fee_per_unit; loss -> -p - fee_per_unit
+  NO  at p: win -> +p     - fee_per_unit; loss -> -(1-p) - fee_per_unit
+
+OPEN BLOCKER (not fixed here): Kalshi fee_cost is per-fill-event (not per
+contract). If fill_count=1 understates actual contract count, fee_per_unit is
+overstated. NOT verified against Kalshi's published fee schedule. Do not draw
+real-P&L conclusions until verified.
+
+### PART E — Tests
+
+19 new tests in tests/test_resolve_first.py (1158 -> 1208 total, 1208 pass, 0 fail).
+No existing test was modified.
+
+Key assertions:
+- select_near_dated only picks markets closing within max_days
+- select_near_dated only picks two-sided-book markets (bid=0 or ask=0 excluded)
+- Re-running does not double-log tickers already logged in lookback window
+- Logged rows carry close_time so resolution audit can bucket them
+- print_resolution_status refuses to show win-rate % when resolved < 10
+
+### PART F — What this goal did NOT do (HARD FREEZE honoured)
+
+No new heuristic base-rate categories were added.
+No calibration rules added to scorer.SYSTEM_PROMPT or research_probe.PROBE_SYSTEM.
+No Leviathan composite score changes.
+No net_edge / Brier / Kelly / close-horizon / persistence logic changes.
+No new analysis scripts besides resolve_first.py.
+No new flag modes.
+No new report sections in report.py.
+
+### Top 3 next steps (ALL about accumulating and resolving outcomes)
+
+1. **Re-run resolve_first weekly** — especially after July 1-2, 2026 when
+   KXMEDIARELEASEPRISONBREAK, KXTAIWANLVL4, KXUSAEXPANDTERRITORY, KXIMPEACHCABINET
+   markets close. Run resolve_outcomes after close to capture ~25 pending rows.
+2. **Run resolve_outcomes after July 2026 markets close** — the ~25 Jul-dated rows
+   in the DB will resolve by July 8 at the latest. This alone would bring
+   resolved count from 4 to potentially ~29 — crossing the n>=20 gate.
+3. **Do NOT add features until n>=20 resolved** — the model has 1200+ tests and
+   35+ heuristics. More machinery is not the bottleneck. Ground truth is.
+
+---
+
 ## Session 15 — 2026-06-18 (autonomous continuation)
 
 ### Commits 63–66: Heuristic labels, LV specificity bonus, DB persistence

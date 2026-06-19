@@ -81,7 +81,9 @@
     "min_high_confidence_edge": 0.1,
     "min_report_lv": 40,
     "min_pre_claude_lv": 20,
-    "max_pass_before_suppress": 5
+    "max_pass_before_suppress": 5,
+    "resolve_first_max_days": 14,
+    "resolve_first_dedup_days": 7
   },
   "accounts": {
     "enabled": true,
