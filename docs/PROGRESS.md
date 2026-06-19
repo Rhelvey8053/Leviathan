@@ -2,6 +2,59 @@
 
 ---
 
+## Goal 3c — CSV export module for Power BI (2026-06-19)
+
+### What was added
+
+**New file: `export_to_csv.py`** (project root)
+- `export_csvs(db_path, export_dir)` reads `signals` and `runs` tables from
+  leviathan.db via stdlib `sqlite3` + `csv` (no new dependencies).
+- Writes `data/powerbi_export/signals.csv` and `data/powerbi_export/runs.csv`.
+- Creates the output directory if missing.
+- Returns `{"signals": row_count, "runs": row_count}`.
+- Handles missing DB gracefully: prints a warning, returns zeros, never raises.
+- Runnable standalone (`python export_to_csv.py`) and importable without side effects.
+
+**`main.py` wired (two-line hook after `logger.log_run()`):**
+```python
+try:
+    from export_to_csv import export_csvs
+    counts = export_csvs()
+    print(f"[export] CSVs updated — {counts['signals']} signals, {counts['runs']} runs")
+except Exception as e:
+    print(f"[export] CSV update failed (non-fatal): {e}")
+```
+The pipeline continues normally whether the export succeeds or fails.
+
+**First live export (2026-06-19):** 63 signal rows, 17 run rows written to
+`data/powerbi_export/`.
+
+### What was NOT changed
+
+No schema columns added. No new metrics, heuristics, or analytics.
+No changes to signals logic, scoring, or report generation.
+The only new code is `export_to_csv.py` and the two-line hook in `main.py`.
+
+### Tests
+
+9 new tests in `tests/test_export_to_csv.py` (1231 total, 0 fail).
+No existing test was modified.
+
+Key assertions:
+- Both CSVs created with correct column headers
+- Double-run overwrites cleanly without error
+- Empty DB produces header-only CSVs (zero data rows)
+- Missing DB path returns `{"signals": 0, "runs": 0}` without raising
+
+### Power BI refresh instruction
+
+After each daily run completes, open Power BI Desktop and click
+**Home > Refresh** to pull the updated `signals.csv` and `runs.csv`
+from `data/powerbi_export/`. The files are overwritten on every run —
+no manual export step required.
+
+---
+
 ## Goal 2c — Resolution-first validation harness (resolve-first-3a branch)
 
 ### PART A — Resolution timeline finding (BLUNT)
