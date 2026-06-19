@@ -312,7 +312,7 @@ def test_smart_money_section_rendered():
     s = _signal(smart_money=[{
         "display_name": "TraderA",
         "direction": "YES",
-        "avg_pct_pnl": 42.0,
+        "resolved_avg_pct_pnl": 42.0,
         "win_rate": 68.0,
         "trade_count": 3,
     }])

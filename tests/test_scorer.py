@@ -535,8 +535,8 @@ def test_spread_signal_not_shown_when_not_wide():
 
 def test_smart_money_shown_in_prompt():
     m = _base_market(smart_money=[
-        {"direction": "YES", "avg_pct_pnl": 85.0},
-        {"direction": "YES", "avg_pct_pnl": 60.0},
+        {"direction": "YES", "resolved_avg_pct_pnl": 85.0},
+        {"direction": "YES", "resolved_avg_pct_pnl": 60.0},
     ])
     prompt = scorer.build_prompt([m])
     assert "SMART MONEY" in prompt
