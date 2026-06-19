@@ -8,7 +8,7 @@ Run: python -m pytest -q
 import pytest
 from datetime import datetime, timezone, timedelta
 
-import scorer
+from core import scorer
 
 
 def _base_market(**kwargs):
@@ -1264,7 +1264,7 @@ def _weak_market(**kwargs):
 def test_pre_claude_lv_gate_returns_empty_when_all_markets_too_weak():
     """score_markets returns ([], {}) when all markets fail min_pre_claude_lv gate."""
     m = _weak_market()
-    lv = __import__("report").compute_leviathan_score(m)
+    lv = __import__("core.report", fromlist=["compute_leviathan_score"]).compute_leviathan_score(m)
     if lv >= 20:
         pytest.skip(f"pre-condition: expected pre-LV < 20, got {lv}")
     config = {"scoring": {"min_pre_claude_lv": 20, "max_markets_per_run": 10}}
@@ -1287,7 +1287,7 @@ def test_pre_claude_lv_gate_disabled_when_zero():
 
 def test_pre_claude_lv_gate_computes_score_without_confidence():
     """Pre-gate LV is computed with confidence=LOW (no key present), not artificially inflated."""
-    import report as _report
+    from core import report as _report
     m = _weak_market()
     # Confidence is absent — compute_leviathan_score treats it as LOW (0 bonus)
     lv_no_conf = _report.compute_leviathan_score(m)
@@ -1303,7 +1303,7 @@ def test_pre_claude_lv_gate_computes_score_without_confidence():
 
 def test_pre_claude_lv_gate_passes_strong_market_to_batch():
     """A Grade-C market passes the gate and reaches build_prompt (subprocess step)."""
-    import report as _report
+    from core import report as _report
     m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
     lv = _report.compute_leviathan_score(m)
     assert lv >= 20, f"pre-condition: expected LV≥20, got {lv}"

@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import kalshi
-import whales
+from core import kalshi
+from core import whales
 
 CONFIG_PATH   = os.path.join(ROOT, "config.json")
 SNAPSHOT_DIR  = os.path.join(ROOT, "data", "snapshots")

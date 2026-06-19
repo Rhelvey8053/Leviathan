@@ -1,0 +1,61 @@
+/goal A CSV export module exists that writes leviathan.db data to 
+data/powerbi_export/ and is wired into the end of the main.py pipeline 
+so it runs automatically on every daily run. Proven by: the files 
+exist after running main.py, the export is wrapped so a failure never 
+breaks the pipeline, and a passing offline test suite (pytest exit 0, 
+output shown).
+
+SCOPE — this is plumbing only. Do NOT add new columns, new metrics, 
+new heuristics, new analytics, or any changes to the signals schema. 
+The only new code is the export module and the two-line hook in main.py.
+
+PART A — export_to_csv.py
+
+Create export_to_csv.py in the project root with:
+  - export_csvs() function that connects to leviathan.db, reads the 
+    signals and runs tables via pandas, and writes them to 
+    data/powerbi_export/signals.csv and data/powerbi_export/runs.csv.
+  - Creates the output directory if it does not exist.
+  - Returns a dict: {"signals": row_count, "runs": row_count}
+  - Handles missing or empty DB gracefully (prints a warning, does 
+    not raise).
+  - Runnable standalone via __main__ block that prints row counts.
+  - Importable as a module from main.py without side effects.
+
+PART B — wire into main.py
+
+At the end of the main pipeline, after logger.log_run() and before 
+or after report sending, add:
+
+    try:
+        from export_to_csv import export_csvs
+        counts = export_csvs()
+        print(f"[export] CSVs updated — {counts['signals']} signals, 
+              {counts['runs']} runs")
+    except Exception as e:
+        print(f"[export] CSV update failed (non-fatal): {e}")
+
+The pipeline must continue normally whether export_csvs succeeds or 
+fails. No existing main.py behavior changes.
+
+PART C — TESTS (offline, tmp DB, no network)
+
+Assert:
+  - export_csvs() creates signals.csv and runs.csv in the output dir
+  - Both CSVs contain the expected column headers from the signals 
+    and runs schema
+  - Running export_csvs() twice does not error (overwrites cleanly)
+  - An empty DB produces empty CSVs (zero data rows, headers present)
+  - A missing DB path logs a warning and returns {"signals": 0, "runs": 0}
+    without raising
+  - No existing test was modified
+
+pytest exits 0 with output shown.
+
+PART D — REPORT
+
+Append to docs/PROGRESS.md: what was added, that no schema or 
+pipeline logic was changed, and the instruction to refresh manually 
+in Power BI Desktop after the daily run completes.
+
+Or stop after 10 turns.

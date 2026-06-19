@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import accounts
-import polymarket
+from sources import accounts
+from sources import polymarket
 
 CONFIG_PATH  = os.path.join(ROOT, "config.json")
 SNAPSHOT_DIR   = os.path.join(ROOT, "data", "snapshots")

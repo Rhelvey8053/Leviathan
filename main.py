@@ -14,15 +14,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import kalshi
-import polymarket
-import external_markets
-import accounts
-import scanner
-import whales
-import scorer
-import logger
-import report
+from core import kalshi, scanner, whales, scorer, logger, report
+from sources import polymarket, external_markets, accounts
 from analysis.smart_money_scan import run_smart_money_scan, save_report as save_sm_report
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
@@ -689,7 +682,7 @@ def main():
         traceback.print_exc()
 
     try:
-        from export_to_csv import export_csvs
+        from core.export_to_csv import export_csvs
         counts = export_csvs()
         print(f"[export] CSVs updated — {counts['signals']} signals, {counts['runs']} runs")
     except Exception as e:

@@ -10,8 +10,9 @@ import csv
 import os
 import sqlite3
 
-DB_PATH    = os.path.join(os.path.dirname(__file__), "leviathan.db")
-EXPORT_DIR = os.path.join(os.path.dirname(__file__), "data", "powerbi_export")
+_ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH    = os.path.join(_ROOT, "leviathan.db")
+EXPORT_DIR = os.path.join(_ROOT, "data", "powerbi_export")
 
 
 def _table_to_csv(conn: sqlite3.Connection, table: str, dest: str) -> int:

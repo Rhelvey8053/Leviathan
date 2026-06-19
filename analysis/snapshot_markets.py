@@ -22,7 +22,7 @@ sys.path.insert(0, ROOT)
 from dotenv import load_dotenv
 load_dotenv(os.path.join(ROOT, ".env"))
 
-import kalshi
+from core import kalshi
 
 CONFIG_PATH = os.path.join(ROOT, "config.json")
 SNAPSHOT_DIR = os.path.join(ROOT, "data", "snapshots")

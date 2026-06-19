@@ -21,8 +21,8 @@ sys.path.insert(0, ROOT)
 from dotenv import load_dotenv
 load_dotenv()
 
-import kalshi
-import scanner
+from core import kalshi
+from core import scanner
 
 W = 68
 

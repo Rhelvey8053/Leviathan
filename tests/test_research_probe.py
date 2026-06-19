@@ -10,8 +10,8 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
 
-import logger
-import scanner
+from core import logger
+from core import scanner
 from analysis import research_probe
 
 
@@ -202,7 +202,7 @@ def test_resolved_probe_direction_correct_scores_win(tmp_db):
     """Probe predicted YES, market resolved YES → result=WIN."""
     _insert_probe_direct("probe-1", "KXTEST", 0.30, 0.55, "YES")
 
-    with patch("kalshi.fetch_market", return_value={"result": "yes"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
         count = logger.resolve_outcomes({})
 
     assert count == 1
@@ -215,7 +215,7 @@ def test_resolved_probe_direction_wrong_scores_loss(tmp_db):
     """Probe predicted YES, market resolved NO → result=LOSS."""
     _insert_probe_direct("probe-2", "KXTEST", 0.30, 0.55, "YES")
 
-    with patch("kalshi.fetch_market", return_value={"result": "no"}):
+    with patch("core.kalshi.fetch_market", return_value={"result": "no"}):
         logger.resolve_outcomes({})
 
     with logger._db() as conn:
@@ -227,7 +227,7 @@ def test_unresolved_probe_stays_pending(tmp_db):
     """Market not yet settled → probe stays unresolved."""
     _insert_probe_direct("probe-open", "KXJULY", 0.40, 0.60, "YES")
 
-    with patch("kalshi.fetch_market", return_value={"result": ""}):
+    with patch("core.kalshi.fetch_market", return_value={"result": ""}):
         count = logger.resolve_outcomes({})
 
     assert count == 0

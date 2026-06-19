@@ -6,7 +6,7 @@ Run: python -m pytest -q
 """
 
 import pytest
-import report
+from core import report
 
 
 def _signal(**kwargs):

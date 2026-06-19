@@ -11,9 +11,10 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 
-DB_PATH   = os.path.join(os.path.dirname(__file__), "leviathan.db")
-CALLS_CSV = os.path.join(os.path.dirname(__file__), "calls.csv")
-RUNS_CSV  = os.path.join(os.path.dirname(__file__), "runs.csv")
+_ROOT     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH   = os.path.join(_ROOT, "leviathan.db")
+CALLS_CSV = os.path.join(_ROOT, "calls.csv")
+RUNS_CSV  = os.path.join(_ROOT, "runs.csv")
 
 
 # ── DB connection ─────────────────────────────────────────────────────────────
@@ -340,7 +341,7 @@ def pull_real_fills(config: dict) -> dict:
     signal_call_id, and direction_aligned accordingly.
     Returns a summary dict: pulled, matched, aligned, contradictory.
     """
-    import kalshi as _kalshi
+    from core import kalshi as _kalshi
 
     fills = _kalshi.fetch_fills(config)
     if not fills:
@@ -503,7 +504,7 @@ def resolve_outcomes(config: dict) -> int:
     Checks all unresolved calls against the Kalshi API and fills in outcomes.
     Returns count of newly resolved calls.
     """
-    import kalshi as _kalshi
+    from core import kalshi as _kalshi
     import time as _time
 
     try:
