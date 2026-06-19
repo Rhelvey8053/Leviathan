@@ -1,0 +1,39 @@
+/goal A resolution-first validation harness exists that places NO new feature, heuristic, calibration, scoring, or analytics code, and instead does exactly three things: (1) selects a batch of near-dated markets for paper logging, (2) logs them as paper signals so they resolve fast, (3) reports the current resolved-outcome count and what is still blocking a win-rate read. Proven by: a printed selection table, a printed resolution-status summary, and a passing offline test suite (pytest exit 0, output shown). Work on a branch named resolve-first-3a with small descriptive commits. READ-ONLY on all external platforms: market data only, never any order/trade endpoint. The only data mutation permitted is inserting paper signal rows into leviathan.db (back up to leviathan.db.bak_3a first).
+
+HARD FREEZE — READ THIS FIRST. This goal forbids the kind of work the last several sessions did. Do NOT, under any circumstance, add or modify: heuristic base-rate categories in scanner.estimate_base_rate; calibration rules in scorer.SYSTEM_PROMPT or research_probe.PROBE_SYSTEM; the Leviathan composite score; net_edge / Brier / Kelly / close-horizon / persistence logic; any new analysis/ script; any new flag mode; any new report section. If you find yourself writing a new heuristic or a new scoring dimension, STOP — that is explicitly out of scope and is the exact failure mode this goal exists to break. The system already has 909 tests and zero resolved paper signals. More machinery is not the bottleneck. Resolved outcomes are. The only new code permitted is the selection + logging harness in PART B and its tests.
+
+CONTEXT — why this goal exists (state plainly, do not re-litigate): across Sessions 1–13 the agent built an elaborate measurement apparatus (35+ heuristics, Brier, Kelly, net-edge, LV bands, calibration feedback) but the entire resolved track record is 2 bets, both losses (KXAAAGASD real fill; Prison Break probe, where Claude called 82% YES on a 5.5% market and was wrong). Every get_stats_by_* function returns "No resolved data." Nothing has approached the profitability gate because nothing has resolved. This goal stops building and starts accumulating ground truth.
+
+PART A — RESOLUTION AUDIT (measure the real timeline). Using a read-only snapshot or live fetch, produce a table of EVERY currently-logged signal/probe/fill in leviathan.db with: ticker, source (paper/research_probe/real_fill), outcome status (resolved/pending), and ACTUAL days-to-close from close_time (or expiration_time, or report it as MISSING if neither is stored). Then answer plainly in the transcript:
+  (a) How many rows are resolved today? (expected: ~2)
+  (b) Of the pending rows, what is the distribution of days-to-close? Bucket: closes ≤14d, 15–30d, 31–90d, 91d+, and MISSING close data.
+  (c) What is the EARLIEST date on which 20 logged rows could possibly have resolved, given their close times? If the answer is "months away" or "most rows are 2027–2029 dated," say so directly — that is the finding.
+This part writes nothing to the DB. It is a diagnosis of whether the existing logged data can ever validate the model on a useful timescale.
+
+PART B — NEAR-DATED PAPER BATCH (the only new code). Write analysis/resolve_first.py that:
+  1. Loads the latest snapshot (no network for selection; live fetch only if no snapshot exists).
+  2. Runs the EXISTING scanner.filter_markets + scanner.score_markets unchanged — do not alter scoring. Use whatever flag_mode is currently in config; do not change the default.
+  3. Selects markets that close within a configurable window (config key scoring.resolve_first_max_days, default 14) AND have a real two-sided book (both yes_bid and yes_ask > 0 — no one-sided/stale legs). Deliberately spread the selection across price bands so the batch is not all 1–5% tail longshots: aim for coverage of at least the 5–15%, 15–40%, 40–60%, and 60–95% price buckets, taking the highest-volume market available in each band per flag_path. Print how many fell in each price band and each flag_path. If a band is empty, say so — do not synthesize.
+  4. Logs each selected market as a paper signal via the EXISTING logger.log_signal, capturing close_time so PART A's resolution audit works on them next run. These are paper bets: our_estimate comes from the existing scorer output if available, otherwise log direction=PASS with the market mid as estimate (a PASS is still a logged row that resolves and tells us whether the scanner's pick would have been right). Do NOT call the Claude CLI in this goal — if scorer output is unavailable offline, log the scanner's mechanical pick and label it clearly. The point is volume of fast-resolving ground truth, not perfect estimates.
+  5. Is safely re-runnable: dedup against tickers already logged in the last N days so repeated runs don't double-log the same market.
+
+PART C — RESOLUTION STATUS REPORT (no new report.py sections — print to stdout only). After logging, print a single plain-text status block answering the one question that gates v2:
+  - Total paper rows logged, total resolved, total pending.
+  - Of pending, how many close within 14 days (i.e. will give us a win-rate read soon).
+  - A countdown: "N resolved / 20 needed before win-rate is meaningful."
+  - The current resolved win rate IF AND ONLY IF resolved ≥ 10; otherwise print "WIN RATE: NOT YET MEANINGFUL (n=X, need ≥10)" and refuse to display a percentage. Do not show a win rate on n<10. This is the discipline the project has been missing — small-n percentages are noise and must not be reported as signal.
+
+PART D — VERIFY THE FEE + PAYOFF ASSUMPTION (no code change, just confirm or flag). The real-fill P&L depends on (1) the payoff fix from the audit being live, and (2) Kalshi's fee_cost units. Confirm in the transcript that logger.resolve_outcomes uses the corrected binary payoff (1-price on win, -price on loss), and restate the open fee-units question from Goal 2a: at 1–5¢ contract prices, if fee_cost is per-fill-event and fill_count understates contracts, real P&L is materially wrong. Do not attempt to fix it here — just state whether it has been verified against Kalshi's fee schedule yet (it has not, per PROGRESS.md). Flag it as a blocker for any real-money decision.
+
+PART E — TESTS (offline, tmp DB, no network — mock any fetch). Assert:
+  - resolve_first selection only picks markets with close within the configured window;
+  - it only picks two-sided-book markets (one-sided/stale legs excluded);
+  - re-running does not double-log a ticker already logged in the window;
+  - logged rows carry close_time so the resolution audit can bucket them;
+  - the status report refuses to print a win-rate percentage when resolved < 10 and prints "NOT YET MEANINGFUL";
+  - NO existing test was modified to accommodate new behavior (the freeze means scanner/scorer/logger behavior is unchanged — existing tests must still pass untouched).
+pytest exits 0 with output shown.
+
+PART F — REPORT. Append to docs/PROGRESS.md: the PART A resolution-timeline finding (stated bluntly — is the existing logged data months/years from validating anything?), the size and price-band composition of the new near-dated batch, the current "N resolved / 20 needed" count, and the explicit statement that NO new heuristic/scoring/calibration code was added this session by design. Top 3 next steps must all be about ACCUMULATING AND RESOLVING outcomes (e.g. "re-run resolve_first weekly," "run resolve_outcomes after the 14-day window closes," "do not add features until n≥20 resolved") — not about new signals or analytics.
+
+Or stop after 20 turns.
