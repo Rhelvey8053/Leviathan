@@ -70,31 +70,36 @@ def _extract_profile(trades: list[dict], address: str) -> dict:
 
 def _score_wallet(positions: list[dict]) -> dict | None:
     """
-    Scores a wallet on their position performance.
-    Computes win rate from resolved positions (redeemable=True means market resolved).
+    Scores a wallet on their RESOLVED position performance only.
+
+    Coin-flip markets (sub-daily crypto tick bets) and sports-game bets are
+    excluded from all scoring — they test luck, not forecasting skill.
+    Ranking metrics (win_rate, resolved_cash_pnl) come from resolved positions
+    only (redeemable=True), so a wallet with 0 resolved positions cannot qualify.
     """
     if not positions:
         return None
 
-    pct_pnls   = []
-    cash_pnls  = []
-    resolved   = []
-    active_mkts = []
+    # Lazy import to avoid circular dependency; _is_sports_title is a pure predicate
+    try:
+        from analysis.smart_money_scan import _is_sports_title as _sports
+    except ImportError:
+        _sports = lambda t: False  # noqa: E731
+
+    resolved_pct_pnls  = []  # pct PnL for resolved (redeemable) positions only
+    resolved_cash_pnls = []  # cash PnL for resolved positions only
+    active_mkts        = []
 
     for p in positions:
         try:
-            pct  = float(p.get("percentPnl") or 0)
-            cash = float(p.get("cashPnl") or 0)
+            pct   = float(p.get("percentPnl") or 0)
+            cash  = float(p.get("cashPnl")    or 0)
             title = (p.get("title") or "").strip()
 
-            # Exclude coin-flip / tick-resolution markets from all scoring
-            if _is_coinflip(title):
+            # Exclude coin-flip and sports-game markets — P&L here is noise, not skill
+            if _is_coinflip(title) or _sports(title):
                 continue
 
-            pct_pnls.append(pct)
-            cash_pnls.append(cash)
-
-            # Track active (unresolved) markets by title
             slug    = (p.get("eventSlug") or p.get("slug") or "").strip()
             outcome = (p.get("outcome") or "").strip()
             if title and not p.get("redeemable"):
@@ -106,29 +111,25 @@ def _score_wallet(positions: list[dict]) -> dict | None:
                     "url":     f"https://polymarket.com/event/{slug}" if slug else "",
                 })
 
-            # Resolved = redeemable flag set (market closed)
             if p.get("redeemable"):
-                resolved.append(pct)
+                resolved_pct_pnls.append(pct)
+                resolved_cash_pnls.append(cash)
         except (TypeError, ValueError):
             pass
 
-    if not pct_pnls:
-        return None
+    wins     = sum(1 for p in resolved_pct_pnls if p > 0)
+    n_res    = len(resolved_pct_pnls)
+    win_rate = round(wins / n_res * 100, 1) if n_res else None
 
-    wins = sum(1 for p in resolved if p > 0)
-    win_rate = round(wins / len(resolved) * 100, 1) if resolved else None
-
-    # Sort active markets by cash PnL desc
     active_mkts.sort(key=lambda m: abs(m["pct_pnl"]), reverse=True)
 
     return {
-        "position_count":    len(positions),
-        "avg_pct_pnl":       round(sum(pct_pnls) / len(pct_pnls), 2),
-        "total_cash_pnl":    round(sum(cash_pnls), 2),
-        "winning_positions": sum(1 for p in pct_pnls if p > 0),
-        "resolved_count":    len(resolved),
-        "win_rate":          win_rate,
-        "active_markets":    active_mkts[:5],  # top 5 by PnL magnitude
+        "position_count":      len(positions),
+        "resolved_count":      n_res,
+        "resolved_avg_pct_pnl": round(sum(resolved_pct_pnls) / n_res, 2) if n_res else None,
+        "resolved_cash_pnl":   round(sum(resolved_cash_pnls), 2),
+        "win_rate":            win_rate,
+        "active_markets":      active_mkts[:5],
     }
 
 
@@ -144,20 +145,39 @@ def _is_coinflip(title: str) -> bool:
 
 
 def _is_winner(stats: dict, config: dict) -> bool:
+    """
+    Returns True only if the wallet has a verified forecasting track record.
+
+    All qualifying thresholds are applied to RESOLVED positions only.
+    avg_pct_pnl and total_cash_pnl across open positions are ignored — they
+    measure unrealised gains (survivorship bias), not verified skill.
+
+    Config keys read:
+      accounts.min_resolved_count  — floor on resolved positions (default 10)
+      accounts.min_win_rate        — resolved win rate floor, % (default 55.0)
+      accounts.min_positions       — total position count floor (default 5)
+      accounts.min_pct_pnl         — resolved avg % PnL floor (default 10.0)
+      accounts.min_cash_pnl        — resolved cash PnL floor in $ (default 100;
+                                      $25 is trivially achievable on luck alone)
+    """
     cfg = config.get("accounts", {})
     min_resolved = cfg.get("min_resolved_count", 10)
     min_win_rate = cfg.get("min_win_rate", 55.0)
 
-    # Must have a verified track record on resolved markets
+    # Gate 1: must have a verified track record on resolved, non-coinflip markets
     if stats["resolved_count"] < min_resolved:
         return False
     if stats["win_rate"] is None or stats["win_rate"] < min_win_rate:
         return False
 
+    # Gate 2: resolved metrics only (not open-position unrealised P&L)
+    resolved_avg_pct = stats.get("resolved_avg_pct_pnl")
+    resolved_cash    = stats.get("resolved_cash_pnl", 0.0) or 0.0
+
     return (
-        stats["position_count"]  >= cfg.get("min_positions", 5)
-        and stats["avg_pct_pnl"] >= cfg.get("min_pct_pnl", 10.0)
-        and stats["total_cash_pnl"] >= cfg.get("min_cash_pnl", 100.0)
+        stats["position_count"] >= cfg.get("min_positions", 5)
+        and (resolved_avg_pct is not None and resolved_avg_pct >= cfg.get("min_pct_pnl", 10.0))
+        and resolved_cash >= cfg.get("min_cash_pnl", 100.0)
     )
 
 
@@ -205,7 +225,12 @@ def discover_winners(config: dict) -> list[dict]:
             **stats,
         })
 
-    winners.sort(key=lambda w: (w["avg_pct_pnl"], w["total_cash_pnl"]), reverse=True)
+    # Rank by resolved win rate (primary) then resolved cash P&L (secondary).
+    # Sorting on unrealised avg_pct_pnl rewards lucky open positions, not skill.
+    winners.sort(
+        key=lambda w: (w.get("win_rate") or 0, w.get("resolved_cash_pnl") or 0),
+        reverse=True,
+    )
     return winners[:max_wallets]
 
 
@@ -282,8 +307,8 @@ def scan_market(condition_id: str, winners: list[dict], config: dict) -> list[di
                 "profile_url":   winner.get("profile_url", f"{POLY_URL}/{winner['address']}"),
                 "direction":     direction,
                 "trade_count":   len(market_trades),
-                "avg_pct_pnl":   winner["avg_pct_pnl"],
-                "total_cash_pnl": winner["total_cash_pnl"],
+                "resolved_avg_pct_pnl": winner.get("resolved_avg_pct_pnl"),
+                "resolved_cash_pnl":    winner.get("resolved_cash_pnl"),
                 "win_rate":      winner.get("win_rate"),
                 "active_markets": winner.get("active_markets", []),
                 "last_trade_ts": latest.get("timestamp"),
