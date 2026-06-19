@@ -2,6 +2,93 @@
 
 ---
 
+## Goal 2d — Winning-wallet selection criterion fix (smart-money-fix-3b branch)
+
+### PART A — Before state (winning_accounts.json)
+
+Cache contained **0 cached winners** at audit time.
+Per AUDIT.md Section 5, a prior cache showed 3 winners — all with:
+  - resolved_count: 0, win_rate: null
+  - Active positions: World Cup player props, Bitcoin 5-minute Up/Down contracts
+  - Qualified on unrealised PnL of open positions, not verified forecasting skill
+
+How many would survive a resolved_count >= 10 filter: **0**
+
+### PART B — Fix applied (accounts.py)
+
+Three specific changes, no new metrics added:
+
+1. **`_score_wallet` — sports-game exclusion added**
+   - Positions whose titles match `_is_sports_title()` from `analysis/smart_money_scan.py`
+     are now excluded alongside existing coinflip patterns (`_is_coinflip`)
+   - P&L on soccer/World Cup/basketball/NFL game bets is noise, not forecasting skill
+   - `reuse` via lazy import: `from analysis.smart_money_scan import _is_sports_title`
+
+2. **`_score_wallet` + `_is_winner` — resolved metrics only**
+   - Removed `avg_pct_pnl` and `total_cash_pnl` (all-positions unrealised metrics)
+   - Added `resolved_avg_pct_pnl` and `resolved_cash_pnl` (resolved positions only)
+   - `_is_winner` now gates on resolved metrics; open-position P&L cannot qualify a wallet
+
+3. **`discover_winners` — ranking on resolved win rate**
+   - Sort key changed from `(avg_pct_pnl, total_cash_pnl)` to `(win_rate, resolved_cash_pnl)`
+   - Primary sort: resolved win rate. Secondary: realized cash P&L on resolved positions.
+   - A wallet with 80% win rate on 12 resolved bets ranks above one with 60% win rate
+     and 5x more unrealised cash PnL
+
+Config thresholds used (from config.json accounts section):
+  - `min_resolved_count`: 10
+  - `min_win_rate`: 55.0%
+  - `min_cash_pnl`: 100.0  (previously $25 — trivially achievable on luck)
+  - `min_pct_pnl`: 10.0%  (now applied to resolved positions only)
+
+### PART C — After state
+
+**NO VERIFIED SMART MONEY YET — zero wallets meet resolved_count >= 10
+with positive resolved win rate.**
+
+winning_accounts.json rewritten with empty qualifying set.
+
+Implication for main.py: the watchlist boost (flag_path="WATCHLIST", prepended
+to flagged_markets) currently has no trustworthy input from the discovery path.
+The watchlist entries in config.json are from the Polymarket trader list (manually
+curated in Session 3-5); those should be evaluated under the new resolved-outcome
+criterion before their signals are weighted as skill-based evidence.
+The smart-money cross-reference layer should be treated as informational-only
+until verified wallets (resolved_count >= 10, win_rate >= 55%) appear.
+
+### PART D — Tests
+
+14 new tests in tests/test_accounts.py (1203 total on this branch, 0 fail).
+No existing test was modified.
+
+Key assertions:
+- Wallet with 20 open positions at +500% does NOT qualify (resolved_count=0)
+- Wallet with 3 coinflip resolved positions has resolved_count=0 (noise excluded)
+- Sports-game resolved positions (vs., World Cup, FIFA) do not count toward track record
+- 12 real resolved positions with 75% win rate DOES qualify
+- Wallet below resolved_count=10 excluded even with high open-position P&L
+- Ranking: 80% win rate beats 60% win rate + 5x cash PnL (resolved metric wins)
+- avg_pct_pnl (all-positions) no longer present in stats dict
+- Empty winning list sorts without error (honest-empty case)
+
+### PART E — What was NOT added
+
+No new signal types, heuristic rules, scoring dimensions, or analytics.
+Only the accounts.py selection criterion was changed as specified in Goal 2d.
+
+### Top 3 next steps (all about accumulating verified wallets)
+
+1. **Re-run discover_winners as more positions resolve** — the current 0-winner result
+   is correct and honest. Re-run monthly; the threshold only passes verified skill.
+2. **Do not re-enable the watchlist boost in main.py until N>=1 verified wallet exists**
+   — until discovery produces a qualifying wallet, the watchlist signal is based on
+   manually curated addresses (config.json watchlist), not verified forecasters.
+3. **Track resolved_count for config.json watchlist addresses** — run
+   fetch_user_positions on each watchlist address and report resolved_count under
+   the new criterion; this tells us whether the hand-curated list has any track record.
+
+---
+
 ## Session 15 — 2026-06-18 (autonomous continuation)
 
 ### Commits 63–66: Heuristic labels, LV specificity bonus, DB persistence
