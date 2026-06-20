@@ -133,6 +133,74 @@ class TestEmptyDB(unittest.TestCase):
             self.assertGreater(len(headers), 0)
 
 
+class TestNullHandling(unittest.TestCase):
+
+    def _make_db_with_nulls(self, path: str) -> None:
+        conn = sqlite3.connect(path)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+                call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+                market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+                confidence TEXT, outcome TEXT, result TEXT
+            );
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+                signals_generated INTEGER, model_used TEXT
+            );
+        """)
+        # Row with NULL result (the key Goal 3d case)
+        conn.execute("""
+            INSERT INTO signals VALUES
+            ('null1','2026-06-20T00:00:00Z','KXTEST-001','Test market',
+             0.55,0.70,0.15,'YES','MED',NULL,NULL)
+        """)
+        # Row with explicit LOSS result
+        conn.execute("""
+            INSERT INTO signals VALUES
+            ('loss1','2026-06-20T00:00:00Z','KXTEST-002','Test market 2',
+             0.40,0.25,0.15,'NO','HIGH',NULL,'LOSS')
+        """)
+        conn.execute("""
+            INSERT INTO runs VALUES
+            ('run1','2026-06-20T00:00:00Z',100,2,'claude-sonnet-4-6')
+        """)
+        conn.commit()
+        conn.close()
+
+    def test_null_result_becomes_empty_string_not_nan(self):
+        """NULL result column must export as '' not 'NaN' or 'None'."""
+        import csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "nulls.db")
+            out = os.path.join(tmpdir, "export")
+            self._make_db_with_nulls(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                result_vals = [row["result"] for row in reader]
+            self.assertNotIn("NaN",  result_vals, "NaN found in result column")
+            self.assertNotIn("None", result_vals, "None found in result column")
+            self.assertIn("",   result_vals, "Empty string expected for NULL result")
+            self.assertIn("LOSS", result_vals, "LOSS row should still be present")
+
+    def test_numeric_columns_not_converted(self):
+        """Numeric columns (market_price, edge) must remain numeric, not become ''."""
+        import csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "nulls.db")
+            out = os.path.join(tmpdir, "export")
+            self._make_db_with_nulls(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+            for row in rows:
+                self.assertNotEqual(row["market_price"], "",
+                                    "market_price should not be blanked out")
+                val = float(row["market_price"])
+                self.assertGreater(val, 0)
+
+
 class TestMissingDB(unittest.TestCase):
 
     def test_missing_db_returns_zeros(self):

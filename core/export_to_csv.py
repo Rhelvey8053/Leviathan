@@ -14,12 +14,35 @@ _ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH    = os.path.join(_ROOT, "leviathan.db")
 EXPORT_DIR = os.path.join(_ROOT, "data", "powerbi_export")
 
+# String columns where NULL should become "" so Power BI DAX comparisons
+# (= "" and = "LOSS") work correctly. Numeric columns are left as-is.
+_STRING_COLS = frozenset({
+    "result", "outcome", "direction", "confidence", "flag_path", "source",
+    "time_horizon", "heuristic_direction", "heuristic_label",
+    "whale_direction", "ticker", "title", "run_id", "call_id",
+})
+
+
+def _null_to_empty(headers: list[str], rows: list[tuple]) -> list[tuple]:
+    """Replace None with '' in string columns; leave all other values untouched."""
+    str_idx = {i for i, h in enumerate(headers) if h in _STRING_COLS}
+    if not str_idx:
+        return rows
+    out = []
+    for row in rows:
+        row = list(row)
+        for i in str_idx:
+            if row[i] is None:
+                row[i] = ""
+        out.append(tuple(row))
+    return out
+
 
 def _table_to_csv(conn: sqlite3.Connection, table: str, dest: str) -> int:
     """Write one table to a CSV file. Returns row count (excluding header)."""
-    cur = conn.execute(f"SELECT * FROM {table}")
+    cur     = conn.execute(f"SELECT * FROM {table}")
     headers = [d[0] for d in cur.description]
-    rows    = cur.fetchall()
+    rows    = _null_to_empty(headers, cur.fetchall())
     with open(dest, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(headers)
