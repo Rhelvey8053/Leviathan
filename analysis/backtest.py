@@ -126,7 +126,7 @@ def main(resolve: bool = True):
     if resolve:
         print("\n[1] Resolving outcomes via Kalshi API...")
         try:
-            import kalshi as _kalshi
+            from core import kalshi as _kalshi
             _kalshi.authenticate(config)
             resolved = logger.resolve_outcomes(config)
             print(f"    {resolved} row(s) newly resolved")
