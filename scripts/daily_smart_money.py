@@ -29,7 +29,7 @@ def main():
 
     # Refresh Kalshi snapshot so cross-reference uses fresh market titles
     try:
-        import kalshi as _kalshi
+        from core import kalshi as _kalshi
         _kalshi.authenticate(cfg)
         markets, event_count = fetch_snapshot(cfg)
         snap_path = save_snapshot(markets, event_count, cfg)
