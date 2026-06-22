@@ -387,5 +387,144 @@ class TestWhitelistExport(unittest.TestCase):
             export_csvs(db_path=db, export_dir=out)
 
 
+def _make_fix_db(path: str) -> None:
+    """DB with 3 rows covering all Goal 3g fix scenarios."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY,
+            timestamp TEXT,
+            ticker TEXT,
+            title TEXT,
+            source TEXT,
+            direction TEXT,
+            confidence TEXT,
+            time_horizon TEXT,
+            market_price REAL,
+            edge REAL,
+            result TEXT,
+            pnl_if_traded REAL,
+            leviathan_score INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.executemany(
+        "INSERT INTO signals (call_id,timestamp,ticker,title,source,direction,"
+        "confidence,time_horizon,market_price,edge,result,pnl_if_traded,leviathan_score)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            # result=WIN, fully populated
+            ("fix_win",  "2026-06-19T10:00:00Z", "KX-WIN",  "Win market",
+             "Kalshi", "YES", "HIGH",  "WEEKLY",  0.65, 0.15, "WIN",  0.15, 72),
+            # result=LOSS, leviathan_score and confidence and time_horizon all NULL
+            ("fix_loss", "2026-06-20T10:00:00Z", "KX-LOSS", "Loss market",
+             "Kalshi", "NO",  None,    None,      0.40, 0.12, "LOSS", -0.12, None),
+            # result=NULL (unresolved), leviathan_score NULL
+            ("fix_open", "2026-06-21T10:00:00Z", "KX-OPEN", "Open market",
+             "Kalshi", "YES", "MED",   "MONTHLY", 0.55, 0.10, None,   None,  None),
+        ]
+    )
+    conn.execute(
+        "INSERT INTO runs VALUES ('r1','2026-06-19T10:00:00Z',50,3,'claude-sonnet-4-6')"
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestHardenedExport(unittest.TestCase):
+    """Goal 3g — FIX 1-5: correct defaults, is_win blanking, lv_band, rank defaults, validation."""
+
+    def _read_rows(self, tmpdir):
+        import csv
+        with open(os.path.join(tmpdir, "export", "signals.csv"),
+                  newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+
+    def _export(self, tmpdir):
+        db = os.path.join(tmpdir, "fix.db")
+        _make_fix_db(db)
+        export_csvs(db_path=db, export_dir=os.path.join(tmpdir, "export"))
+
+    # FIX 1 — result column has no NaN/None strings
+    def test_result_no_nan_strings(self):
+        """result column must only contain '', 'WIN', or 'LOSS' — never 'NaN' or 'None'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = self._read_rows(tmpdir)
+        result_vals = {r["result"] for r in rows}
+        self.assertNotIn("NaN",  result_vals, "NaN found in result column")
+        self.assertNotIn("None", result_vals, "None found in result column")
+        self.assertNotIn("nan",  result_vals, "nan found in result column")
+        for v in result_vals:
+            self.assertIn(v, ("", "WIN", "LOSS"), f"Unexpected result value: {v!r}")
+
+    # FIX 2 — is_win: 1 for WIN, 0 for LOSS, blank for unresolved
+    def test_is_win_win_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = {r["call_id"]: r for r in self._read_rows(tmpdir)}
+        self.assertEqual(rows["fix_win"]["is_win"], "1", "WIN row → is_win=1")
+
+    def test_is_win_loss_row(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = {r["call_id"]: r for r in self._read_rows(tmpdir)}
+        self.assertEqual(rows["fix_loss"]["is_win"], "0", "LOSS row → is_win=0")
+
+    def test_is_win_unresolved_blank(self):
+        """Unresolved row must have blank is_win so Power BI excludes it from SUM()."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = {r["call_id"]: r for r in self._read_rows(tmpdir)}
+        self.assertEqual(rows["fix_open"]["is_win"], "",
+                         "Unresolved row → is_win must be blank")
+
+    # FIX 3 — lv_band shows 'Unscored' when leviathan_score is NULL
+    def test_lv_band_unscored_when_null(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = {r["call_id"]: r for r in self._read_rows(tmpdir)}
+        self.assertEqual(rows["fix_loss"]["lv_band"], "Unscored",
+                         "NULL leviathan_score → lv_band='Unscored'")
+        self.assertEqual(rows["fix_open"]["lv_band"], "Unscored",
+                         "NULL leviathan_score → lv_band='Unscored'")
+
+    def test_lv_band_letter_when_scored(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = {r["call_id"]: r for r in self._read_rows(tmpdir)}
+        self.assertEqual(rows["fix_win"]["lv_band"], "A",
+                         "leviathan_score=72 → lv_band='A'")
+
+    # FIX 4 — horizon_rank and confidence_rank default to 0 when blank
+    def test_horizon_rank_zero_when_blank(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = {r["call_id"]: r for r in self._read_rows(tmpdir)}
+        self.assertEqual(rows["fix_loss"]["horizon_rank"], "0",
+                         "NULL time_horizon → horizon_rank=0")
+
+    def test_confidence_rank_zero_when_blank(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._export(tmpdir)
+            rows = {r["call_id"]: r for r in self._read_rows(tmpdir)}
+        self.assertEqual(rows["fix_loss"]["confidence_rank"], "0",
+                         "NULL confidence → confidence_rank=0")
+
+    # FIX 5 — validation report prints without error on empty DB
+    def test_validation_report_empty_db_no_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "empty.db")
+            out = os.path.join(tmpdir, "export")
+            _make_db(db, with_data=False)
+            try:
+                export_csvs(db_path=db, export_dir=out)
+            except Exception as exc:
+                self.fail(f"export_csvs raised on empty DB: {exc}")
+
+
 if __name__ == "__main__":
     unittest.main()

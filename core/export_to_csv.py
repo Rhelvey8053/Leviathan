@@ -20,8 +20,11 @@ _STRING_COLS = frozenset({
     "result", "outcome", "direction", "confidence", "flag_path", "source",
     "time_horizon", "heuristic_direction", "heuristic_label",
     "whale_direction", "ticker", "title", "run_id", "call_id",
-    "close_time", "lv_band", "date",
+    "close_time", "lv_band", "date", "timestamp",
 })
+
+# Sentinel strings that SQLite/Python can produce for missing data.
+_NULL_STRINGS = frozenset({"None", "nan", "NaT"})
 
 # Computed columns that are derived at export time, not stored in the DB.
 _COMPUTED_COLS = frozenset({
@@ -48,8 +51,22 @@ WHITELIST = [
 _CONF_RANK    = {"HIGH": 0, "MED": 1, "LOW": 2}
 _HORIZON_RANK = {"INTRADAY": 0, "WEEKLY": 1, "MONTHLY": 2, "QUARTERLY": 3, "LONG": 4}
 
+# Per-column notes shown in blank-rate warnings.
+_COL_NOTES = {
+    "leviathan_score": "lv_band will show Unscored",
+    "time_horizon":    "horizon breakdown unavailable",
+}
 
-def _null_to_empty(headers: list[str], rows: list[tuple]) -> list[tuple]:
+
+def _clean_str(val) -> str:
+    """Convert None or null-sentinel strings to '' for string columns."""
+    if val is None:
+        return ""
+    s = str(val)
+    return "" if s in _NULL_STRINGS else s
+
+
+def _null_to_empty(headers: list, rows: list) -> list:
     """Replace None with '' in string columns; leave all other values untouched."""
     str_idx = {i for i, h in enumerate(headers) if h in _STRING_COLS}
     if not str_idx:
@@ -58,7 +75,7 @@ def _null_to_empty(headers: list[str], rows: list[tuple]) -> list[tuple]:
     for row in rows:
         row = list(row)
         for i in str_idx:
-            if row[i] is None:
+            if row[i] is None or (isinstance(row[i], str) and row[i] in _NULL_STRINGS):
                 row[i] = ""
         out.append(tuple(row))
     return out
@@ -68,18 +85,26 @@ def _add_computed_cols(row: dict) -> dict:
     """Return a copy of row with analysis-ready computed columns added."""
     r = dict(row)
 
-    result              = r.get("result") or ""
-    r["is_resolved"]    = 1 if result in ("WIN", "LOSS") else 0
-    r["is_win"]         = 1 if result == "WIN" else 0
+    result           = _clean_str(r.get("result"))
+    r["is_resolved"] = 1 if result in ("WIN", "LOSS") else 0
+    # FIX 2: blank for unresolved so Power BI excludes them from SUM()
+    if result == "WIN":
+        r["is_win"] = 1
+    elif result == "LOSS":
+        r["is_win"] = 0
+    else:
+        r["is_win"] = None
 
-    conf                = (r.get("confidence") or "").upper()
-    r["confidence_rank"] = _CONF_RANK.get(conf, "")
+    conf = _clean_str(r.get("confidence")).upper()
+    # FIX 4: default 0 so Power BI sorts blanks consistently
+    r["confidence_rank"] = _CONF_RANK.get(conf, 0)
 
-    horizon             = (r.get("time_horizon") or "").upper()
-    r["horizon_rank"]   = _HORIZON_RANK.get(horizon, "")
+    horizon = _clean_str(r.get("time_horizon")).upper()
+    # FIX 4: default 0 so Power BI sorts blanks consistently
+    r["horizon_rank"] = _HORIZON_RANK.get(horizon, 0)
 
-    ts                  = r.get("timestamp") or ""
-    r["date"]           = ts[:10] if ts else ""
+    ts         = _clean_str(r.get("timestamp"))
+    r["date"]  = ts[:10] if ts else ""
 
     pnl = r.get("pnl_if_traded")
     try:
@@ -95,9 +120,58 @@ def _add_computed_cols(row: dict) -> dict:
         elif lv_int >= 40:  r["lv_band"] = "C"
         else:               r["lv_band"] = "D"
     except (TypeError, ValueError):
-        r["lv_band"] = ""
+        # FIX 3: readable label so Power BI shows a category rather than blank
+        r["lv_band"] = "Unscored"
 
     return r
+
+
+def _is_blank(val) -> bool:
+    return val is None or val == "" or (isinstance(val, str) and val in _NULL_STRINGS)
+
+
+def _print_validation(rows: list, final_cols: list) -> None:
+    """Print a post-export summary so data gaps are immediately visible."""
+    n      = len(rows)
+    col_idx = {c: i for i, c in enumerate(final_cols)}
+
+    def get(row, col):
+        idx = col_idx.get(col)
+        return row[idx] if idx is not None else None
+
+    resolved   = sum(1 for r in rows if get(r, "result") in ("WIN", "LOSS"))
+    pending    = n - resolved
+    wins       = sum(1 for r in rows if get(r, "result") == "WIN")
+    losses     = sum(1 for r in rows if get(r, "result") == "LOSS")
+    win_rate   = (wins / resolved * 100) if resolved else 0.0
+
+    total_pnl = 0.0
+    for r in rows:
+        try:
+            total_pnl += float(get(r, "pnl_if_traded"))
+        except (TypeError, ValueError):
+            pass
+
+    sign = "-" if total_pnl < 0 else ""
+    print(f"[export] signals.csv — {n} rows, {len(final_cols)} columns")
+    print(f"[export] Resolved: {resolved} | Pending: {pending} | Wins: {wins} | Losses: {losses}")
+    print(f"[export] Win Rate: {win_rate:.1f}%")
+    print(f"[export] Net PnL: {sign}${abs(total_pnl):.2f}")
+
+    if n > 0:
+        warnings = []
+        for col in final_cols:
+            idx        = col_idx[col]
+            blank_cnt  = sum(1 for r in rows if _is_blank(r[idx]))
+            if blank_cnt / n > 0.5:
+                pct  = int(blank_cnt / n * 100)
+                note = _COL_NOTES.get(col, "")
+                warnings.append((col, pct, note))
+        if warnings:
+            print("[export] BLANK RATE WARNING (>50% blank):")
+            for col, pct, note in warnings:
+                suffix = f" — {note}" if note else ""
+                print(f"         {col}: {pct}% blank{suffix}")
 
 
 def _signals_to_csv(conn: sqlite3.Connection, dest: str) -> int:
@@ -119,10 +193,13 @@ def _signals_to_csv(conn: sqlite3.Connection, dest: str) -> int:
         out_row  = []
         for col in final_cols:
             val = row_dict.get(col)
-            if val is None and col in _STRING_COLS:
-                val = ""
+            # FIX 1: harden all string columns against None and null-sentinel strings
+            if col in _STRING_COLS:
+                val = _clean_str(val)
             out_row.append(val)
         rows.append(out_row)
+
+    _print_validation(rows, final_cols)
 
     with open(dest, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
