@@ -1427,6 +1427,55 @@ def get_stats_by_leviathan_score() -> dict:
     return result
 
 
+def get_next_resolution_date() -> str | None:
+    """Return the earliest close_time (as YYYY-MM-DD) among unresolved paper signals, or None."""
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                f"""
+                SELECT MIN(close_time) AS earliest
+                FROM signals
+                WHERE ({_PAPER})
+                  AND (result IS NULL OR result = '')
+                  AND close_time IS NOT NULL AND close_time != ''
+                  AND direction IN ('YES', 'NO')
+                """
+            ).fetchone()
+        val = row["earliest"] if row else None
+        return val[:10] if val else None
+    except Exception:
+        return None
+
+
+def get_upcoming_resolutions(days: int = 14) -> list[dict]:
+    """
+    Return unresolved paper signals closing within the next N days.
+    direction must be YES or NO. Ordered by close_time ASC.
+    """
+    now    = datetime.now(timezone.utc)
+    cutoff = (now + timedelta(days=days)).isoformat()
+    now_s  = now.isoformat()
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT ticker, title, direction, confidence, market_price, close_time
+                FROM signals
+                WHERE ({_PAPER})
+                  AND (result IS NULL OR result = '')
+                  AND close_time IS NOT NULL AND close_time != ''
+                  AND close_time >= ?
+                  AND close_time <= ?
+                  AND direction IN ('YES', 'NO')
+                ORDER BY close_time ASC
+                """,
+                (now_s, cutoff),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 def get_stats_by_heuristic_label() -> list[dict]:
     """
     Win rate and P&L grouped by heuristic_label for resolved paper signals.

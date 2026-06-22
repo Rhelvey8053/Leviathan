@@ -1,9 +1,10 @@
 import os
 import smtplib
 import textwrap
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
+from analysis.smart_money_scan import _is_sports_title
 
 load_dotenv()
 
@@ -446,7 +447,13 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
 
 # ── Smart money section ───────────────────────────────────────────────────────
 
-def _smart_money_section(result: dict | None) -> list[str]:
+def _trunc(s: str, n: int, ellipsis: bool = True) -> str:
+    if len(s) <= n:
+        return s
+    return s[:n - 3] + "..." if ellipsis else s[:n]
+
+
+def _smart_money_section(result: dict | None, show_detail: bool = True) -> list[str]:
     out = []
     out.append(_rule("="))
     out.append("SMART MONEY WATCHLIST  (Top Polymarket Traders)")
@@ -469,69 +476,73 @@ def _smart_money_section(result: dict | None) -> list[str]:
     out.append(f"  Snapshot:           {run_at} UTC")
     out.append("")
 
-    # Grouped by Kalshi ticker — most actionable view
+    # Grouped by Kalshi ticker — always shown
     grouped = result.get("grouped_signals", [])
     if grouped:
-        out.append("  Kalshi Targets  (grouped by ticker, total smart money behind each):")
-        out.append(f"  {'Ticker':<30}  {'Traders':>7}  {'$Total':>11}  {'Direction':<10}  Kalshi Market")
-        out.append(f"  {'-'*30}  {'-'*7}  {'-'*11}  {'-'*10}  {'-'*38}")
-        for g in sorted(grouped, key=lambda x: -x["total_position_val"]):
-            ticker  = g["kalshi_ticker"][:30]
-            n_t     = g["trader_count"]
-            total_v = f"${g['total_position_val']:>10,.0f}"
-            dirs    = g.get("directions", {})
-            yes_c   = dirs.get("YES", 0)
-            no_c    = dirs.get("NO", 0)
-            if yes_c > 0 and no_c > 0:
-                dir_s = f"MIXED(Y{yes_c}/N{no_c})"
-            else:
-                dir_s = g.get("consensus_direction", "?")
-            kalshi_t = g.get("kalshi_title", "")[:38]
-            out.append(f"  {ticker:<30}  {n_t:>7}  {total_v:>11}  {dir_s:<10}  {kalshi_t}")
+        sorted_g  = sorted(grouped, key=lambda x: -x["total_position_val"])
+        show_g    = sorted_g[:15]
+        overflow  = len(sorted_g) - 15
+        out.append("  Kalshi Targets  (grouped by ticker):")
+        out.append(f"  {'Ticker':<25} {'T':>2} {'$Total':>9} {'Dir':<10}  Title")
+        out.append(f"  {'-'*25} {'-'*2} {'-'*9} {'-'*10}  {'-'*18}")
+        for g in show_g:
+            ticker   = _trunc(g["kalshi_ticker"], 25, ellipsis=False)
+            n_t      = g["trader_count"]
+            total_v  = f"${g['total_position_val']:>8,.0f}"
+            dirs     = g.get("directions", {})
+            yes_c    = dirs.get("YES", 0)
+            no_c     = dirs.get("NO", 0)
+            dir_s    = f"MIXED(Y{yes_c}/N{no_c})" if yes_c > 0 and no_c > 0 else g.get("consensus_direction", "?")
+            kalshi_t = _trunc(g.get("kalshi_title", ""), 45)
+            out.append(f"  {ticker:<25} {n_t:>2} {total_v:>9} {dir_s:<10}  {kalshi_t}")
+        if overflow > 0:
+            out.append(f"  ... and {overflow} more")
         out.append("")
 
-    # Kalshi cross-references — sorted by match quality × position size
+    if not show_detail:
+        return out
+
+    # Per-Trader Cross-References — one line per match, no "Poly:"/"Kalshi:" labels
     if signals:
-        out.append("  Per-Trader Cross-References:")
-        out.append(f"  {'Trader':<18}  {'Out':<4}  {'$Position':>10}  {'Price':>5}  {'Match':>5}  Kalshi Ticker")
-        out.append(f"  {'-'*18}  {'-'*4}  {'-'*10}  {'-'*5}  {'-'*5}  {'-'*32}")
         ranked = sorted(signals, key=lambda x: -(x["match_score"] * x["position_val"]))
+        out.append("  Per-Trader Cross-References:")
+        out.append(f"  {'Trader':<18} {'Out':<4} {'$Position':>10} {'Price':>5} {'Match':>5}  Kalshi Ticker")
+        out.append(f"  {'-'*18} {'-'*4} {'-'*10} {'-'*5} {'-'*5}  {'-'*25}")
         for s in ranked[:12]:
-            trader  = s["trader"][:18]
+            trader  = _trunc(s["trader"], 18, ellipsis=False)
             outcome = s["poly_outcome"][:4]
             val     = f"${s['position_val']:,.0f}"
             price   = f"{s['poly_price']:.2f}"
             score   = f"{s['match_score']:.0%}"
-            ticker  = s["kalshi_ticker"]
-            out.append(f"  {trader:<18}  {outcome:<4}  {val:>10}  {price:>5}  {score:>5}  {ticker}")
-            # Second line: Poly title → Kalshi title
-            poly_t   = s["poly_title"][:48]
-            kalshi_t = s.get("kalshi_title", "")[:48]
-            if kalshi_t and kalshi_t != poly_t:
-                out.append(f"    Poly:   {poly_t}")
-                out.append(f"    Kalshi: {kalshi_t}")
-            else:
-                out.append(f"    {poly_t}")
+            ticker  = _trunc(s["kalshi_ticker"], 28, ellipsis=False)
+            out.append(f"  {trader:<18} {outcome:<4} {val:>10} {price:>5} {score:>5}  {ticker}")
         out.append("")
 
-    # Top 10 positions across all traders by value
+    # Largest open positions — sports bets filtered out, capped at 8
     top_pos = []
     for name, data in result.get("trader_data", {}).items():
         for p in data.get("positions", []):
-            val = float(p.get("currentValue") or 0)
-            top_pos.append((name, p, val))
+            title = p.get("title") or ""
+            if not _is_sports_title(title):
+                val = float(p.get("currentValue") or 0)
+                top_pos.append((name, p, val))
     top_pos.sort(key=lambda x: -x[2])
 
-    if top_pos:
-        out.append("  Largest Open Positions:")
-        out.append(f"  {'Trader':<20}  {'Outcome':<20}  {'Value':>10}  {'Price':>6}  {'PnL':>7}  Market")
-        out.append(f"  {'-'*20}  {'-'*20}  {'-'*10}  {'-'*6}  {'-'*7}  -----")
-        for name, p, val in top_pos[:10]:
-            outcome = (p.get("outcome") or "?")[:20]
-            price   = float(p.get("curPrice") or p.get("avgPrice") or 0)
-            pnl     = float(p.get("percentPnl") or 0)
-            title   = (p.get("title") or "")[:38]
-            out.append(f"  {name:<20}  {outcome:<20}  ${val:>9,.0f}  {price:>6.2f}  {pnl:>+6.1f}%  {title}")
+    if len(top_pos) >= 3:
+        out.append("  Largest Open Positions  (non-sports):")
+        out.append(f"  {'Trader':<18}  {'Outcome':<10}  {'Value':>9}  {'Price':>5}  {'PnL':>7}  Market")
+        out.append(f"  {'-'*18}  {'-'*10}  {'-'*9}  {'-'*5}  {'-'*7}  -----")
+        for name, p, val in top_pos[:8]:
+            trader_s = _trunc(name, 18, ellipsis=False)
+            outcome  = _trunc(p.get("outcome") or "?", 10, ellipsis=False)
+            price    = float(p.get("curPrice") or p.get("avgPrice") or 0)
+            pnl      = float(p.get("percentPnl") or 0)
+            title_s  = p.get("title") or ""
+            title_t  = _trunc(title_s, 42)
+            out.append(f"  {trader_s:<18}  {outcome:<10}  ${val:>8,.0f}  {price:>5.2f}  {pnl:>+6.1f}%  {title_t}")
+        out.append("")
+    else:
+        out.append("  (No non-sports positions large enough to display)")
         out.append("")
 
     return out
@@ -620,6 +631,8 @@ def compile_report(
     n_mkt      = run_meta.get("markets_scanned", 0)
     runtime_s  = run_meta.get("runtime_ms", 0) / 1000
 
+    from .logger import get_next_resolution_date as _get_nrd, get_upcoming_resolutions as _get_upcoming
+
     out = []
 
     # ── Header ────────────────────────────────────────────────────────────
@@ -634,6 +647,14 @@ def compile_report(
     out.append(f"  Whale Flags:    {len(whale_only)}")
     out.append(f"  Markets Scanned:{n_mkt}")
     out.append(f"  Smart Money:    {sm_xref} Kalshi x-refs from top Polymarket traders")
+    _next_res = _get_nrd()
+    if _next_res:
+        try:
+            _res_dt   = date.fromisoformat(_next_res)
+            _res_days = (_res_dt - date.today()).days
+        except Exception:
+            _res_days = 0
+        out.append(f"  Next resolution: {_next_res}  ({_res_days} days)")
     out.append("")
 
     # ── Top picks executive summary ───────────────────────────────────────
@@ -678,7 +699,7 @@ def compile_report(
         out.append("")
         for s in repeat_q:
             ticker = s.get("ticker", "")
-            title  = (s.get("title") or "")[:55]
+            title  = _trunc(s.get("title") or "", 42)
             conf   = CONF_LABEL.get(s.get("confidence", "LOW"), "?")
             dir_   = s.get("direction", "?")
             mkt    = _pct(s.get("market_price"))
@@ -723,7 +744,7 @@ def compile_report(
     out.append("")
 
     # ── Smart money watchlist ─────────────────────────────────────────────────
-    out.extend(_smart_money_section(smart_money_result))
+    out.extend(_smart_money_section(smart_money_result, show_detail=len(qualifying) > 0))
 
     # ── Whale activity ────────────────────────────────────────────────────
     out.append(_rule("="))
@@ -739,6 +760,32 @@ def compile_report(
             avg   = w.get("avg_trade_size", 0)
             ratio = f"{w.get('max_trade_size', 0)/avg:.1f}x" if avg else "—"
             out.append(f"  {w.get('ticker',''):<22}  {w.get('whale_direction','?'):<10}  {ratio:<11}  {(w.get('title',''))[:30]}")
+    out.append("")
+
+    # ── Upcoming resolutions ──────────────────────────────────────────────
+    upcoming = _get_upcoming(days=14)
+    out.append(_rule("="))
+    out.append("UPCOMING RESOLUTIONS  (closing within 14 days)")
+    out.append(_rule("="))
+    out.append("")
+    if not upcoming:
+        out.append("  No picks closing within 14 days.")
+    else:
+        out.append(f"  {'Close Date':<12}  {'Ticker':<28}  {'Dir':>3}  {'Conf':>4}  Price")
+        out.append(f"  {'-'*12}  {'-'*28}  {'-'*3}  {'-'*4}  -----")
+        for row in upcoming:
+            close_raw = row.get("close_time", "")
+            try:
+                close_dt = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
+                close_s  = close_dt.strftime("%b %d, %Y")
+            except Exception:
+                close_s = close_raw[:12]
+            ticker  = _trunc(row.get("ticker") or "", 28, ellipsis=False)
+            dir_    = row.get("direction", "?")
+            conf    = row.get("confidence") or "?"
+            price   = row.get("market_price")
+            price_s = f"{float(price)*100:.0f}%" if price else "—"
+            out.append(f"  {close_s:<12}  {ticker:<28}  {dir_:>3}  {conf:>4}  {price_s}")
     out.append("")
 
     # ── Track record ──────────────────────────────────────────────────────
@@ -823,8 +870,6 @@ def compile_report(
     out.append(f"  Runtime:           {runtime_s:.0f}s")
     out.append("")
     out.append(_rule("="))
-    out.append("Leviathan v1  ·  Read-only  ·  For informational purposes only")
-    out.append(_rule("="))
 
     return "\n".join(out)
 
@@ -881,7 +926,7 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
             ts_s = ts.strftime("%b %d %H:%M")
         except Exception:
             ts_s = ts_raw[:12]
-        ticker = row.get("ticker", "")[:26]
+        ticker = _trunc(row.get("ticker", ""), 28, ellipsis=False)
         conf   = CONF_LABEL.get(row.get("confidence", "LOW"), "?")
         dir_   = row.get("direction", "?")
         try:
@@ -896,7 +941,7 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
         _lv    = compute_leviathan_score(row)
         _band  = "A" if _lv >= 70 else "B" if _lv >= 55 else "C" if _lv >= 40 else "D"
         lv_s   = f"{_lv}{_band}"
-        title  = (row.get("title") or "")[:36]
+        title  = _trunc(row.get("title") or "", 35)
         out.append(f"  {ts_s:<12}  {ticker:<26}  {conf:<4}  {dir_:<3}  {edge_s:>7}  {net_s:>7}  {lv_s:>4}  {title}")
 
     out.append("")
