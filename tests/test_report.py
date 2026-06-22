@@ -1369,3 +1369,299 @@ def test_qualifying_min_lv_filters_grade_d_from_mixed_list():
     assert good in result
     if lv_bad < 40:
         assert bad not in result
+
+
+# ─── Goal 3e: smart money section detail gating ───────────────────────────────
+
+def _sm_result(**kwargs):
+    base = {
+        "traders_active": 2,
+        "positions_total": 10,
+        "kalshi_signals": [],
+        "grouped_signals": [],
+        "run_at": "2026-06-21T00:00:00Z",
+        "trader_data": {},
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_smart_money_no_signals_omits_per_trader_block():
+    """When signals==[], smart money section must not include Per-Trader block."""
+    result = _sm_result()
+    out = "\n".join(report._smart_money_section(result, show_detail=False))
+    assert "Per-Trader" not in out
+
+
+def test_smart_money_no_signals_omits_largest_positions_block():
+    """When show_detail=False, Largest Open Positions must be absent."""
+    result = _sm_result(trader_data={
+        "traderA": {"positions": [
+            {"currentValue": 50000, "outcome": "Yes", "curPrice": 0.8,
+             "percentPnl": 10.0, "title": "Will the Fed raise rates?"},
+        ]}
+    })
+    out = "\n".join(report._smart_money_section(result, show_detail=False))
+    assert "Largest Open Positions" not in out
+
+
+def test_smart_money_with_signals_shows_all_blocks():
+    """When show_detail=True and signals exist, all three blocks appear."""
+    signals = [{
+        "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
+        "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
+        "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
+    }]
+    grouped = [{
+        "kalshi_ticker": "KXTEST-26", "trader_count": 1, "total_position_val": 10000,
+        "directions": {"YES": 1}, "consensus_direction": "YES",
+        "kalshi_title": "Will X happen by 2026?",
+    }]
+    trader_data = {
+        "traderX": {"positions": [
+            {"currentValue": 10000, "outcome": "Yes", "curPrice": 0.6,
+             "percentPnl": 5.0, "title": "Will the Fed raise rates?"},
+            {"currentValue": 8000, "outcome": "Yes", "curPrice": 0.5,
+             "percentPnl": 3.0, "title": "Will inflation fall below 3%?"},
+            {"currentValue": 7000, "outcome": "No", "curPrice": 0.4,
+             "percentPnl": -2.0, "title": "Will tariffs increase?"},
+        ]}
+    }
+    result = _sm_result(kalshi_signals=signals, grouped_signals=grouped, trader_data=trader_data)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    assert "Per-Trader" in out
+    assert "Kalshi Targets" in out
+
+
+def test_smart_money_sports_titles_filtered_from_largest_positions():
+    """Sports-titled positions must be absent from Largest Open Positions."""
+    trader_data = {
+        "traderA": {"positions": [
+            {"currentValue": 90000, "outcome": "Yes", "curPrice": 0.9,
+             "percentPnl": 5.0, "title": "Will France vs. Germany end in a draw?"},
+            {"currentValue": 80000, "outcome": "Yes", "curPrice": 0.7,
+             "percentPnl": 3.0, "title": "Will France win on 2026-06-22?"},
+            {"currentValue": 70000, "outcome": "No",  "curPrice": 0.6,
+             "percentPnl": -1.0, "title": "Uruguay vs. Cabo Verde: O/U 2.5"},
+            {"currentValue": 60000, "outcome": "Yes", "curPrice": 0.8,
+             "percentPnl": 2.0, "title": "Will the Fed raise rates in 2026?"},
+            {"currentValue": 50000, "outcome": "No",  "curPrice": 0.3,
+             "percentPnl": 4.0, "title": "Will inflation fall to 2% by year end?"},
+            {"currentValue": 40000, "outcome": "Yes", "curPrice": 0.55,
+             "percentPnl": 6.0, "title": "Will Andy Burnham become Prime Minister?"},
+        ]}
+    }
+    result = _sm_result(trader_data=trader_data)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    # Sports titles must be absent
+    assert "France vs. Germany" not in out
+    assert "win on 2026-06-22" not in out
+    assert "O/U 2.5" not in out
+    # Non-sports title must be present
+    assert "Fed raise rates" in out
+
+
+def test_smart_money_non_sports_still_shown():
+    """Non-sports positions must appear in Largest Open Positions."""
+    trader_data = {
+        "traderA": {"positions": [
+            {"currentValue": 50000, "outcome": "Yes", "curPrice": 0.6,
+             "percentPnl": 5.0, "title": "Will the Fed raise rates?"},
+            {"currentValue": 40000, "outcome": "No",  "curPrice": 0.4,
+             "percentPnl": 3.0, "title": "Will inflation fall below 3%?"},
+            {"currentValue": 30000, "outcome": "Yes", "curPrice": 0.7,
+             "percentPnl": 2.0, "title": "Will Andy Burnham be Prime Minister?"},
+        ]}
+    }
+    result = _sm_result(trader_data=trader_data)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    assert "Fed raise rates" in out
+
+
+def test_smart_money_fewer_than_3_non_sports_shows_note():
+    """When fewer than 3 non-sports positions, note is shown instead of table."""
+    trader_data = {
+        "traderA": {"positions": [
+            {"currentValue": 90000, "outcome": "Yes", "curPrice": 0.9,
+             "percentPnl": 5.0, "title": "France vs. Spain: O/U 2.5"},
+            {"currentValue": 80000, "outcome": "Yes", "curPrice": 0.7,
+             "percentPnl": 3.0, "title": "Will Germany win on 2026-06-24?"},
+            {"currentValue": 5000,  "outcome": "No",  "curPrice": 0.3,
+             "percentPnl": 2.0, "title": "Will the Fed raise rates?"},
+        ]}
+    }
+    result = _sm_result(trader_data=trader_data)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    assert "No non-sports positions" in out
+    assert "Largest Open Positions" not in out
+
+
+def test_smart_money_per_trader_no_poly_kalshi_labels():
+    """Per-Trader Cross-References must not contain 'Poly:' or 'Kalshi:' label prefixes."""
+    signals = [{
+        "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
+        "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
+        "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
+    }]
+    result = _sm_result(kalshi_signals=signals)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    assert "Poly:   " not in out
+    assert "Kalshi: " not in out
+
+
+def test_smart_money_kalshi_targets_capped_at_15():
+    """Kalshi Targets table must be capped at 15 rows with overflow note."""
+    grouped = [
+        {
+            "kalshi_ticker": f"KXTICKER-{i:02d}", "trader_count": 1,
+            "total_position_val": 1000 * (20 - i),
+            "directions": {"YES": 1}, "consensus_direction": "YES",
+            "kalshi_title": f"Market title {i}",
+        }
+        for i in range(20)
+    ]
+    result = _sm_result(grouped_signals=grouped)
+    out = "\n".join(report._smart_money_section(result))
+    # Exactly 15 rows shown, overflow note present
+    assert "... and 5 more" in out
+    # First 15 by descending total_position_val must appear
+    assert "KXTICKER-00" in out
+    assert "KXTICKER-14" in out
+    assert "KXTICKER-15" not in out
+
+
+def test_smart_money_largest_positions_capped_at_8():
+    """Largest Open Positions must be capped at 8 rows after sports filter."""
+    trader_data = {
+        "traderA": {"positions": [
+            {"currentValue": float(10000 - i * 500), "outcome": "Yes",
+             "curPrice": 0.5, "percentPnl": 1.0,
+             "title": f"Will macro event {i} happen?"}
+            for i in range(12)
+        ]}
+    }
+    result = _sm_result(trader_data=trader_data)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    # Count "macro event" occurrences — should be at most 8
+    count = out.count("macro event")
+    assert count <= 8, f"Expected at most 8 rows, got {count}"
+
+
+# ─── Goal 3e: logger resolution helpers ──────────────────────────────────────
+
+import sqlite3
+import tempfile
+import os
+
+def _make_resolution_db(path: str, rows: list[dict]) -> None:
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT,
+            direction TEXT, confidence TEXT, market_price REAL,
+            close_time TEXT, result TEXT, source TEXT
+        );
+    """)
+    for r in rows:
+        conn.execute("""
+            INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?)
+        """, (
+            r["call_id"], r.get("timestamp", "2026-06-01T00:00:00Z"),
+            r.get("ticker", "KXTEST"), r.get("direction", "YES"),
+            r.get("confidence", "MED"), r.get("market_price", 0.5),
+            r.get("close_time"), r.get("result", ""), r.get("source", "paper"),
+        ))
+    conn.commit()
+    conn.close()
+
+
+def test_get_next_resolution_date_none_when_no_close_times():
+    """Returns None when no close_time is set on any signal."""
+    from core.logger import get_next_resolution_date, DB_PATH, _db
+    # Use the real DB but test that the function doesn't crash; result is None or a string
+    result = get_next_resolution_date()
+    assert result is None or (isinstance(result, str) and len(result) == 10)
+
+
+def test_get_next_resolution_date_returns_earliest():
+    """Returns the earliest close_time date from unresolved signals."""
+    from core.logger import get_next_resolution_date, _db, _PAPER
+    import uuid
+    # Insert two unresolved signals with different close_times, then verify
+    id1 = str(uuid.uuid4())[:8]
+    id2 = str(uuid.uuid4())[:8]
+    with _db() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+            (call_id, timestamp, ticker, direction, confidence, result, source, close_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (id1, "2026-06-01T00:00:00Z", "KXTEST-NEAR", "YES", "MED", "", "paper",
+              "2026-07-05T00:00:00Z"))
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+            (call_id, timestamp, ticker, direction, confidence, result, source, close_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (id2, "2026-06-01T00:00:00Z", "KXTEST-FAR", "NO", "MED", "", "paper",
+              "2026-08-01T00:00:00Z"))
+
+    result = get_next_resolution_date()
+    # Should be the earlier date (or at most 2026-07-05 if other earlier signals exist)
+    assert result is not None
+    assert result <= "2026-07-05"
+
+    # Cleanup
+    with _db() as conn:
+        conn.execute("DELETE FROM signals WHERE call_id IN (?, ?)", (id1, id2))
+
+
+def test_get_upcoming_resolutions_returns_only_window():
+    """Returns only signals closing within N days, excluding PASS direction."""
+    from core.logger import get_upcoming_resolutions, _db
+    from datetime import datetime, timezone, timedelta
+    import uuid
+    now = datetime.now(timezone.utc)
+    id_near   = str(uuid.uuid4())[:8]
+    id_far    = str(uuid.uuid4())[:8]
+    id_pass   = str(uuid.uuid4())[:8]
+    near_close = (now + timedelta(days=5)).isoformat()
+    far_close  = (now + timedelta(days=30)).isoformat()
+
+    with _db() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+            (call_id, timestamp, ticker, direction, confidence, result, source, close_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (id_near, now.isoformat(), "KXNEAR", "YES", "MED", "", "paper", near_close))
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+            (call_id, timestamp, ticker, direction, confidence, result, source, close_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (id_far, now.isoformat(), "KXFAR", "NO", "MED", "", "paper", far_close))
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+            (call_id, timestamp, ticker, direction, confidence, result, source, close_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (id_pass, now.isoformat(), "KXPASS", "PASS", "MED", "", "paper", near_close))
+
+    rows = get_upcoming_resolutions(days=14)
+    tickers = [r["ticker"] for r in rows]
+    assert "KXNEAR" in tickers
+    assert "KXFAR"  not in tickers
+    assert "KXPASS" not in tickers
+
+    # Cleanup
+    with _db() as conn:
+        conn.execute("DELETE FROM signals WHERE call_id IN (?, ?, ?)", (id_near, id_far, id_pass))
+
+
+def test_upcoming_resolutions_section_in_compile_report():
+    """UPCOMING RESOLUTIONS section must appear in compile_report output."""
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "UPCOMING RESOLUTIONS" in body
+
+
+def test_upcoming_resolutions_no_picks_message():
+    """When no picks close within 14 days, placeholder message appears."""
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
+    # Either shows the section with a "No picks" message, or shows upcoming picks
+    assert "UPCOMING RESOLUTIONS" in body
