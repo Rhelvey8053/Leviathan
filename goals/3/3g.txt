@@ -1,0 +1,81 @@
+/goal export_to_csv.py is hardened so Power BI receives clean, 
+correctly typed data with no unexpected NaN, no wrong default 
+values, and a validation report printed after each run showing 
+which columns have data gaps. Proven by: running the script 
+produces a clean CSV and pytest exits 0.
+
+SCOPE — export_to_csv.py only. No DB schema changes, no pipeline 
+changes, no changes to any other file.
+
+──────────────────────────────────────────────────────────────────
+FIX 1 — result column still has NaN
+──────────────────────────────────────────────────────────────────
+The current fillna approach is not catching all NaN. Replace with 
+an explicit conversion:
+
+    signals['result'] = signals['result'].astype(str)
+    signals['result'] = signals['result'].replace({'nan': '', 
+                                                   'None': '',
+                                                   'NaT': ''})
+
+Apply the same pattern to ALL string columns in the whitelist 
+that should never be NaN in Power BI.
+
+──────────────────────────────────────────────────────────────────
+FIX 2 — is_win is 0 for unresolved rows, should be blank
+──────────────────────────────────────────────────────────────────
+Current logic sets is_win=0 for all 63 rows. Correct behavior:
+  - result = 'WIN'  → is_win = 1
+  - result = 'LOSS' → is_win = 0
+  - result = ''     → is_win = None (blank in CSV)
+
+Update the is_win computation to use None for unresolved rows so 
+Power BI treats them as blank and excludes them from SUM().
+
+──────────────────────────────────────────────────────────────────
+FIX 3 — lv_band returns NaN when leviathan_score is blank
+──────────────────────────────────────────────────────────────────
+When leviathan_score is NULL in the DB, lv_band should output 
+'Unscored' (not NaN) so Power BI shows a readable label in charts 
+rather than a blank category.
+
+──────────────────────────────────────────────────────────────────
+FIX 4 — horizon_rank and confidence_rank default to 0 for blanks
+──────────────────────────────────────────────────────────────────
+When time_horizon or confidence is blank, the rank columns should 
+output 0 (not NaN) so Power BI sorts them consistently to the 
+bottom rather than treating them as missing.
+
+──────────────────────────────────────────────────────────────────
+FIX 5 — Post-export validation report
+──────────────────────────────────────────────────────────────────
+After writing the CSV, print a validation block so Reed always 
+knows what data is actually in the export:
+
+    [export] signals.csv — 63 rows, 31 columns
+    [export] Resolved: 4 | Pending: 59 | Wins: 0 | Losses: 4
+    [export] Win Rate: 0.0%
+    [export] Net PnL: -$8.55
+    [export] BLANK RATE WARNING (>50% blank):
+             leviathan_score: 100% blank — lv_band will show Unscored
+             time_horizon: 98% blank — horizon breakdown unavailable
+
+This makes it immediately obvious when key pipeline fields are 
+not being written, rather than silently producing empty charts.
+
+──────────────────────────────────────────────────────────────────
+PART B — TESTS (offline, tmp DB, no network)
+──────────────────────────────────────────────────────────────────
+Assert:
+  - result column has no NaN — only '' or 'WIN' or 'LOSS'
+  - is_win is None/blank for unresolved rows, 0 for LOSS, 
+    1 for WIN
+  - lv_band shows 'Unscored' when leviathan_score is NULL
+  - horizon_rank is 0 (not NaN) when time_horizon is blank
+  - confidence_rank is 0 (not NaN) when confidence is blank
+  - validation report prints without error on empty DB
+  - all existing passing tests still pass
+
+pytest exits 0 with output shown.
+
+Or stop after 10 turns.

@@ -1,47 +1,49 @@
 {
-  "run_at": "2026-06-19T12:43:20.218408+00:00",
+  "run_at": "2026-06-22T03:03:33.532064+00:00",
   "kalshi_tickers": [
     "KXNEXTUKPM-30-ABUR",
-    "KXNEXTUKPM-30-ACAR",
+    "KXSENATEPAD-28-SWIL",
     "KXRTICKET-28NOV07-JVANEKIR",
     "CONTROLS-2028-D",
     "CONTROLS-2028-R",
     "SENATEUT-28-R",
+    "KXPRESNOMD-28-WM",
+    "KXPRESNOMD-28-AB",
     "SENATEFL-28-R",
     "KXABRAHAMSY-29-JAN20",
     "KXABRAHAMSA-29-JAN20",
     "SENATEUT-28-D"
   ],
-  "signal_count": 13,
+  "signal_count": 15,
   "ticker_details": {
     "KXNEXTUKPM-30-ABUR": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 22326.8642,
+      "total_position_val": 32939.4061,
       "kalshi_title": "Will Andy Burnham be the next Prime Minister of United Kingdom?"
     },
-    "KXNEXTUKPM-30-ACAR": {
+    "KXSENATEPAD-28-SWIL": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 1067.2832,
-      "kalshi_title": "Will Al Carns be the next Prime Minister of United Kingdom?"
+      "total_position_val": 29093.1346,
+      "kalshi_title": "Will Susan Wild be the Democratic nominee for the Senate in Pennsylvania?"
     },
     "KXRTICKET-28NOV07-JVANEKIR": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 24838.3692,
+      "total_position_val": 24381.4216,
       "kalshi_title": "Will JD Vance and Erika Kirk be the 2028 Republican Presidential ticket?"
     },
     "CONTROLS-2028-D": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 21749.9667,
+      "total_position_val": 21499.9671,
       "kalshi_title": "Will the Democratic party win the Senate in 2028?"
     },
     "CONTROLS-2028-R": {
       "consensus_direction": "NO",
       "trader_count": 1,
-      "total_position_val": 21749.9041,
+      "total_position_val": 21249.9063,
       "kalshi_title": "Will the Republican party win the Senate in 2028?"
     },
     "SENATEUT-28-R": {
@@ -49,6 +51,18 @@
       "trader_count": 1,
       "total_position_val": 6781.8361,
       "kalshi_title": "Will Republicans win the Senate race in Utah?"
+    },
+    "KXPRESNOMD-28-WM": {
+      "consensus_direction": "YES",
+      "trader_count": 1,
+      "total_position_val": 3272.517,
+      "kalshi_title": "Will Wes Moore be the Democratic Presidential nominee in 2028?"
+    },
+    "KXPRESNOMD-28-AB": {
+      "consensus_direction": "NO",
+      "trader_count": 1,
+      "total_position_val": 2327.1415,
+      "kalshi_title": "Will Andy Beshear be the Democratic Presidential nominee in 2028?"
     },
     "SENATEFL-28-R": {
       "consensus_direction": "NO",
@@ -59,19 +73,19 @@
     "KXABRAHAMSY-29-JAN20": {
       "consensus_direction": "NO",
       "trader_count": 1,
-      "total_position_val": 23867.186700000002,
+      "total_position_val": 24732.211499999998,
       "kalshi_title": "Will Israel and Syria normalize relations before Jan 20, 2029?"
     },
     "KXABRAHAMSA-29-JAN20": {
       "consensus_direction": "NO",
       "trader_count": 1,
-      "total_position_val": 5551.517,
+      "total_position_val": 5643.0892,
       "kalshi_title": "Will Israel and Saudi Arabia normalize relations before Jan 20, 2029?"
     },
     "SENATEUT-28-D": {
       "consensus_direction": "YES",
       "trader_count": 1,
-      "total_position_val": 2225.9993,
+      "total_position_val": 2200.4132,
       "kalshi_title": "Will Democratics win the Senate race in Utah?"
     }
   }
