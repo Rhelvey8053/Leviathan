@@ -20,7 +20,33 @@ _STRING_COLS = frozenset({
     "result", "outcome", "direction", "confidence", "flag_path", "source",
     "time_horizon", "heuristic_direction", "heuristic_label",
     "whale_direction", "ticker", "title", "run_id", "call_id",
+    "close_time", "lv_band", "date",
 })
+
+# Computed columns that are derived at export time, not stored in the DB.
+_COMPUTED_COLS = frozenset({
+    "is_resolved", "is_win", "confidence_rank", "horizon_rank",
+    "date", "pnl_scaled", "lv_band",
+})
+
+# Analysis-relevant columns written to signals.csv, in display order.
+# Pipeline plumbing (run_id, from_signal, fill_count, fill_fee, outcome,
+# our_estimate, direction_aligned, entry_price, signal_call_id, logged_under,
+# resolution_date, whale_direction, heuristic_direction, etc.) are excluded.
+WHITELIST = [
+    "call_id", "date", "timestamp", "ticker", "title",
+    "source", "direction", "confidence", "confidence_rank",
+    "flag_path", "time_horizon", "horizon_rank",
+    "market_price", "edge", "net_edge", "base_rate",
+    "result", "is_resolved", "is_win", "pnl_if_traded", "pnl_scaled",
+    "leviathan_score", "lv_band",
+    "close_time", "sig_edge", "sig_drift", "sig_br_none",
+    "watchlist_signal", "whale_detected",
+    "heuristic_label", "short_horizon",
+]
+
+_CONF_RANK    = {"HIGH": 0, "MED": 1, "LOW": 2}
+_HORIZON_RANK = {"INTRADAY": 0, "WEEKLY": 1, "MONTHLY": 2, "QUARTERLY": 3, "LONG": 4}
 
 
 def _null_to_empty(headers: list[str], rows: list[tuple]) -> list[tuple]:
@@ -36,6 +62,73 @@ def _null_to_empty(headers: list[str], rows: list[tuple]) -> list[tuple]:
                 row[i] = ""
         out.append(tuple(row))
     return out
+
+
+def _add_computed_cols(row: dict) -> dict:
+    """Return a copy of row with analysis-ready computed columns added."""
+    r = dict(row)
+
+    result              = r.get("result") or ""
+    r["is_resolved"]    = 1 if result in ("WIN", "LOSS") else 0
+    r["is_win"]         = 1 if result == "WIN" else 0
+
+    conf                = (r.get("confidence") or "").upper()
+    r["confidence_rank"] = _CONF_RANK.get(conf, "")
+
+    horizon             = (r.get("time_horizon") or "").upper()
+    r["horizon_rank"]   = _HORIZON_RANK.get(horizon, "")
+
+    ts                  = r.get("timestamp") or ""
+    r["date"]           = ts[:10] if ts else ""
+
+    pnl = r.get("pnl_if_traded")
+    try:
+        r["pnl_scaled"] = round(float(pnl) * 10, 4)
+    except (TypeError, ValueError):
+        r["pnl_scaled"] = ""
+
+    lv = r.get("leviathan_score")
+    try:
+        lv_int = int(lv)
+        if lv_int >= 70:    r["lv_band"] = "A"
+        elif lv_int >= 55:  r["lv_band"] = "B"
+        elif lv_int >= 40:  r["lv_band"] = "C"
+        else:               r["lv_band"] = "D"
+    except (TypeError, ValueError):
+        r["lv_band"] = ""
+
+    return r
+
+
+def _signals_to_csv(conn: sqlite3.Connection, dest: str) -> int:
+    """
+    Write signals table to CSV with computed columns added and whitelist applied.
+    Pipeline plumbing columns are excluded; only WHITELIST columns are written.
+    """
+    cur        = conn.execute("SELECT * FROM signals")
+    db_headers = [d[0] for d in cur.description]
+    db_rows    = cur.fetchall()
+
+    # Final column set: WHITELIST ∩ (DB columns ∪ computed columns), in WHITELIST order.
+    available  = set(db_headers) | _COMPUTED_COLS
+    final_cols = [c for c in WHITELIST if c in available]
+
+    rows = []
+    for raw in db_rows:
+        row_dict = _add_computed_cols(dict(zip(db_headers, raw)))
+        out_row  = []
+        for col in final_cols:
+            val = row_dict.get(col)
+            if val is None and col in _STRING_COLS:
+                val = ""
+            out_row.append(val)
+        rows.append(out_row)
+
+    with open(dest, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(final_cols)
+        writer.writerows(rows)
+    return len(rows)
 
 
 def _table_to_csv(conn: sqlite3.Connection, table: str, dest: str) -> int:
@@ -66,8 +159,8 @@ def export_csvs(db_path: str = DB_PATH, export_dir: str = EXPORT_DIR) -> dict:
     try:
         conn = sqlite3.connect(db_path)
         try:
-            counts["signals"] = _table_to_csv(
-                conn, "signals", os.path.join(export_dir, "signals.csv")
+            counts["signals"] = _signals_to_csv(
+                conn, os.path.join(export_dir, "signals.csv")
             )
             counts["runs"] = _table_to_csv(
                 conn, "runs", os.path.join(export_dir, "runs.csv")
