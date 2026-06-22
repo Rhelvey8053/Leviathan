@@ -5,6 +5,7 @@ import sys
 import time
 import traceback
 import uuid
+import winsound
 from datetime import datetime, timezone
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -746,6 +747,7 @@ def main():
             pass
 
     print(f"\n=== Done in {time.time() - start_time:.1f}s | {len(final_signals)} signals | cost {_fmt_usd(cost)} ===\n")
+    winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
 
 
 if __name__ == "__main__":
