@@ -1,0 +1,45 @@
+/goal export_to_csv.py is updated so all exported CSVs are Power BI 
+friendly — null/NaN values in string columns are replaced with empty 
+strings before writing, so Power BI DAX formulas using = "" and 
+= "LOSS" work correctly. Proven by: re-running the script produces 
+a signals.csv with no NaN in string columns, and a passing offline 
+test (pytest exit 0, output shown).
+
+SCOPE — one file change only. Do NOT touch main.py, logger.py, 
+scanner.py, or any other file. Do NOT add new columns or change 
+what gets exported. Only change how nulls are written.
+
+PART A — update export_to_csv.py
+
+In the export_csvs() function, after reading signals and runs from 
+the DB and before writing to CSV, fill NaN with empty string for 
+these string columns (if they exist in the dataframe):
+
+    result, outcome, direction, confidence, flag_path, source,
+    time_horizon, heuristic_direction, heuristic_label,
+    whale_direction, ticker, title, run_id, call_id
+
+Use: df[col] = df[col].fillna('') for each column in the list 
+that exists in df.columns. Do not hardcode assumes about which 
+columns exist — check first.
+
+Numeric columns (market_price, edge, pnl_if_traded, etc.) should 
+remain as-is (NaN is fine for numerics in Power BI).
+
+PART B — TESTS (offline, tmp DB, no network)
+
+Assert:
+  - After export_csvs() runs against a tmp DB with some NULL result 
+    rows, the output signals.csv has no NaN values in the result column
+  - Numeric columns still export as numeric (not converted to string)
+  - Running twice does not error
+  - Empty DB still produces valid CSV with headers
+
+pytest exits 0 with output shown.
+
+PART C — verify
+
+Run python export_to_csv.py against the real leviathan.db and print 
+the result column value counts to confirm LOSS appears and no NaN.
+
+Or stop after 8 turns.
