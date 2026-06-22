@@ -222,5 +222,170 @@ class TestMissingDB(unittest.TestCase):
                 self.fail(f"export_csvs raised unexpectedly: {exc}")
 
 
+def _make_full_db(path: str) -> None:
+    """Create a DB with the full signals schema: whitelist cols + pipeline plumbing cols."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY,
+            timestamp TEXT,
+            ticker TEXT,
+            title TEXT,
+            source TEXT,
+            direction TEXT,
+            confidence TEXT,
+            flag_path TEXT,
+            time_horizon TEXT,
+            market_price REAL,
+            edge REAL,
+            net_edge REAL,
+            base_rate REAL,
+            result TEXT,
+            pnl_if_traded REAL,
+            leviathan_score INTEGER,
+            close_time TEXT,
+            sig_edge REAL,
+            sig_drift REAL,
+            sig_br_none REAL,
+            watchlist_signal INTEGER,
+            whale_detected INTEGER,
+            heuristic_label TEXT,
+            short_horizon INTEGER,
+            run_id TEXT,
+            from_signal TEXT,
+            fill_count INTEGER,
+            fill_fee REAL,
+            contract_type TEXT,
+            segment TEXT,
+            outcome TEXT,
+            our_estimate REAL,
+            direction_aligned INTEGER,
+            entry_price REAL,
+            signal_call_id TEXT,
+            logged_under TEXT,
+            resolution_date TEXT,
+            whale_direction TEXT,
+            heuristic_direction TEXT
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.execute("""
+        INSERT INTO signals (
+            call_id, timestamp, ticker, title, source, direction, confidence,
+            flag_path, time_horizon, market_price, edge, net_edge, base_rate,
+            result, pnl_if_traded, leviathan_score, close_time,
+            sig_edge, sig_drift, sig_br_none, watchlist_signal, whale_detected,
+            heuristic_label, short_horizon,
+            run_id, from_signal, fill_count, fill_fee, contract_type, segment,
+            outcome, our_estimate, direction_aligned, entry_price,
+            signal_call_id, logged_under, resolution_date, whale_direction,
+            heuristic_direction
+        ) VALUES (
+            'full1', '2026-06-19T10:00:00Z', 'KXTEST-001', 'Full test market',
+            'Kalshi', 'YES', 'HIGH',
+            NULL, 'WEEKLY', 0.60, 0.12, 0.10, 0.50,
+            'WIN', 0.12, 72, '2026-06-25T00:00:00Z',
+            0.05, 0.02, 0.30, 1, 1,
+            'momentum', 0,
+            'run1', NULL, 2, 0.01, 'binary', 'politics',
+            'WIN', 0.55, 1, 0.61,
+            'full1', 'full1', '2026-06-25', 'YES', 'UP'
+        )
+    """)
+    conn.execute("""
+        INSERT INTO runs VALUES ('run1','2026-06-19T10:00:00Z',50,1,'claude-sonnet-4-6')
+    """)
+    conn.commit()
+    conn.close()
+
+
+_DROPPED_COLS = [
+    "run_id", "from_signal", "fill_count", "fill_fee", "contract_type",
+    "segment", "outcome", "our_estimate", "direction_aligned", "entry_price",
+    "signal_call_id", "logged_under", "resolution_date", "whale_direction",
+    "heuristic_direction",
+]
+
+_COMPUTED_COLS_EXPECTED = [
+    "is_win", "is_resolved", "lv_band", "pnl_scaled",
+    "confidence_rank", "horizon_rank", "date",
+]
+
+
+class TestWhitelistExport(unittest.TestCase):
+
+    def test_only_whitelisted_columns_in_output(self):
+        """signals.csv must contain only columns from WHITELIST."""
+        import csv
+        from core.export_to_csv import WHITELIST
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "full.db")
+            out = os.path.join(tmpdir, "export")
+            _make_full_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                headers = next(csv.reader(f))
+            for col in headers:
+                self.assertIn(col, WHITELIST, f"Non-whitelist column in output: {col}")
+
+    def test_dropped_columns_absent(self):
+        """Pipeline plumbing columns must not appear in signals.csv."""
+        import csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "full.db")
+            out = os.path.join(tmpdir, "export")
+            _make_full_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                headers = next(csv.reader(f))
+            for col in _DROPPED_COLS:
+                self.assertNotIn(col, headers, f"Dropped column still present: {col}")
+
+    def test_computed_columns_present(self):
+        """All 7 computed columns must appear in signals.csv."""
+        import csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "full.db")
+            out = os.path.join(tmpdir, "export")
+            _make_full_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                headers = next(csv.reader(f))
+            for col in _COMPUTED_COLS_EXPECTED:
+                self.assertIn(col, headers, f"Computed column missing: {col}")
+
+    def test_computed_column_values_correct(self):
+        """Computed column values are derived correctly from the DB row."""
+        import csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "full.db")
+            out = os.path.join(tmpdir, "export")
+            _make_full_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["is_resolved"], "1",  "result=WIN should be resolved")
+        self.assertEqual(row["is_win"],      "1",  "result=WIN should be a win")
+        self.assertEqual(row["lv_band"],     "A",  "leviathan_score=72 → A band (>=70)")
+        self.assertEqual(row["confidence_rank"], "0", "HIGH confidence → rank 0")
+        self.assertEqual(row["horizon_rank"],    "1", "WEEKLY horizon → rank 1")
+        self.assertEqual(row["date"],        "2026-06-19", "date extracted from timestamp")
+        self.assertEqual(row["pnl_scaled"],  "1.2",        "0.12 * 10 = 1.2")
+
+    def test_double_run_does_not_error(self):
+        """Running export_csvs() twice with full schema overwrites cleanly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "full.db")
+            out = os.path.join(tmpdir, "export")
+            _make_full_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            export_csvs(db_path=db, export_dir=out)
+
+
 if __name__ == "__main__":
     unittest.main()
