@@ -1036,29 +1036,41 @@ def score_markets(flagged_markets: list[dict], config: dict,
     import time as _time
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
+    # Write the system prompt to a temp file to avoid Windows' ~32K CLI argument limit.
+    import tempfile as _tempfile
+    _sp_file = _tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="utf-8"
+    )
+    _sp_file.write(sys_prompt)
+    _sp_file.close()
+    _sp_path = _sp_file.name
+
     max_retries = 2
     result = None
-    for attempt in range(max_retries + 1):
-        result = subprocess.run(
-            [
-                claude_cmd,
-                "--print",
-                "--system-prompt", sys_prompt,
-                "--allowedTools", "WebSearch",
-                "--output-format", "text",
-            ],
-            input=user_prompt,
-            capture_output=True,
-            text=True,
-            timeout=180,
-            encoding="utf-8",
-            errors="replace",
-            env=clean_env,
-        )
-        if result.returncode == 0:
-            break
-        if attempt < max_retries:
-            _time.sleep(5)
+    try:
+        for attempt in range(max_retries + 1):
+            result = subprocess.run(
+                [
+                    claude_cmd,
+                    "--print",
+                    "--system-prompt-file", _sp_path,
+                    "--allowedTools", "WebSearch",
+                    "--output-format", "text",
+                ],
+                input=user_prompt,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                encoding="utf-8",
+                errors="replace",
+                env=clean_env,
+            )
+            if result.returncode == 0:
+                break
+            if attempt < max_retries:
+                _time.sleep(5)
+    finally:
+        _os.unlink(_sp_path)
 
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip()
