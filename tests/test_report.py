@@ -1665,3 +1665,58 @@ def test_upcoming_resolutions_no_picks_message():
     body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
     # Either shows the section with a "No picks" message, or shows upcoming picks
     assert "UPCOMING RESOLUTIONS" in body
+
+
+# ── Wilson CI tests (Section 3 — sample-size-gates + wilson-intervals) ─────────
+
+def test_wilson_ci_n0_returns_na():
+    """n=0 must return the N/A message."""
+    result = report._wilson_ci(50.0, 0)
+    assert "N/A" in result
+    assert "no resolved signals" in result
+
+
+def test_wilson_ci_known_values():
+    """p=50%, n=10 → CI roughly 0.237–0.763 (Wilson formula)."""
+    result = report._wilson_ci(50.0, 10)
+    # Strip formatting and parse low/high
+    # Expected format: "  95% CI:         23.7% – 76.3%  (n=10)"
+    assert "95% CI:" in result
+    assert "n=10" in result
+    # Extract percentages — low should be ~23-24%, high ~76-77%
+    import re
+    pcts = re.findall(r"(\d+\.\d+)%", result)
+    assert len(pcts) >= 2, f"Expected 2 percentages in: {result!r}"
+    low  = float(pcts[0])
+    high = float(pcts[1])
+    assert 22.0 < low  < 26.0, f"Expected low ~23.7%, got {low}%"
+    assert 74.0 < high < 78.0, f"Expected high ~76.3%, got {high}%"
+
+
+def test_wilson_ci_low_confidence_flag():
+    """n<5 must include 'low confidence' tag."""
+    result = report._wilson_ci(50.0, 3)
+    assert "low confidence" in result
+    assert "n=3" in result
+
+
+def test_wilson_ci_high_confidence_no_flag():
+    """n>=5 must NOT include 'low confidence' tag."""
+    result = report._wilson_ci(50.0, 10)
+    assert "low confidence" not in result
+
+
+def test_wilson_ci_n1_p0():
+    """Edge case: p=0%, n=1 — CI should still be computed (no division by zero)."""
+    result = report._wilson_ci(0.0, 1)
+    assert "95% CI:" in result
+    assert "N/A" not in result
+
+
+def test_wilson_ci_appears_in_compile_report():
+    """compile_report output must include a 95% CI line in TRACK RECORD."""
+    stats = dict(_EMPTY_STATS)
+    stats["win_rate"] = 50.0
+    stats["resolved"] = 10
+    body = report.compile_report([], [], stats, _run_meta(), _CFG)
+    assert "95% CI:" in body

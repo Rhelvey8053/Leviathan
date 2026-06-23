@@ -37,6 +37,22 @@ def _usd(v) -> str:
 def _rule(char="-") -> str:
     return char * W
 
+
+def _wilson_ci(p_pct, n: int) -> str:
+    """Returns a formatted Wilson 95% CI line for a win rate percentage over n trials."""
+    if n == 0:
+        return "  95% CI:         N/A (no resolved signals)"
+    p = p_pct / 100.0
+    z = 1.96
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = (p + z2 / (2 * n)) / denom
+    margin = z * ((p * (1 - p) / n + z2 / (4 * n * n)) ** 0.5) / denom
+    low  = center - margin
+    high = center + margin
+    tag = ", low confidence" if n < 5 else ""
+    return f"  95% CI:         {low:.1%} – {high:.1%}  (n={n}{tag})"
+
 def _section(title: str) -> str:
     return f"\n{title.upper()}\n{'-' * len(title)}"
 
@@ -453,6 +469,38 @@ def _trunc(s: str, n: int, ellipsis: bool = True) -> str:
     return s[:n - 3] + "..." if ellipsis else s[:n]
 
 
+def _parse_sm_snapshot(md_path: str) -> dict:
+    """Returns {(trader, ticker): total_position_val} from a smart_money .md file."""
+    snapshot: dict[tuple, float] = {}
+    try:
+        with open(md_path, encoding="utf-8") as _f:
+            in_table = False
+            for line in _f:
+                line = line.strip()
+                if line.startswith("## Kalshi Cross-References"):
+                    in_table = True
+                    continue
+                if in_table and (line.startswith("| Trader") or line.startswith("|---")):
+                    continue
+                if in_table and line.startswith("|"):
+                    cols = [c.strip() for c in line.split("|")[1:-1]]
+                    if len(cols) >= 7:
+                        trader = cols[0]
+                        ticker = cols[4]
+                        pos_s  = cols[6].replace("$", "").replace(",", "").strip()
+                        try:
+                            val = float(pos_s)
+                        except ValueError:
+                            val = 0.0
+                        key = (trader, ticker)
+                        snapshot[key] = snapshot.get(key, 0.0) + val
+                elif in_table and not line.startswith("|"):
+                    break
+    except (OSError, IOError):
+        pass
+    return snapshot
+
+
 def _smart_money_section(result: dict | None, show_detail: bool = True) -> list[str]:
     out = []
     out.append(_rule("="))
@@ -497,6 +545,47 @@ def _smart_money_section(result: dict | None, show_detail: bool = True) -> list[
             out.append(f"  {ticker:<25} {n_t:>2} {total_v:>9} {dir_s:<10}  {kalshi_t}")
         if overflow > 0:
             out.append(f"  ... and {overflow} more")
+        out.append("")
+
+    # SMART MONEY DRIFT: compare to yesterday's snapshot
+    _run_date = result.get("run_at", "")[:10] if result else ""
+    _sm_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "smart_money")
+    try:
+        _today_dt = date.fromisoformat(_run_date) if _run_date else date.today()
+    except ValueError:
+        _today_dt = date.today()
+    _yest_path = os.path.join(_sm_dir, f"{(_today_dt - timedelta(days=1)).isoformat()}.md")
+
+    if os.path.exists(_yest_path):
+        _prev = _parse_sm_snapshot(_yest_path)
+        _curr: dict[tuple, float] = {}
+        for _s in signals:
+            _key = (_s.get("trader", ""), _s.get("kalshi_ticker", ""))
+            _curr[_key] = _curr.get(_key, 0.0) + float(_s.get("position_val", 0))
+        _drift: list[tuple] = []
+        for _key in sorted(set(_prev) | set(_curr)):
+            _trader, _ticker = _key
+            _pv = _prev.get(_key, 0.0)
+            _cv = _curr.get(_key, 0.0)
+            _chg = _cv - _pv
+            if abs(_chg) >= 1000:
+                if _key not in _prev:
+                    _chg_s = "New position"
+                elif _key not in _curr:
+                    _chg_s = "Closed"
+                else:
+                    _chg_s = f"{'+' if _chg >= 0 else '-'}${abs(_chg):,.0f}"
+                _drift.append((_trader, _ticker, _chg_s))
+
+        out.append("  SMART MONEY DRIFT")
+        out.append("  " + "-" * 17)
+        if _drift:
+            out.append(f"  {'Wallet':<8}  {'Ticker':<25}  Change")
+            out.append(f"  {'-'*8}  {'-'*25}  {'-'*7}")
+            for _tr, _tk, _cs in _drift:
+                out.append(f"  {_tr[:8]:<8}  {_tk[:25]:<25}  {_cs}")
+        else:
+            out.append("  No significant drift today.")
         out.append("")
 
     if not show_detail:
@@ -802,6 +891,7 @@ def compile_report(
     out.append(f"  Total Calls:    {tc}")
     out.append(f"  Resolved:       {res}")
     out.append(f"  Win Rate:       {f'{wr:.1f}%' if wr is not None else '— (no resolved markets yet)'}")
+    out.append(_wilson_ci(wr if wr is not None else 0.0, res))
     out.append(f"  Avg Edge:       {_pct(ae) if ae is not None else '—'}")
     out.append(f"  Hypothetical P&L ($10/contract): {f'${pnl:.2f}' if pnl is not None else '—'}")
     out.append("")
@@ -817,6 +907,7 @@ def compile_report(
         out.append(f"    Probes Logged:  {p_total}")
         out.append(f"    Resolved:       {p_res}")
         out.append(f"    Hit Rate:       {f'{p_hr:.1f}%' if p_hr is not None else '— (pending settlement)'}")
+        out.append("  " + _wilson_ci(p_hr if p_hr is not None else 0.0, p_res))
         out.append(f"    Hi-Div (≥10%):  {p_hi_tot} probes, {f'{p_hi_hr:.1f}%' if p_hi_hr is not None else 'pending'}")
         if p_verdict:
             out.append(f"    Verdict:        {p_verdict}")
@@ -957,6 +1048,7 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
     out.append(f"  Total Calls:    {stats.get('total_calls', 0)}")
     out.append(f"  Resolved:       {stats.get('resolved', 0)}")
     out.append(f"  Win Rate:       {f'{wr:.1f}%' if wr is not None else '— (none resolved yet)'}")
+    out.append(_wilson_ci(wr if wr is not None else 0.0, stats.get("resolved", 0)))
     out.append(f"  Avg Edge:       {_pct(ae) if ae is not None else '—'}")
     out.append(f"  Hypo P&L:       {f'${pnl:.2f}' if pnl is not None else '—'}")
     if brier:

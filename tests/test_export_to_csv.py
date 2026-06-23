@@ -526,5 +526,75 @@ class TestHardenedExport(unittest.TestCase):
                 self.fail(f"export_csvs raised on empty DB: {exc}")
 
 
+class TestRealfillDedup(unittest.TestCase):
+    """Section 2 — realfill-dedup guard: warning printed for duplicate pending real_fill rows."""
+
+    def _make_dedup_db(self, path: str) -> None:
+        conn = sqlite3.connect(path)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+                call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+                source TEXT, direction TEXT, confidence TEXT, result TEXT
+            );
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+                signals_generated INTEGER, model_used TEXT
+            );
+        """)
+        # Two duplicate real_fill rows for KXFOO — same ticker, source=real_fill, result=''
+        conn.execute(
+            "INSERT INTO signals VALUES ('rf1','2026-06-01T00:00:00Z','KXFOO','Foo',"
+            "'real_fill','YES','','')"
+        )
+        conn.execute(
+            "INSERT INTO signals VALUES ('rf2','2026-06-02T00:00:00Z','KXFOO','Foo',"
+            "'real_fill','NO','','')"
+        )
+        # A non-duplicate real_fill row — should not trigger warning
+        conn.execute(
+            "INSERT INTO signals VALUES ('rf3','2026-06-03T00:00:00Z','KXBAR','Bar',"
+            "'real_fill','YES','','')"
+        )
+        conn.execute("INSERT INTO runs VALUES ('r1','2026-06-01',0,0,'test')")
+        conn.commit()
+        conn.close()
+
+    def test_duplicate_realfill_prints_warning(self):
+        """Export with duplicate pending real_fill rows must print WARNING line."""
+        import io
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "dedup.db")
+            out = os.path.join(tmpdir, "export")
+            self._make_dedup_db(db)
+            import sys
+            captured = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = captured
+            try:
+                export_csvs(db_path=db, export_dir=out)
+            finally:
+                sys.stdout = old_stdout
+            output = captured.getvalue()
+        self.assertIn("WARNING: duplicate real_fill detected for KXFOO", output)
+
+    def test_no_warning_for_unique_realfill(self):
+        """No WARNING for a ticker with only one pending real_fill row."""
+        import io
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "dedup.db")
+            out = os.path.join(tmpdir, "export")
+            self._make_dedup_db(db)
+            import sys
+            captured = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = captured
+            try:
+                export_csvs(db_path=db, export_dir=out)
+            finally:
+                sys.stdout = old_stdout
+            output = captured.getvalue()
+        self.assertNotIn("WARNING: duplicate real_fill detected for KXBAR", output)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,148 @@
+/goal Build a dynamic, machine-readable backlog for Leviathan: 
+backlog.json plus a backlog.py CLI with status and add subcommands 
+sharing one validation/trigger engine. Proven by: backlog.json parses 
+with 21 items, python backlog.py status prints a summary, python 
+backlog.py add appends a valid item and rejects invalid ones 
+atomically, and offline pytest exits 0 with output shown.
+
+SCOPE — create three new files only: backlog.json, backlog.py, and a 
+test file (test_backlog.py). Do NOT touch main.py, scanner.py, 
+export_to_csv.py, logger.py, or the DB. No network.
+
+PART A — backlog.json
+
+Top level:
+{
+  "version": "1.0",
+  "updated": "2026-06-23",
+  "metrics_glossary": {
+    "resolved_count": "total resolved signals in DB",
+    "resolved_count_per_category_max": "max resolved across any single heuristic category",
+    "resolved_count_per_wallet_max": "max resolved across any qualified smart-money wallet",
+    "fills_count": "count of real_fill rows"
+  },
+  "items": [ ... ]
+}
+
+Each item:
+{
+  "id": "kebab-case-id",
+  "title": "short title",
+  "area": "execution|data-quality|validation|reporting|calibration|smart-money|backtesting",
+  "priority": 1,
+  "status": "ready|locked|blocked",
+  "trigger": { "all": [ { "metric": "...", "op": ">=", "value": N } ] },
+  "depends_on": ["other-id"],
+  "action": "one sentence on what executing this means",
+  "notes": "one sentence on why the gate is set where it is"
+}
+
+Manual items use "trigger": { "all": [] } (empty = trivially true) and 
+"depends_on": [].
+
+Status precedence at creation (blocked > locked > ready):
+  - depends_on non-empty            -> "blocked"
+  - else trigger.all non-empty      -> "locked"
+  - else                            -> "ready"
+
+Transcribe these 21 items (id | area | priority | trigger | depends_on):
+
+ 1 trade-reconciliation        | execution     | 1 | manual                              | -
+ 2 realfill-dedup              | data-quality  | 1 | manual                              | -
+ 3 sample-size-gates           | validation    | 2 | manual                              | -
+ 4 wilson-intervals            | reporting     | 2 | manual                              | -
+ 5 title-scraping-fix          | data-quality  | 3 | manual                              | -
+ 6 smart-money-drift-alerts    | smart-money   | 3 | manual                              | -
+ 7 backtest-harness            | backtesting   | 3 | manual                              | -
+ 8 position-reconciliation-job | execution     | 4 | manual                              | trade-reconciliation
+ 9 brier-tracking              | calibration   | 4 | resolved_count>=25                  | -
+10 confluence-detection        | validation    | 4 | resolved_count>=25                  | -
+11 edge-decay-analysis         | validation    | 5 | resolved_count>=30                  | -
+12 per-wallet-track-record     | smart-money   | 4 | resolved_count_per_wallet_max>=10   | -
+13 skill-vs-luck-weighting     | smart-money   | 5 | resolved_count_per_wallet_max>=10   | -
+14 walk-forward-validation     | backtesting   | 5 | manual                              | backtest-harness
+15 slippage-tracking           | execution     | 5 | fills_count>=20                     | -
+16 calibration-curve           | calibration   | 5 | resolved_count>=50                  | -
+17 calibration-curve-dashboard | reporting     | 6 | resolved_count>=50                  | calibration-curve
+18 per-heuristic-scorecard     | reporting     | 4 | resolved_count_per_category_max>=15 | -
+19 heuristic-sunsetting        | calibration   | 5 | resolved_count_per_category_max>=15 | -
+20 empirical-base-rates-poly   | calibration   | 4 | manual                              | -
+21 auto-calibration-loop       | calibration   | 6 | resolved_count>=30,resolved_count_per_category_max>=15 | sample-size-gates,brier-tracking
+
+For trigger column: "manual" = empty all array; "metric>=N" = one 
+condition; comma-separated = multiple conditions ANDed in the all array. 
+Item 21 has 2 trigger conditions AND 2 depends_on entries. Items 8, 14, 
+17, 21 have depends_on, so their status is "blocked" regardless of 
+trigger. Fill action and notes for each in one sentence, plain language, 
+no em dashes.
+
+PART B — backlog.py (CLI, importable engine)
+
+Shared functions (importable for the weekly checker later and for tests):
+  - parse_trigger(s) -> dict. "manual" returns {"all": []}. Otherwise 
+    split on comma, parse each "metric<op>value" via regex 
+    ^([a-z_]+)(>=|<=|==|>|<)(\d+(?:\.\d+)?)$, value cast to number.
+  - determine_status(trigger, depends_on) -> applies precedence above.
+  - validate_item(item, existing_items, glossary) -> returns list of 
+    error strings (empty = valid). Checks: id is non-empty and unique, 
+    area in allowed set, priority is int 1-9, every trigger metric is in 
+    glossary, every op is valid, every value numeric, every depends_on 
+    id exists in existing_items.
+  - load_backlog(path) / save_backlog(path, data) with indent=2 so git 
+    diffs stay clean.
+
+Subcommand: status
+  python backlog.py status [--file backlog.json]
+  Loads, validates the whole file, then prints a summary: counts per 
+  status, then ready/locked/blocked sections each listing id, priority, 
+  and trigger in plain text. Sorted by priority then id. Windows-safe, 
+  plain ASCII only, no unicode box characters. Exits 0.
+
+Subcommand: add
+  python backlog.py add --id ID --title T --area A --priority N 
+    --action TEXT [--trigger "manual"] [--depends-on a,b] [--notes TEXT] 
+    [--file backlog.json] [--dry-run]
+  Builds the item, computes status via determine_status, runs 
+  validate_item against current file contents. If any errors: print them, 
+  write NOTHING, exit non-zero (atomic). If valid and not dry-run: append 
+  to items, set top-level "updated" to today (local date), save, then 
+  print the new item's id, computed status, and trigger. --dry-run does 
+  all validation and prints the would-be result but does not write.
+
+Default subcommand when none given: status (so bare python backlog.py 
+still prints the summary).
+
+PART C — TESTS (pytest, offline, operate on a temp copy of backlog.json 
+so the real file is never mutated)
+
+Assert:
+  - backlog.json parses, exactly 21 items, all ids unique
+  - every item passes validate_item against the rest
+  - every depends_on references a real id
+  - every trigger metric is in metrics_glossary
+  - item 21 has 2 trigger conditions and 2 depends_on entries
+  - parse_trigger("manual") == {"all": []}
+  - parse_trigger("resolved_count>=30,resolved_count_per_category_max>=15") 
+    yields 2 conditions with correct metric/op/value types
+  - determine_status: empty trigger + no deps -> ready; data trigger + no 
+    deps -> locked; any deps -> blocked
+  - add a valid manual item to a temp file -> count +1, status ready
+  - add an item with a data trigger -> status locked
+  - add an item with depends_on to a real id -> status blocked
+  - add with duplicate id -> non-zero exit, file unchanged (count same)
+  - add with bad area -> rejected, file unchanged
+  - add with trigger metric not in glossary -> rejected, file unchanged
+  - add with depends_on to missing id -> rejected, file unchanged
+  - python backlog.py status exits 0
+pytest exits 0 with output shown.
+
+PART D — verify
+
+Run python backlog.py status and show the printed summary. Then run a 
+real example against the actual file with --dry-run to prove add works 
+without mutating: 
+  python backlog.py add --id test-idea --title "Test" --area validation 
+    --priority 5 --action "demo" --trigger "resolved_count>=40" --dry-run
+Show its output.
+
+Or stop after 10 turns.

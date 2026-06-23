@@ -1,0 +1,169 @@
+/goal Build a weekly backlog checker for Leviathan as 
+backlog_checker.py. It reads backlog.json, computes live metrics 
+from leviathan.db, evaluates every locked item's trigger, flags 
+newly ready items, prompts Continue or Manual Review per item, 
+regenerates BACKLOG.md, and appends a summary to the weekly email 
+report. Proven by: offline pytest exits 0, BACKLOG.md generates 
+correctly, and a dry-run against real DB prints a valid summary.
+
+SCOPE — create three new files: backlog_checker.py, BACKLOG.md 
+(generated), tests/test_backlog_checker.py. Import from backlog.py 
+(load_backlog, save_backlog, validate_item, determine_status, 
+parse_trigger). Do NOT touch main.py, scanner.py, reporter.py, 
+export_to_csv.py, or leviathan.db directly (read-only DB access 
+only). No network calls.
+
+PART A — backlog_checker.py
+
+METRICS ENGINE
+Compute these four metrics from leviathan.db (read-only):
+  resolved_count:
+    SELECT count(*) FROM SIGNALS WHERE result != '' AND result IS NOT NULL
+  resolved_count_per_category_max:
+    SELECT max(cnt) FROM (
+      SELECT flag_path, count(*) as cnt FROM SIGNALS 
+      WHERE result != '' AND result IS NOT NULL 
+      GROUP BY flag_path
+    )
+  resolved_count_per_wallet_max:
+    SELECT max(cnt) FROM (
+      SELECT wallet, count(*) as cnt FROM SMART_MONEY_FILLS
+      WHERE resolved = 1
+      GROUP BY wallet
+    ) -- if table missing or empty return 0, no error
+  fills_count:
+    SELECT count(*) FROM SIGNALS WHERE source = 'real_fill'
+
+Store as dict: {"resolved_count": N, ...}
+
+TRIGGER EVALUATOR
+evaluate_triggers(backlog, metrics) -> dict mapping id -> bool.
+For each item: evaluate all conditions in trigger.all using live 
+metrics. All must be true for the item to unlock. Items with 
+depends_on are only eligible if all dependencies have status 
+"done" (not just "ready"). Return True only if trigger passes AND 
+deps are satisfied.
+
+STATUS UPDATER
+compare_statuses(old_backlog, new_results) -> list of 
+newly_unlocked item ids (were locked/blocked, now ready). Update 
+each item's status in memory. Do NOT write to backlog.json 
+automatically — only write after user confirmation.
+
+PROMPT ENGINE (CLI mode)
+For each newly unlocked item, print:
+  [UNLOCKED] <id> (priority <N>)
+  Action: <action field>
+  Trigger met: <which conditions cleared>
+  
+  (C) Continue   (M) Manual Review   (S) Skip
+  > 
+
+  C = execute the action (call execute_action, see below), 
+      update status to "done" in backlog.json, save
+  M = update status to "ready" in backlog.json, save, 
+      print "Flagged for manual review"
+  S = do nothing, status stays locked/blocked
+
+If no newly unlocked items: print "No new items unlocked." and exit.
+
+EXECUTE_ACTION
+A dispatch table mapping item id -> callable. Start with stubs 
+for all 22 items that just print 
+"[STUB] Execute: <action>" and return True. 
+The real implementations come later per item. 
+execute_action(item_id) calls the stub, returns True/False.
+
+EMAIL MODE (--email flag)
+When run with --email, skip the CLI prompt entirely. Instead:
+  - Collect all newly unlocked items
+  - Format a plain-text email block:
+    === LEVIATHAN BACKLOG UPDATE ===
+    Date: <today>
+    Newly Unlocked: <count>
+    
+    <for each item>
+    [<priority>] <id>
+    Action: <action>
+    Gate cleared: <conditions>
+    Reply CONTINUE:<id> or REVIEW:<id> to act.
+    ----
+    
+    Live Metrics:
+    resolved_count: N
+    resolved_count_per_category_max: N
+    resolved_count_per_wallet_max: N
+    fills_count: N
+    
+    Full backlog: <N> ready / <N> locked / <N> blocked
+    ===
+  - Return this block as a string so reporter.py can append it 
+    to the weekly email. Print it to stdout too.
+  - Do NOT send email directly. reporter.py handles sending.
+
+BACKLOG.MD GENERATOR
+generate_markdown(backlog, metrics) -> string. Regenerate on 
+every run regardless of whether items unlocked. Format:
+
+# Leviathan Backlog
+Last updated: <date> | Metrics: resolved=N, fills=N
+
+## Ready (N)
+| Priority | ID | Action | Area |
+|----------|-----|--------|------|
+...sorted by priority
+
+## Locked (N)
+| Priority | ID | Gate | Area |
+|----------|-----|------|------|
+...gate column shows "resolved_count >= 30" etc
+
+## Blocked (N)
+| Priority | ID | Waiting On | Area |
+|----------|-----|-----------|------|
+...waiting on = depends_on ids
+
+## Done (N)
+...same as ready table
+
+Write to BACKLOG.md in repo root. ASCII only in terminal output, 
+markdown formatting is fine in the .md file.
+
+SCHEDULER INTEGRATION
+Add a comment block at the bottom of backlog_checker.py showing 
+the Windows Task Scheduler command to run this weekly:
+  schtasks /create /tn "LeviathanBacklogChecker" /tr 
+  "python C:\Users\Administrator\Downloads\Leviathan\backlog_checker.py --email" 
+  /sc weekly /d MON /st 08:00
+And the manual run command:
+  python backlog_checker.py          (CLI prompt mode)
+  python backlog_checker.py --email  (email block mode)
+
+PART B — TESTS (pytest, offline, tmp DB)
+
+Use a tmp sqlite DB with controlled data for all metric tests.
+Assert:
+  - compute_metrics returns correct counts from tmp DB
+  - compute_metrics returns 0 for missing SMART_MONEY_FILLS, 
+    no error
+  - evaluate_triggers: item with resolved_count>=25 unlocks 
+    when metric=25, stays locked at 24
+  - evaluate_triggers: item with two conditions requires both
+  - evaluate_triggers: blocked item with unmet dep stays locked 
+    even if trigger passes
+  - compare_statuses returns correct newly_unlocked list
+  - generate_markdown produces valid markdown with all three 
+    status sections
+  - email block contains all required fields
+  - execute_action stubs return True and print [STUB] line
+  - backlog_checker.py --email exits 0 against real DB 
+    (dry-run, no writes)
+pytest exits 0 with output shown.
+
+PART C — verify
+
+Run against real leviathan.db in dry-run mode:
+  python backlog_checker.py --email
+Show full output. Then show the generated BACKLOG.md content.
+
+Or stop after 10 turns.

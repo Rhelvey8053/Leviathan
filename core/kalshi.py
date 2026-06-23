@@ -242,6 +242,32 @@ def fetch_event_markets(config: dict, event_ticker: str) -> list[dict]:
     return resp.json().get("markets", [])
 
 
+def fetch_market_with_retry(config: dict, ticker: str) -> dict:
+    """
+    Fetch a single market by ticker, retrying once after a 2s delay if the title
+    is missing or equals the ticker (title-scraping-fix guard).
+    Returns the market dict from the API response.
+    """
+    base_url = _get_base_url(config)
+    path = f"/markets/{ticker}"
+
+    def _fetch_once():
+        resp = requests.get(
+            f"{base_url}{path}",
+            headers=_auth_headers("GET", _vpath(path)),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json().get("market", {})
+
+    market = _fetch_once()
+    title = market.get("title") or ""
+    if not title or title == ticker:
+        time.sleep(2)
+        market = _fetch_once()
+    return market
+
+
 def fetch_orderbook(config: dict, ticker: str) -> dict:
     """
     Returns the full order book for a market — all bid/ask price levels.

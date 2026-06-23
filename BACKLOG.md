@@ -1,17 +1,11 @@
 # Leviathan Backlog
 Last updated: 2026-06-23 | Metrics: resolved=4, fills=13
 
-## Ready (8)
+## Ready (2)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
-| 1 | trade-reconciliation | Reconcile paper signals against actual Kalshi fills to confirm each signal has a corresponding real trade. | execution |
-| 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
-| 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
-| 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
-| 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |
-| 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
-| 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |
+| 4 | position-reconciliation-job | Automate daily reconciliation of open paper signals against the Kalshi position API. | execution |
+| 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |
 
 ## Locked (9)
 | Priority | ID | Gate | Area |
@@ -26,15 +20,21 @@ Last updated: 2026-06-23 | Metrics: resolved=4, fills=13
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (5)
+## Blocked (3)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
-| 4 | position-reconciliation-job | trade-reconciliation | execution |
-| 5 | walk-forward-validation | backtest-harness | backtesting |
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (0)
+## Done (8)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
+| 1 | trade-reconciliation | Reconcile paper signals against actual Kalshi fills to confirm each signal has a corresponding real trade. | execution |
+| 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
+| 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
+| 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
+| 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |
+| 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
+| 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |
