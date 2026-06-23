@@ -2084,13 +2084,45 @@ def score_market(market: dict, config: dict) -> dict:
     }
 
 
-def score_markets(markets: list[dict], config: dict) -> list[dict]:
-    """Scores all filtered markets and returns them sorted by priority."""
+_HIGH_PRICE_THRESHOLD = 0.85
+
+
+def apply_high_price_filter(markets: list[dict]) -> tuple[list[dict], int]:
+    """
+    Removes markets where market_price >= 0.85 (low return potential).
+    Returns (kept_markets, filtered_count).
+    Logs a [FILTERED] line for each removed market.
+    Markets with no mid_price pass through with a warning.
+    """
+    kept = []
+    filtered = 0
+    for m in markets:
+        mp = m.get("mid_price")
+        if mp is None:
+            ticker = m.get("ticker", "?")
+            print(f"[WARN] {ticker} — market_price missing, passing through high-price filter")
+            kept.append(m)
+            continue
+        if mp >= _HIGH_PRICE_THRESHOLD:
+            ticker = m.get("ticker", "?")
+            print(f"[FILTERED] {ticker} — market price {mp:.0%} above 0.85 threshold, low return potential")
+            filtered += 1
+        else:
+            kept.append(m)
+    return kept, filtered
+
+
+def score_markets(markets: list[dict], config: dict) -> tuple[list[dict], int]:
+    """
+    Scores all filtered markets and returns (sorted_markets, high_price_filtered_count).
+    Markets at or above the 0.85 high-price threshold are removed before sorting.
+    """
     scored = [score_market(m, config) for m in markets]
+    scored, hp_filtered = apply_high_price_filter(scored)
     # Sort: watchlist-overlap first, then flagged, then by edge desc
     scored.sort(key=lambda m: (
         not m.get("watchlist_signal", False),
         not m.get("flag", False),
         -(m.get("raw_edge") or 0),
     ))
-    return scored
+    return scored, hp_filtered

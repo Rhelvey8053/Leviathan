@@ -1,0 +1,118 @@
+/goal Add two signal quality improvements to Leviathan: a high-price 
+filter that suppresses signals where market_price >= 0.85, and EV 
+per contract display in the report. Proven by: pytest exits 0, a 
+signal at 0.90 is filtered out in tests, EV displays correctly in 
+report output, and a dry-run of the daily report shows the changes.
+
+SCOPE — touch scanner.py (or wherever signals are scored/filtered), 
+reporter.py (or equivalent report builder), and test files only. 
+Do NOT touch leviathan.db, backlog.json, export_to_csv.py, or 
+backlog.py.
+
+====================================================
+PART A — high-price filter
+====================================================
+In the signal generation/scoring step, after a signal is built 
+and before it is written to the DB, add a filter:
+
+  if market_price >= 0.85:
+      skip signal, log reason:
+      "[FILTERED] <ticker> — market price {market_price:.0%} 
+      above 0.85 threshold, low return potential"
+
+This applies to ALL signal paths (heuristic, drift, smart money 
+cross-ref). Do NOT apply to signals already in the DB with 
+result != '' (don't retroactively filter resolved signals).
+
+Add a counter to run statistics:
+  "Filtered (high price): N"
+
+Show this in the RUN STATISTICS block of the daily report.
+
+Edge case: if market_price is None or missing, do not filter — 
+let it through and log a warning.
+
+====================================================
+PART B — EV per contract display
+====================================================
+Expected value per contract formula:
+  If direction = YES:
+    EV = (estimate - market_price) * $10
+  If direction = NO:
+    EV = (market_price - estimate) * $10
+  Where $10 is the standard contract size
+
+Add EV display to two places:
+
+1. In each signal block in the daily/weekly report, after the 
+   Edge line:
+     "  EV/contract:    $X.XX"
+   Example: edge of 20pp = $2.00 EV per contract
+
+2. In the TOP PICKS section, add EV/contract next to Kelly:
+     "Market: 16.5%  Est: 35.0%  Edge: +18.5pp  
+      EV: $1.85  Kelly(1/4): 5.5%"
+
+====================================================
+PART C — betting queue
+====================================================
+Add a BETTING QUEUE block to the daily report, placed after 
+TOP PICKS and before NEW SIGNALS. 
+
+Logic:
+- Take all pending signals (result = '') from DB
+- Cross-reference against real_fill rows — exclude any ticker 
+  already in real_fill
+- Filter out market_price >= 0.85
+- Sort by: urgency score = (edge * 0.6) + (1/days_to_close * 0.4)
+  normalized so both components are on similar scales
+- Show top 5 only
+
+Format:
+  ====================================================
+  BETTING QUEUE  (top 5 unplaced signals by urgency x edge)
+  ====================================================
+  Rank  Ticker                    Days  Price  Edge   EV     Kelly
+  ----  ------------------------  ----  -----  -----  -----  -----
+  1     KXCABLEAVE-26MAY22-26JUL    9   10.5%  54.5%  $5.45  12.1%
+  2     KXLAKECONF-26MAY12-SEP01   70   16.5%  18.5%  $1.85   5.5%
+  ...
+  
+  Already placed (excluded): KXTAIWANLVL4-26JUL01, ...
+
+If no unplaced signals: print "  No unplaced signals in queue."
+
+====================================================
+PART D — TESTS
+====================================================
+Assert:
+  - signal at market_price=0.90 is filtered, not written to DB
+  - signal at market_price=0.84 passes through
+  - signal at market_price=None passes through with warning
+  - EV calculation correct for YES: (0.35-0.165)*10 = $1.85
+  - EV calculation correct for NO: (0.77-0.62)*10 = $1.50
+  - betting queue excludes tickers already in real_fill
+  - betting queue sorts by urgency score correctly
+  - betting queue shows max 5 items
+  - run statistics block contains "Filtered (high price):" line
+pytest exits 0 with output shown.
+
+====================================================
+PART E — verify
+====================================================
+Run a dry-run of the daily report generator and show:
+1. The BETTING QUEUE block output
+2. One full signal block showing the EV/contract line
+3. The RUN STATISTICS block showing the filter counter
+
+Then add betting-queue, high-price-filter, and ev-per-contract 
+as "done" items to backlog.json via:
+  python backlog.py add --id high-price-filter ...
+  python backlog.py add --id ev-per-contract ...
+  python backlog.py add --id betting-queue ...
+  (mark each as done immediately since they're being built now)
+
+git add -A && git commit -m "Add high-price filter, EV display, 
+and betting queue to Leviathan signal pipeline"
+
+Or stop after 12 turns.
