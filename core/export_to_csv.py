@@ -96,7 +96,9 @@ def _add_computed_cols(row: dict) -> dict:
         r["is_win"] = None
 
     conf = _clean_str(r.get("confidence")).upper()
-    # FIX 4: default 0 so Power BI sorts blanks consistently
+    if conf not in _CONF_RANK:
+        r["confidence"] = ""
+        conf = ""
     r["confidence_rank"] = _CONF_RANK.get(conf, 0)
 
     horizon = _clean_str(r.get("time_horizon")).upper()
