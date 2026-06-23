@@ -1,0 +1,246 @@
+{
+  "version": "1.0",
+  "updated": "2026-06-23",
+  "metrics_glossary": {
+    "resolved_count": "total resolved signals in DB",
+    "resolved_count_per_category_max": "max resolved across any single heuristic category",
+    "resolved_count_per_wallet_max": "max resolved across any qualified smart-money wallet",
+    "fills_count": "count of real_fill rows"
+  },
+  "items": [
+    {
+      "id": "trade-reconciliation",
+      "title": "Trade Reconciliation",
+      "area": "execution",
+      "priority": 1,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Reconcile paper signals against actual Kalshi fills to confirm each signal has a corresponding real trade.",
+      "notes": "Must be completed before position-reconciliation-job can safely automate the same check."
+    },
+    {
+      "id": "realfill-dedup",
+      "title": "Real Fill Deduplication",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held.",
+      "notes": "Duplicate fills skew PnL tracking and inflate fill counts used by downstream gates."
+    },
+    {
+      "id": "sample-size-gates",
+      "title": "Sample Size Gates",
+      "area": "validation",
+      "priority": 2,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Document the minimum resolved-signal thresholds that gate each downstream analysis step.",
+      "notes": "Prevents drawing statistical conclusions before sample sizes support reliable estimates."
+    },
+    {
+      "id": "wilson-intervals",
+      "title": "Wilson Confidence Intervals",
+      "area": "reporting",
+      "priority": 2,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Add Wilson score confidence intervals to win-rate stats in the email report.",
+      "notes": "Point estimates are misleading at small sample sizes and Wilson intervals are well-calibrated."
+    },
+    {
+      "id": "title-scraping-fix",
+      "title": "Title Scraping Fix",
+      "area": "data-quality",
+      "priority": 3,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Fix market title capture so titles are populated correctly for all logged signal rows.",
+      "notes": "Blank titles break Power BI filtering and make signals unidentifiable in the dashboard."
+    },
+    {
+      "id": "smart-money-drift-alerts",
+      "title": "Smart Money Drift Alerts",
+      "area": "smart-money",
+      "priority": 3,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Alert when a tracked wallet materially shifts position size or direction between daily scans.",
+      "notes": "Direction reversals by high-volume wallets are the strongest signal of new market information."
+    },
+    {
+      "id": "backtest-harness",
+      "title": "Backtest Harness",
+      "area": "backtesting",
+      "priority": 3,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Build a framework to replay historical signals against resolved market outcomes.",
+      "notes": "Required foundation before walk-forward-validation can be attempted."
+    },
+    {
+      "id": "position-reconciliation-job",
+      "title": "Position Reconciliation Job",
+      "area": "execution",
+      "priority": 4,
+      "status": "blocked",
+      "trigger": { "all": [] },
+      "depends_on": ["trade-reconciliation"],
+      "action": "Automate daily reconciliation of open paper signals against the Kalshi position API.",
+      "notes": "Depends on trade-reconciliation being clean first so automation does not propagate existing errors."
+    },
+    {
+      "id": "brier-tracking",
+      "title": "Brier Score Tracking",
+      "area": "calibration",
+      "priority": 4,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count", "op": ">=", "value": 25 } ] },
+      "depends_on": [],
+      "action": "Track Brier scores over time to measure forecast calibration quality across runs.",
+      "notes": "25 resolved signals gives a stable enough baseline to detect systematic miscalibration."
+    },
+    {
+      "id": "confluence-detection",
+      "title": "Confluence Detection",
+      "area": "validation",
+      "priority": 4,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count", "op": ">=", "value": 25 } ] },
+      "depends_on": [],
+      "action": "Flag and track signals where multiple independent sources agree on direction.",
+      "notes": "Multi-source agreement historically lifts win rates and needs resolved data to measure the effect."
+    },
+    {
+      "id": "edge-decay-analysis",
+      "title": "Edge Decay Analysis",
+      "area": "validation",
+      "priority": 5,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count", "op": ">=", "value": 30 } ] },
+      "depends_on": [],
+      "action": "Measure how quickly identified edges decay as markets approach their resolution date.",
+      "notes": "30 resolved signals needed to fit a decay curve with acceptable variance."
+    },
+    {
+      "id": "per-wallet-track-record",
+      "title": "Per-Wallet Track Record",
+      "area": "smart-money",
+      "priority": 4,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count_per_wallet_max", "op": ">=", "value": 10 } ] },
+      "depends_on": [],
+      "action": "Build per-wallet win rate and PnL tables using resolved signals aligned to wallet positions.",
+      "notes": "10 resolved signals per wallet is the minimum for a meaningful individual track record."
+    },
+    {
+      "id": "skill-vs-luck-weighting",
+      "title": "Skill vs Luck Weighting",
+      "area": "smart-money",
+      "priority": 5,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count_per_wallet_max", "op": ">=", "value": 10 } ] },
+      "depends_on": [],
+      "action": "Apply a binomial skill test to wallet track records to separate genuine skill from luck.",
+      "notes": "Requires the same per-wallet sample size as per-wallet-track-record before the test has power."
+    },
+    {
+      "id": "walk-forward-validation",
+      "title": "Walk-Forward Validation",
+      "area": "backtesting",
+      "priority": 5,
+      "status": "blocked",
+      "trigger": { "all": [] },
+      "depends_on": ["backtest-harness"],
+      "action": "Run rolling out-of-sample validation on the scoring model using the backtest harness.",
+      "notes": "Requires backtest-harness to exist before rolling windows can be executed."
+    },
+    {
+      "id": "slippage-tracking",
+      "title": "Slippage Tracking",
+      "area": "execution",
+      "priority": 5,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "fills_count", "op": ">=", "value": 20 } ] },
+      "depends_on": [],
+      "action": "Track the difference between signal entry price and actual fill price across all real fills.",
+      "notes": "20 fills gives a stable estimate of average slippage for bid-ask spread modeling."
+    },
+    {
+      "id": "calibration-curve",
+      "title": "Calibration Curve",
+      "area": "calibration",
+      "priority": 5,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count", "op": ">=", "value": 50 } ] },
+      "depends_on": [],
+      "action": "Plot predicted probabilities against actual win rates in decile buckets.",
+      "notes": "50 resolved signals needed to populate all decile buckets with meaningful counts."
+    },
+    {
+      "id": "calibration-curve-dashboard",
+      "title": "Calibration Curve Dashboard",
+      "area": "reporting",
+      "priority": 6,
+      "status": "blocked",
+      "trigger": { "all": [ { "metric": "resolved_count", "op": ">=", "value": 50 } ] },
+      "depends_on": ["calibration-curve"],
+      "action": "Add the calibration curve chart to the Power BI dashboard.",
+      "notes": "Depends on calibration-curve analysis being complete before the visual can be built."
+    },
+    {
+      "id": "per-heuristic-scorecard",
+      "title": "Per-Heuristic Scorecard",
+      "area": "reporting",
+      "priority": 4,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count_per_category_max", "op": ">=", "value": 15 } ] },
+      "depends_on": [],
+      "action": "Build a per-heuristic win rate and PnL scorecard broken down by flag_path category.",
+      "notes": "15 resolved signals per category is the minimum for reliable category-level comparisons."
+    },
+    {
+      "id": "heuristic-sunsetting",
+      "title": "Heuristic Sunsetting",
+      "area": "calibration",
+      "priority": 5,
+      "status": "locked",
+      "trigger": { "all": [ { "metric": "resolved_count_per_category_max", "op": ">=", "value": 15 } ] },
+      "depends_on": [],
+      "action": "Disable or reweight heuristics that consistently underperform relative to base rates.",
+      "notes": "Requires per-category sample size before sunsetting decisions are statistically reliable."
+    },
+    {
+      "id": "empirical-base-rates-poly",
+      "title": "Empirical Base Rates from Polymarket",
+      "area": "calibration",
+      "priority": 4,
+      "status": "ready",
+      "trigger": { "all": [] },
+      "depends_on": [],
+      "action": "Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes.",
+      "notes": "Empirical rates reduce dependence on subjective prior calibration and should improve edge estimates."
+    },
+    {
+      "id": "auto-calibration-loop",
+      "title": "Auto-Calibration Loop",
+      "area": "calibration",
+      "priority": 6,
+      "status": "blocked",
+      "trigger": { "all": [
+        { "metric": "resolved_count", "op": ">=", "value": 30 },
+        { "metric": "resolved_count_per_category_max", "op": ">=", "value": 15 }
+      ] },
+      "depends_on": ["sample-size-gates", "brier-tracking"],
+      "action": "Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates.",
+      "notes": "Requires both sufficient global and per-category sample sizes before automation is safe."
+    }
+  ]
+}
