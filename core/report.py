@@ -38,6 +38,22 @@ def _rule(char="-") -> str:
     return char * W
 
 
+def _ev_per_contract(direction: str, market_price, estimate) -> str | None:
+    """Returns formatted EV/contract string, or None if inputs are missing."""
+    try:
+        mp  = float(market_price)
+        est = float(estimate)
+    except (TypeError, ValueError):
+        return None
+    if direction == "YES":
+        ev = (est - mp) * 10
+    elif direction == "NO":
+        ev = (mp - est) * 10
+    else:
+        return None
+    return f"${ev:+.2f}"
+
+
 def _wilson_ci(p_pct, n: int) -> str:
     """Returns a formatted Wilson 95% CI line for a win rate percentage over n trials."""
     if n == 0:
@@ -319,6 +335,9 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     lines.append(f"  Market:       {mkt_p}")
     lines.append(f"  Our Estimate: {est_p}")
     lines.append(f"  Edge:         {edge_s}")
+    _ev = _ev_per_contract(direction, s.get("market_price"), s.get("our_estimate"))
+    if _ev is not None:
+        lines.append(f"  EV/contract:  {_ev}")
     _ne = s.get("net_edge")
     if _ne is not None:
         _ne_str = f"  Net Edge:     {_ne*100:+.1f} pp (after spread)"
@@ -683,6 +702,8 @@ def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
         edge_v  = float(s.get("edge") or 0)
         kelly   = _kelly_fraction(direction, s.get("market_price"), s.get("our_estimate"))
         kelly_s = f"  Kelly(1/4): {kelly[1]*100:.1f}%" if kelly else ""
+        ev_s    = _ev_per_contract(direction, s.get("market_price"), s.get("our_estimate"))
+        ev_l    = f"  EV: {ev_s}" if ev_s else ""
 
         rep_cnt = s.get("repeat_count", 0) or 0
         rep_l   = f"  [REPEAT x{rep_cnt}]" if rep_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
@@ -690,10 +711,116 @@ def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
         out.append(f"{i}. {CONF_LABEL[conf]} / BUY {direction}  /  {horizon}{fp_l}{str_l}")
         ticker_close = f"{ticker}  ·  {close_fmt}{urgency}{rep_l}" if close_fmt else f"{ticker}{urgency}{rep_l}"
         out.append(f"   {ticker_close}")
-        out.append(f"   Market: {mkt_p}  Est: {est_p}  Edge: {edge_v*100:+.1f} pp{kelly_s}")
+        out.append(f"   Market: {mkt_p}  Est: {est_p}  Edge: {edge_v*100:+.1f} pp{ev_l}{kelly_s}")
         if i < len(ranked):
             out.append("")
     out.append(_rule("="))
+    out.append("")
+    return out
+
+
+def _betting_queue(db_path: str | None = None, top_n: int = 5) -> list[str]:
+    """
+    Returns lines for the BETTING QUEUE block:
+    pending signals sorted by urgency = (edge*0.6) + (1/days_to_close * 0.4),
+    excluding tickers already in real_fill and market_price >= 0.85.
+    """
+    import sqlite3 as _sq
+    from pathlib import Path as _P
+
+    if db_path is None:
+        db_path = str(_P(__file__).parent.parent / "leviathan.db")
+
+    out = []
+    out.append(_rule("="))
+    out.append("BETTING QUEUE  (top 5 unplaced signals by urgency x edge)")
+    out.append(_rule("="))
+    out.append("")
+
+    try:
+        conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True)
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT ticker FROM signals WHERE source = 'real_fill'"
+        )
+        placed = {r[0] for r in cur.fetchall()}
+
+        cur.execute(
+            "SELECT ticker, direction, market_price, our_estimate, edge, close_time, confidence "
+            "FROM signals "
+            "WHERE result = '' AND source != 'real_fill' AND direction != 'PASS' "
+            "ORDER BY timestamp DESC"
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        out.append(f"  (Queue unavailable: {e})")
+        out.append("")
+        return out
+
+    now = datetime.now(timezone.utc)
+    candidates = []
+    already_placed = []
+    for row in rows:
+        ticker, direction, mp, est, edge, close_time, conf = row
+        if ticker in placed:
+            already_placed.append(ticker)
+            continue
+        try:
+            mp_f = float(mp or 0)
+        except (TypeError, ValueError):
+            mp_f = 0.0
+        if mp_f >= 0.85:
+            continue
+        try:
+            edge_f = float(edge or 0)
+        except (TypeError, ValueError):
+            edge_f = 0.0
+        days_left = None
+        if close_time:
+            try:
+                dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                days_left = max((dt - now).total_seconds() / 86400, 0.01)
+            except Exception:
+                pass
+        urgency = (edge_f * 0.6) + ((1.0 / days_left * 0.4) if days_left else 0.0)
+        ev = _ev_per_contract(direction, mp_f, est)
+        kelly = _kelly_fraction(direction, mp_f, est)
+        kelly_s = f"{kelly[1]*100:.1f}%" if kelly else "—"
+        candidates.append({
+            "ticker": ticker, "direction": direction, "mp": mp_f, "edge": edge_f,
+            "days": days_left, "urgency": urgency, "ev": ev, "kelly": kelly_s,
+        })
+
+    # Deduplicate by ticker — keep highest-urgency row per ticker
+    seen: dict[str, dict] = {}
+    for c in candidates:
+        t = c["ticker"]
+        if t not in seen or c["urgency"] > seen[t]["urgency"]:
+            seen[t] = c
+    top = sorted(seen.values(), key=lambda x: -x["urgency"])[:top_n]
+
+    if not top:
+        out.append("  No unplaced signals in queue.")
+    else:
+        out.append(f"  {'Rank':<4}  {'Ticker':<26}  {'Days':>4}  {'Price':>5}  {'Edge':>5}  {'EV':>6}  Kelly")
+        out.append(f"  {'----':<4}  {'-'*26}  {'----':>4}  {'-----':>5}  {'-----':>5}  {'------':>6}  -----")
+        for i, c in enumerate(top, 1):
+            days_s = f"{c['days']:.0f}" if c["days"] is not None else "—"
+            ev_s   = c["ev"] if c["ev"] else "—"
+            out.append(
+                f"  {i:<4}  {c['ticker'][:26]:<26}  {days_s:>4}  "
+                f"{c['mp']*100:.1f}%  {c['edge']*100:.1f}%  {ev_s:>6}  {c['kelly']}"
+            )
+
+    if already_placed:
+        unique_placed = sorted(set(already_placed))
+        placed_s = ", ".join(unique_placed[:8])
+        if len(unique_placed) > 8:
+            placed_s += f", +{len(unique_placed)-8} more"
+        out.append("")
+        out.append(f"  Already placed (excluded): {placed_s}")
+
     out.append("")
     return out
 
@@ -704,7 +831,7 @@ def compile_report(
     signals, whale_only, stats, run_meta, config,
     all_filtered=None, new_signals=None, repeat_signals=None,
     smart_money_result=None, probe_stats=None, flag_path_stats=None,
-    lv_stats=None,
+    lv_stats=None, db_path=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
@@ -750,6 +877,9 @@ def compile_report(
     all_q = _qualifying(signals, threshold_rank, min_lv)
     if all_q:
         out.extend(_top_picks(all_q, n=3))
+
+    # ── Betting queue ─────────────────────────────────────────────────────
+    out.extend(_betting_queue(db_path=db_path))
 
     # ── New signals ───────────────────────────────────────────────────────
     out.append(_rule("="))
@@ -956,6 +1086,7 @@ def compile_report(
     model = run_meta.get("model_used", "—").replace("claude-", "")
     out.append(f"  Markets Scanned:   {n_mkt}")
     out.append(f"  Signals Generated: {run_meta.get('signals_generated', 0)}")
+    out.append(f"  Filtered (high price): {run_meta.get('high_price_filtered', 0)}")
     out.append(f"  Model:             {model}")
     out.append(f"  Cost:              {_usd(run_meta.get('cost_usd'))}")
     out.append(f"  Runtime:           {runtime_s:.0f}s")

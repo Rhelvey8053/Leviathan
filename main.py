@@ -160,7 +160,8 @@ def main():
         except Exception as _e:
             print(f"      [warn] Smart money tag failed: {_e}")
 
-        scored_markets = scanner.score_markets(filtered, config)
+        scored_markets, hp_filtered = scanner.score_markets(filtered, config)
+        run_meta["high_price_filtered"] = hp_filtered
 
         # Post-scoring event dedup: picks the best-signal market per event
         # (watchlist > net_edge > raw_edge > volume) instead of raw volume.
@@ -730,7 +731,8 @@ def main():
                                       smart_money_result=smart_money_result,
                                       probe_stats=probe_stats,
                                       flag_path_stats=flag_path_stats,
-                                      lv_stats=lv_stats)
+                                      lv_stats=lv_stats,
+                                      db_path=logger.DB_PATH)
         report.send_report(body, final_signals, run_meta["whale_flags"], config)
     except Exception as e:
         print(f"      FAILED: {e}")
@@ -741,7 +743,8 @@ def main():
                                          smart_money_result=smart_money_result,
                                          probe_stats=logger.get_stats_probe(),
                                          flag_path_stats=logger.get_stats_by_flag_path(),
-                                         lv_stats=logger.get_stats_by_leviathan_score())
+                                         lv_stats=logger.get_stats_by_leviathan_score(),
+                                         db_path=logger.DB_PATH)
             print(body)
         except Exception:
             pass

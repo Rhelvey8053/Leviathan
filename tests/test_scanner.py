@@ -324,7 +324,7 @@ def test_score_markets_flagged_first():
     # "Some random event" → base_rate=None → flag=True
     flagged   = _market(mid=0.30, title="Some random event")
 
-    results = scanner.score_markets([unflagged, flagged], BASE_CFG)
+    results, _ = scanner.score_markets([unflagged, flagged], BASE_CFG)
     assert results[0]["flag"] is True
     assert results[1]["flag"] is False
 
@@ -814,7 +814,7 @@ def test_watchlist_tag_priority_sorts_first():
     untagged["watchlist_signal"] = False
     untagged["time_horizon"] = "MONTHLY"
     untagged["close_time"] = _close(30)
-    results = scanner.score_markets([untagged, tagged], BASE_CFG)
+    results, _ = scanner.score_markets([untagged, tagged], BASE_CFG)
     assert results[0]["ticker"] == "KXTAGGED"
 
 

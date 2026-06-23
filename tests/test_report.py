@@ -1720,3 +1720,183 @@ def test_wilson_ci_appears_in_compile_report():
     stats["resolved"] = 10
     body = report.compile_report([], [], stats, _run_meta(), _CFG)
     assert "95% CI:" in body
+
+
+# ─── Goal 4a Part D: high-price filter ────────────────────────────────────────
+
+import sys
+from io import StringIO
+from core import scanner as _scanner
+
+
+def _mkt(mid_price=0.30, ticker="KXTEST"):
+    return {
+        "ticker": ticker, "title": f"Will {ticker} happen?",
+        "mid_price": mid_price, "volume": 5000, "yes_bid": 0.28,
+        "yes_ask": 0.32, "close_time": None, "is_deactivated": False,
+        "category": "POLITICS",
+    }
+
+
+def test_high_price_filter_at_0_90_is_filtered(capsys):
+    m = _mkt(mid_price=0.90, ticker="KXHIGH-90")
+    kept, n_filtered = _scanner.apply_high_price_filter([m])
+    assert n_filtered == 1
+    assert len(kept) == 0
+    captured = capsys.readouterr()
+    assert "[FILTERED]" in captured.out
+    assert "KXHIGH-90" in captured.out
+
+
+def test_high_price_filter_at_0_84_passes_through():
+    m = _mkt(mid_price=0.84, ticker="KXLOW-84")
+    kept, n_filtered = _scanner.apply_high_price_filter([m])
+    assert n_filtered == 0
+    assert len(kept) == 1
+    assert kept[0]["ticker"] == "KXLOW-84"
+
+
+def test_high_price_filter_none_passes_with_warning(capsys):
+    m = _mkt(ticker="KXNOMID")
+    m["mid_price"] = None
+    kept, n_filtered = _scanner.apply_high_price_filter([m])
+    assert n_filtered == 0
+    assert len(kept) == 1
+    captured = capsys.readouterr()
+    assert "[WARN]" in captured.out
+    assert "KXNOMID" in captured.out
+
+
+# ─── Goal 4a Part D: EV/contract calculations ─────────────────────────────────
+
+def test_ev_yes_calculation():
+    """YES: EV = (estimate - market_price) * 10 = (0.35 - 0.165) * 10 = $1.85"""
+    ev = report._ev_per_contract("YES", 0.165, 0.35)
+    assert ev is not None
+    val = float(ev.replace("$", "").replace("+", ""))
+    assert abs(val - 1.85) < 0.01
+
+
+def test_ev_no_calculation():
+    """NO: EV = (market_price - estimate) * 10 = (0.77 - 0.62) * 10 = $1.50"""
+    ev = report._ev_per_contract("NO", 0.77, 0.62)
+    assert ev is not None
+    val = float(ev.replace("$", "").replace("+", ""))
+    assert abs(val - 1.50) < 0.01
+
+
+def test_ev_shown_in_signal_block():
+    """EV/contract line appears in signal block after Edge line."""
+    s = _signal(direction="YES", market_price=0.165, our_estimate=0.35)
+    lines = report._signal_block(s, index=1)
+    full = "\n".join(lines)
+    assert "EV/contract" in full
+    assert "$" in full
+
+
+def test_ev_shown_in_top_picks():
+    """EV appears in top picks executive summary line."""
+    s = _signal(confidence="HIGH", direction="YES", market_price=0.165, our_estimate=0.35, edge=0.185)
+    lines = report._top_picks([s])
+    pick_line = " ".join(lines)
+    assert "EV:" in pick_line
+    assert "$" in pick_line
+
+
+# ─── Goal 4a Part D: betting queue ────────────────────────────────────────────
+
+import sqlite3
+import tempfile
+
+
+def _make_bq_db(tmp_path, pending_rows=None, fill_tickers=None):
+    db = tmp_path / "bq_test.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT, ticker TEXT, direction TEXT, market_price REAL,
+            our_estimate REAL, edge REAL, close_time TEXT,
+            confidence TEXT, result TEXT, source TEXT, timestamp TEXT
+        );
+    """)
+    for r in (pending_rows or []):
+        conn.execute(
+            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                r.get("call_id", r["ticker"]),
+                r["ticker"], r.get("direction", "YES"),
+                r.get("market_price", 0.30), r.get("our_estimate", 0.55),
+                r.get("edge", 0.25), r.get("close_time", "2026-07-10T00:00:00Z"),
+                r.get("confidence", "MED"), "", "paper",
+                r.get("timestamp", "2026-06-20T00:00:00Z"),
+            )
+        )
+    for tk in (fill_tickers or []):
+        conn.execute(
+            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (tk, tk, "YES", 0.20, 0.50, 0.30, None, "MED", "", "real_fill",
+             "2026-06-20T00:00:00Z")
+        )
+    conn.commit()
+    conn.close()
+    return str(db)
+
+
+def test_betting_queue_excludes_real_fill_tickers(tmp_path):
+    db = _make_bq_db(
+        tmp_path,
+        pending_rows=[
+            {"ticker": "KXPLACED", "call_id": "p1"},
+            {"ticker": "KXUNPLACED", "call_id": "p2"},
+        ],
+        fill_tickers=["KXPLACED"],
+    )
+    lines = report._betting_queue(db_path=db)
+    full = "\n".join(lines)
+    assert "KXUNPLACED" in full
+    assert "Already placed" in full
+    assert "KXPLACED" in full.split("Already placed")[1]
+
+
+def test_betting_queue_sorts_by_urgency(tmp_path):
+    """Higher urgency (closer close_time + edge) should rank first."""
+    from datetime import datetime, timezone, timedelta
+    near = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    far  = (datetime.now(timezone.utc) + timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    db = _make_bq_db(
+        tmp_path,
+        pending_rows=[
+            {"ticker": "KXFAR",  "call_id": "f1", "edge": 0.20, "close_time": far},
+            {"ticker": "KXNEAR", "call_id": "n1", "edge": 0.20, "close_time": near},
+        ],
+    )
+    lines = report._betting_queue(db_path=db)
+    full = "\n".join(lines)
+    near_pos = full.find("KXNEAR")
+    far_pos  = full.find("KXFAR")
+    assert near_pos < far_pos, "KXNEAR (higher urgency) should appear before KXFAR"
+
+
+def test_betting_queue_shows_max_5(tmp_path):
+    """Betting queue must show at most 5 rows."""
+    db = _make_bq_db(
+        tmp_path,
+        pending_rows=[
+            {"ticker": f"KXITEM{i:02d}", "call_id": f"c{i}",
+             "edge": 0.10 + i * 0.01}
+            for i in range(8)
+        ],
+    )
+    lines = report._betting_queue(db_path=db)
+    rank_lines = [l for l in lines if l.strip().startswith(("1 ", "2 ", "3 ", "4 ", "5 ", "6 "))]
+    assert len(rank_lines) <= 5
+
+
+# ─── Goal 4a Part D: run statistics block ─────────────────────────────────────
+
+def test_run_statistics_contains_filtered_high_price():
+    """RUN STATISTICS block must show 'Filtered (high price):' line."""
+    meta = _run_meta(high_price_filtered=3)
+    body = report.compile_report([], [], _EMPTY_STATS, meta, _CFG)
+    assert "Filtered (high price):" in body
+    assert "3" in body

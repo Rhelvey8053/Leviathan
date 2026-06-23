@@ -381,6 +381,45 @@
       ],
       "action": "Add a Power BI page showing realized hit rate over time per qualified smart-money wallet",
       "notes": "Viz layer on top of the per-wallet metric, gated so it only surfaces once wallets have enough resolved cross-refs to be readable"
+    },
+    {
+      "id": "high-price-filter",
+      "title": "High-price filter (market_price >= 0.85)",
+      "area": "data-quality",
+      "priority": 5,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Filter out markets at or above 0.85 market price before writing to DB",
+      "notes": ""
+    },
+    {
+      "id": "ev-per-contract",
+      "title": "EV per contract display in signals and top picks",
+      "area": "reporting",
+      "priority": 5,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Show EV/contract in signal blocks and top picks summary",
+      "notes": ""
+    },
+    {
+      "id": "betting-queue",
+      "title": "Betting queue block in daily report",
+      "area": "reporting",
+      "priority": 5,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Show top 5 unplaced signals sorted by urgency in daily report",
+      "notes": ""
     }
   ]
 }
