@@ -43,7 +43,7 @@ def tmp_backlog(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_parses_and_21_items(backlog_data):
-    assert len(backlog_data["items"]) == 21
+    assert len(backlog_data["items"]) == 22
 
 
 def test_all_ids_unique(backlog_data):

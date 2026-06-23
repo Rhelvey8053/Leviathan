@@ -1,0 +1,238 @@
+/goal Work through all 8 ready items in backlog.json in priority 
+order. Each section is independent — if one fails, continue to 
+the next. After all sections complete, run export_to_csv.py to 
+refresh the CSV, then update backlog.json marking completed items 
+as "done". Proven by: all sections complete or explicitly skipped 
+with reason, pytest exits 0, and python backlog.py status shows 
+completed items as done.
+
+GLOBAL CONSTRAINTS
+- Read leviathan.db with sqlite3, read-only except where 
+  explicitly told to write
+- No network calls
+- Windows-compatible paths throughout
+- Do not touch scanner.py, main.py, or any heuristic files
+- After all sections: run export_to_csv.py, then run 
+  python backlog.py status and show output
+- Or stop after 25 turns total
+
+====================================================
+SECTION 1 — trade-reconciliation (priority 1)
+====================================================
+Clean up real_fill rows in leviathan.db that don't match actual 
+held positions. Two confirmed duplicates:
+
+1. KXIMPEACHCABINET-26JUL01 — 3 rows exist, keep earliest YES 
+   only, delete 2
+2. KXAILEGISLATION-27-JAN01 — 2 rows exist, keep earliest YES 
+   only, delete 1
+
+Steps:
+A) Print all real_fill rows before touching anything:
+   SELECT date, ticker, direction, result, source 
+   FROM SIGNALS WHERE source = 'real_fill' ORDER BY date
+B) Delete the duplicate rows by keeping MIN(rowid) per ticker 
+   for the two affected tickers only. Do NOT touch any other rows.
+C) Print all real_fill rows after deletion to confirm count 
+   dropped from 15 to 13
+D) Mark trade-reconciliation as "done" in backlog.json
+
+====================================================
+SECTION 2 — realfill-dedup (priority 1)
+====================================================
+Add a guard to export_to_csv.py so duplicate real_fill rows 
+can never silently persist into the CSV again.
+
+In the signals export block, after reading from DB and before 
+writing CSV, add:
+  - A dedup check: if any ticker appears more than once with 
+    source = real_fill AND result = '', log a warning line:
+    "WARNING: duplicate real_fill detected for <ticker>"
+  - Do NOT auto-delete from DB here — just warn so it's visible
+  - Add a comment: # realfill-dedup guard
+
+Prove by: add a tmp duplicate row to a test DB, run export, 
+confirm warning prints. pytest test added.
+
+Mark realfill-dedup as "done" in backlog.json
+
+====================================================
+SECTION 3 — sample-size-gates + wilson-intervals 
+(priority 2, do together)
+====================================================
+Add Wilson score confidence intervals to the track record block 
+in both daily and weekly email reports.
+
+Wilson score formula for proportion p, n trials, z=1.96:
+  center = (p + z²/2n) / (1 + z²/n)
+  margin = z * sqrt(p(1-p)/n + z²/4n²) / (1 + z²/n)
+  low = center - margin
+  high = center + margin
+
+Where to add it:
+In reporter.py (or equivalent), find where Win Rate is computed 
+and printed in the TRACK RECORD block. After the win rate line, 
+add a new line:
+  "  95% CI:         {low:.1%} – {high:.1%}  (n={n})"
+
+Edge cases:
+  - n=0: print "  95% CI:         N/A (no resolved signals)"
+  - n<5: print "  95% CI:         {low:.1%} – {high:.1%}  
+    (n={n}, low confidence)"
+
+Also add the same CI line to the Research Probe Track Record 
+block using its own n and win rate.
+
+Do NOT change any other part of the report format.
+Prove by: unit test with known values (p=0.5, n=10 should give 
+CI roughly 0.237–0.763). pytest exits 0.
+
+Mark sample-size-gates and wilson-intervals as "done" in 
+backlog.json
+
+====================================================
+SECTION 4 — title-scraping-fix (priority 3)
+====================================================
+Find markets where title = ticker (scraper fallback) and fix 
+the root cause in the scraper.
+
+Step A — audit: 
+  SELECT ticker, title FROM SIGNALS 
+  WHERE title = ticker OR title IS NULL OR title = ''
+  Print count and sample rows.
+
+Step B — fix the scraper:
+  In scanner.py or wherever market title is fetched, find the 
+  fallback that assigns ticker to title when scrape fails.
+  Add a retry: if title is empty/null/equals ticker after first 
+  fetch, attempt one more fetch with a 2s delay before falling 
+  back. Do NOT change any heuristic logic.
+
+Step C — backfill: for existing rows where title = ticker, 
+  do NOT auto-update the DB (titles need live fetch, not a 
+  guess). Just log how many need backfill so it's visible.
+
+Mark title-scraping-fix as "done" in backlog.json
+
+====================================================
+SECTION 5 — smart-money-drift-alerts (priority 3)
+====================================================
+Surface wallet position changes in the daily email report.
+
+In the smart money section of the daily report, add a DRIFT 
+ALERTS block after the existing Kalshi Targets table:
+
+  SMART MONEY DRIFT
+  -----------------
+  Wallet   Ticker                    Change
+  -------- ------------------------- -------
+  wan123   CONTROLS-2028-R           +$5,000
+  ...
+
+Logic:
+- Compare current snapshot position sizes against previous 
+  day's snapshot for each qualified wallet + ticker pair
+- If a position changed by more than $1,000 in either 
+  direction, flag it as drift
+- "New position" if ticker wasn't in yesterday's snapshot
+- "Closed" if ticker was in yesterday's but not today's
+- If no drift detected: print "  No significant drift today."
+- If no previous snapshot exists: skip block silently
+
+For the snapshot comparison, use whatever existing smart money 
+data structure is in the DB. If yesterday's data isn't stored, 
+add a daily snapshot write to the smart money scan so future 
+runs have something to compare against. Minimal schema change 
+only.
+
+Mark smart-money-drift-alerts as "done" in backlog.json
+
+====================================================
+SECTION 6 — backtest-harness (priority 3)
+====================================================
+Build a backtest harness that replays Leviathan heuristics 
+against historical Polymarket resolution data.
+
+This is a scaffold only — no live data fetch, no network. 
+Build the structure so it's ready to plug real data in.
+
+Create backtest.py in repo root with:
+
+class BacktestRunner:
+  - load_signals(path): loads signals CSV
+  - load_resolutions(path): loads a resolutions CSV with 
+    columns: ticker, resolved_yes (bool), close_date
+  - match_signals_to_resolutions(): joins on ticker, computes 
+    hit (direction=YES and resolved_yes=True, or 
+    direction=NO and resolved_yes=False)
+  - compute_stats(): returns dict with:
+      total, matched, hit_rate, avg_edge,
+      by_confidence {HIGH/MED/LOW: {n, hits, rate}},
+      by_flag_path {path: {n, hits, rate}},
+      by_horizon {Intraday/Weekly/Quarterly/Long-Term: 
+        {n, hits, rate}}
+  - report(output_path): writes a plain text report to file
+
+CLI: python backtest.py --signals path --resolutions path 
+     --output report.txt
+Prints summary to stdout and writes full report to file.
+
+Include a sample resolutions CSV with 5 dummy rows so the 
+harness can be tested immediately without real data.
+
+Prove by: pytest runs harness against sample data, stats 
+compute correctly, report writes without error. 
+pytest exits 0.
+
+Mark backtest-harness as "done" in backlog.json
+
+====================================================
+SECTION 7 — empirical-base-rates-poly (priority 4)
+====================================================
+This section is a scaffold only — no network, no live 
+Polymarket fetch.
+
+Create base_rates.py with:
+- A BASE_RATES dict mapping heuristic category names to 
+  hand-coded prior rates (copy existing values from wherever 
+  they live in scanner.py or config)
+- A load_empirical_rates(path) function that reads a CSV 
+  (columns: category, resolved, hits) and returns a dict of 
+  empirical rates
+- A merge_rates(priors, empirical, min_n=15) function that 
+  replaces a prior with the empirical rate only if n >= min_n, 
+  otherwise keeps the prior (shrinkage-lite)
+- A cli: python base_rates.py --empirical path prints a 
+  comparison table showing prior vs empirical vs merged rate 
+  per category
+
+No actual Polymarket data fetching. This is the plumbing that 
+will receive data once the backtest harness has results to feed 
+it.
+
+Prove by: unit tests on merge_rates with known inputs. 
+pytest exits 0.
+
+Mark empirical-base-rates-poly as "done" in backlog.json
+
+====================================================
+FINAL STEPS
+====================================================
+1. Run: python export_to_csv.py
+   Confirm no errors, show output
+
+2. Run: python backlog.py status
+   All 8 sections should show as "done"
+   Show full output
+
+3. Run: pytest tests/ -v
+   All tests must pass
+   Show full output
+
+4. git add -A && git commit -m "Complete all 8 ready backlog 
+   items: trade-reconciliation, realfill-dedup, 
+   sample-size-gates, wilson-intervals, title-scraping-fix, 
+   smart-money-drift-alerts, backtest-harness, 
+   empirical-base-rates-poly"
+
+Or stop after 25 turns.

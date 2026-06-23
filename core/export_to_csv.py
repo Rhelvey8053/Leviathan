@@ -185,6 +185,20 @@ def _signals_to_csv(conn: sqlite3.Connection, dest: str) -> int:
     db_headers = [d[0] for d in cur.description]
     db_rows    = cur.fetchall()
 
+    # realfill-dedup guard
+    _src_idx = db_headers.index("source") if "source" in db_headers else -1
+    _tkr_idx = db_headers.index("ticker") if "ticker" in db_headers else -1
+    _res_idx = db_headers.index("result") if "result" in db_headers else -1
+    if _src_idx >= 0 and _tkr_idx >= 0 and _res_idx >= 0:
+        _rf_seen: dict[str, int] = {}
+        for _raw in db_rows:
+            if str(_raw[_src_idx] or "") == "real_fill" and str(_raw[_res_idx] or "") == "":
+                _t = str(_raw[_tkr_idx] or "")
+                _rf_seen[_t] = _rf_seen.get(_t, 0) + 1
+        for _t, _cnt in _rf_seen.items():
+            if _cnt > 1:
+                print(f"WARNING: duplicate real_fill detected for {_t}")
+
     # Final column set: WHITELIST ∩ (DB columns ∪ computed columns), in WHITELIST order.
     available  = set(db_headers) | _COMPUTED_COLS
     final_cols = [c for c in WHITELIST if c in available]

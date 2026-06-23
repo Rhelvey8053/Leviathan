@@ -126,11 +126,11 @@ def cmd_status(args) -> int:
             print(e)
         print()
 
-    groups = {"ready": [], "locked": [], "blocked": []}
+    groups = {"ready": [], "locked": [], "blocked": [], "done": []}
     for item in items:
-        groups[item["status"]].append(item)
+        groups.setdefault(item["status"], []).append(item)
 
-    for status in ("ready", "locked", "blocked"):
+    for status in ("ready", "locked", "blocked", "done"):
         bucket = sorted(groups[status], key=lambda i: (i["priority"], i["id"]))
         groups[status] = bucket
 
@@ -140,9 +140,10 @@ def cmd_status(args) -> int:
     print(f"  Ready:   {len(groups['ready'])}")
     print(f"  Locked:  {len(groups['locked'])}")
     print(f"  Blocked: {len(groups['blocked'])}")
+    print(f"  Done:    {len(groups['done'])}")
     print()
 
-    for status, label in (("ready", "READY"), ("locked", "LOCKED"), ("blocked", "BLOCKED")):
+    for status, label in (("done", "DONE"), ("ready", "READY"), ("locked", "LOCKED"), ("blocked", "BLOCKED")):
         bucket = groups[status]
         if not bucket:
             continue

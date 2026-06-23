@@ -1,0 +1,6 @@
+ticker,resolved_yes,close_date
+KXTEST-001,true,2026-05-01
+KXTEST-002,false,2026-05-05
+KXTEST-003,true,2026-04-15
+KXTEST-004,false,2026-06-01
+KXTEST-005,true,2026-06-10

@@ -13,7 +13,7 @@
       "title": "Trade Reconciliation",
       "area": "execution",
       "priority": 1,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
@@ -26,7 +26,7 @@
       "title": "Real Fill Deduplication",
       "area": "data-quality",
       "priority": 1,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
@@ -39,7 +39,7 @@
       "title": "Sample Size Gates",
       "area": "validation",
       "priority": 2,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
@@ -52,7 +52,7 @@
       "title": "Wilson Confidence Intervals",
       "area": "reporting",
       "priority": 2,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
@@ -65,7 +65,7 @@
       "title": "Title Scraping Fix",
       "area": "data-quality",
       "priority": 3,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
@@ -78,7 +78,7 @@
       "title": "Smart Money Drift Alerts",
       "area": "smart-money",
       "priority": 3,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
@@ -91,7 +91,7 @@
       "title": "Backtest Harness",
       "area": "backtesting",
       "priority": 3,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
@@ -326,7 +326,7 @@
       "title": "Empirical Base Rates from Polymarket",
       "area": "calibration",
       "priority": 4,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },

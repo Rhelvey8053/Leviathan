@@ -162,11 +162,11 @@ def test_evaluate_triggers_two_conditions_both_required(backlog_data):
 
 
 def test_evaluate_triggers_blocked_stays_locked_even_if_trigger_passes(backlog_data):
-    # position-reconciliation-job depends on trade-reconciliation (not done)
+    # calibration-curve-dashboard depends on calibration-curve (locked, not done)
     metrics = {"resolved_count": 999, "resolved_count_per_category_max": 999,
                "resolved_count_per_wallet_max": 999, "fills_count": 999}
     results = evaluate_triggers(backlog_data, metrics)
-    assert results["position-reconciliation-job"] is False
+    assert results["calibration-curve-dashboard"] is False
 
 
 # ---------------------------------------------------------------------------
