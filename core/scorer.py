@@ -799,9 +799,16 @@ def build_prompt(markets: list[dict]) -> str:
             lines.append(f"   SIGNAL SUMMARY: {_total_s} source(s) → {_align} lean {_lean}{_extra}")
 
         if whale and whale.get("whale_detected"):
+            streak = m.get("whale_streak", 0)
+            streak_str = (
+                f"  [STREAK: {streak} consecutive daily scan(s) pointing the same direction"
+                f" — persistent informed buying is a strong informed-trader signal]"
+                if streak >= 2 else ""
+            )
             lines.append(
                 f"   WHALE ALERT: Large trades detected buying {whale.get('whale_direction', 'unknown')}. "
                 f"Max trade size: {whale.get('max_trade_size', 0):.0f} (avg: {whale.get('avg_trade_size', 0):.1f})"
+                f"{streak_str}"
             )
 
         if m.get("whale_reversal"):

@@ -1,4 +1,59 @@
+import json
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+STREAK_PATH = Path(__file__).parent.parent / "data" / "whale_history" / "streak.json"
+
+
+def load_whale_streak() -> dict:
+    """Load cross-scan whale direction streak data from disk."""
+    if STREAK_PATH.exists():
+        try:
+            return json.loads(STREAK_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def update_whale_streak(
+    whale_results: dict,
+    streak_data: dict,
+    now_iso: str,
+) -> dict:
+    """
+    Update per-ticker streak counts given today's whale detection results.
+
+    Rules:
+      - whale detected, same direction as stored: increment streak
+      - whale detected, opposite direction: reset streak to 1
+      - no whale detected for a ticker: leave streak unchanged (scan gap; don't penalise)
+    """
+    for ticker, result in whale_results.items():
+        if not result.get("whale_detected"):
+            continue
+        direction = result.get("whale_direction")
+        if not direction:
+            continue
+        existing = streak_data.get(ticker, {})
+        if existing.get("direction") == direction:
+            streak_data[ticker] = {
+                "direction":    direction,
+                "streak":       existing.get("streak", 0) + 1,
+                "last_updated": now_iso,
+            }
+        else:
+            streak_data[ticker] = {
+                "direction":    direction,
+                "streak":       1,
+                "last_updated": now_iso,
+            }
+    return streak_data
+
+
+def save_whale_streak(streak_data: dict) -> None:
+    """Persist streak data to disk."""
+    STREAK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STREAK_PATH.write_text(json.dumps(streak_data, indent=2), encoding="utf-8")
 
 
 def _size(t: dict) -> float:

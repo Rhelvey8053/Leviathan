@@ -191,3 +191,72 @@ def test_scan_recent_trades_skips_missing_ticker():
     trades = [_trade(1000)]  # no "ticker" key
     results = whales.scan_recent_trades(trades, _cfg(min_whale_size=100))
     assert results == []
+
+
+# ─── load / save / update_whale_streak ───────────────────────────────────────
+
+def test_update_whale_streak_increments_same_direction():
+    streak_data = {"KXABC": {"direction": "YES", "streak": 2, "last_updated": "2026-06-28T00:00:00"}}
+    whale_results = {"KXABC": {"whale_detected": True, "whale_direction": "YES"}}
+    updated = whales.update_whale_streak(whale_results, streak_data, "2026-06-29T00:00:00")
+    assert updated["KXABC"]["streak"] == 3
+    assert updated["KXABC"]["direction"] == "YES"
+
+
+def test_update_whale_streak_resets_on_direction_change():
+    streak_data = {"KXABC": {"direction": "YES", "streak": 3, "last_updated": "2026-06-28T00:00:00"}}
+    whale_results = {"KXABC": {"whale_detected": True, "whale_direction": "NO"}}
+    updated = whales.update_whale_streak(whale_results, streak_data, "2026-06-29T00:00:00")
+    assert updated["KXABC"]["streak"] == 1
+    assert updated["KXABC"]["direction"] == "NO"
+
+
+def test_update_whale_streak_starts_at_one_for_new_ticker():
+    streak_data = {}
+    whale_results = {"KXNEW": {"whale_detected": True, "whale_direction": "YES"}}
+    updated = whales.update_whale_streak(whale_results, streak_data, "2026-06-29T00:00:00")
+    assert updated["KXNEW"]["streak"] == 1
+    assert updated["KXNEW"]["direction"] == "YES"
+
+
+def test_update_whale_streak_skips_no_whale_detected():
+    streak_data = {"KXABC": {"direction": "YES", "streak": 4, "last_updated": "2026-06-28T00:00:00"}}
+    whale_results = {"KXABC": {"whale_detected": False, "whale_direction": None}}
+    updated = whales.update_whale_streak(whale_results, streak_data, "2026-06-29T00:00:00")
+    assert updated["KXABC"]["streak"] == 4  # unchanged
+
+
+def test_update_whale_streak_skips_no_direction():
+    streak_data = {}
+    whale_results = {"KXABC": {"whale_detected": True, "whale_direction": None}}
+    updated = whales.update_whale_streak(whale_results, streak_data, "2026-06-29T00:00:00")
+    assert "KXABC" not in updated
+
+
+def test_update_whale_streak_multiple_tickers():
+    streak_data = {
+        "KXAAA": {"direction": "YES", "streak": 2, "last_updated": "2026-06-28T00:00:00"},
+        "KXBBB": {"direction": "NO",  "streak": 1, "last_updated": "2026-06-28T00:00:00"},
+    }
+    whale_results = {
+        "KXAAA": {"whale_detected": True, "whale_direction": "YES"},
+        "KXBBB": {"whale_detected": True, "whale_direction": "YES"},  # direction flip
+        "KXCCC": {"whale_detected": True, "whale_direction": "NO"},   # new ticker
+    }
+    updated = whales.update_whale_streak(whale_results, streak_data, "2026-06-29T00:00:00")
+    assert updated["KXAAA"]["streak"] == 3
+    assert updated["KXBBB"]["streak"] == 1 and updated["KXBBB"]["direction"] == "YES"
+    assert updated["KXCCC"]["streak"] == 1
+
+
+def test_load_whale_streak_returns_empty_when_no_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(whales, "STREAK_PATH", tmp_path / "nonexistent.json")
+    assert whales.load_whale_streak() == {}
+
+
+def test_save_and_load_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(whales, "STREAK_PATH", tmp_path / "streak.json")
+    data = {"KXABC": {"direction": "YES", "streak": 5, "last_updated": "2026-06-29T00:00:00"}}
+    whales.save_whale_streak(data)
+    loaded = whales.load_whale_streak()
+    assert loaded == data

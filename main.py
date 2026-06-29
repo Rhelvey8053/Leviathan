@@ -8,9 +8,6 @@ import uuid
 import winsound
 from datetime import datetime, timezone
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,7 +36,48 @@ def estimate_cost(token_info: dict, model: str) -> float:
     return 0.0
 
 
+def _extremize(p: float, alpha: float) -> float:
+    """
+    Satopää et al. (2014) extremizing transform.
+    When multiple independent sources agree on a probability, the true
+    probability is typically more extreme than a simple average suggests.
+    alpha > 1 pushes the estimate toward 0 or 1; alpha = 1 is identity.
+    """
+    if not (0.001 < p < 0.999):
+        return p
+    return (p ** alpha) / (p ** alpha + (1.0 - p) ** alpha)
+
+
+def _count_agreeing_signals(m: dict, direction: str) -> int:
+    """
+    Count independent signal sources aligned with the given direction.
+    Used to determine the extremizing alpha factor.
+    """
+    count = 0
+    if m.get("heuristic_direction") == direction:
+        count += 1
+    poly_gap = float((m.get("poly") or {}).get("price_gap") or 0)
+    if direction == "YES" and poly_gap >= 0.05:
+        count += 1
+    elif direction == "NO" and poly_gap <= -0.05:
+        count += 1
+    cons = m.get("ext_consensus") or {}
+    if abs(cons.get("consensus_gap", 0) or 0) >= 0.05 and cons.get("consensus_dir") == direction:
+        count += 1
+    wh = m.get("whale_data") or {}
+    if wh.get("whale_detected") and wh.get("whale_direction") == direction:
+        count += 1
+    if m.get("ob_flag") and m.get("ob_direction") == direction:
+        count += 1
+    if m.get("watchlist_signal") and (m.get("watchlist_direction") or "").upper() == direction:
+        count += 1
+    return count
+
+
 def main():
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
     run_id     = str(uuid.uuid4())[:8]
     start_time = time.time()
     print(f"\n=== Leviathan v1 | run {run_id} | {datetime.now(timezone.utc).isoformat()} ===\n")
@@ -342,6 +380,31 @@ def main():
         if (m["whale_reversal"] or m.get("ob_flag")) and not m.get("flag"):
             m["flag"] = True
 
+    # Whale persistence streak — track same-direction whale activity across daily scans.
+    # A whale buying YES for 3 consecutive scans is qualitatively stronger than a one-off.
+    whale_streak_data = {}
+    try:
+        whale_streak_data = whales.load_whale_streak()
+        whale_streak_data = whales.update_whale_streak(
+            whale_results, whale_streak_data, datetime.now(timezone.utc).isoformat()
+        )
+        whales.save_whale_streak(whale_streak_data)
+        n_streaks = sum(1 for v in whale_streak_data.values() if v.get("streak", 0) >= 2)
+        if n_streaks:
+            print(f"      Whale streak: {n_streaks} ticker(s) with 2+ consecutive directional scan(s)")
+    except Exception as _e:
+        print(f"      [warn] Whale streak update failed: {_e}")
+
+    for m in flagged_markets:
+        ticker = m.get("ticker", "")
+        streak = whale_streak_data.get(ticker, {})
+        current_dir = (whale_results.get(ticker) or {}).get("whale_direction")
+        m["whale_streak"] = (
+            streak["streak"]
+            if streak.get("direction") == current_dir and streak.get("streak", 0) >= 2
+            else 0
+        )
+
     # PASS history: markets Claude has repeatedly declined get deprioritized.
     # Single batch lookup to avoid N DB queries.
     _pass_tickers = {}
@@ -471,6 +534,12 @@ def main():
             if not has_corroboration:
                 sc -= 2  # counter-evidence from a liquid market weakens the signal
 
+        # Whale persistence: same-direction whale across consecutive daily scans.
+        # Multi-day persistence is the Kyle (1985) informed-trader signature.
+        ws = m.get("whale_streak", 0)
+        if ws >= 3:   sc += 3
+        elif ws >= 2: sc += 1
+
         # Net edge: realizable edge after bid-ask spread. Positive = tradeable.
         # Markets with net_edge ≤ 0 would be underwater on entry — deprioritise
         # them so Claude slots go to actually tradeable opportunities first.
@@ -596,6 +665,21 @@ def main():
             if not _has_corroboration:
                 signal["confidence"] = "MED"
                 signal["confidence_downgraded"] = True
+
+        # Extremizing: when ≥2 independent sources agree with Claude's direction,
+        # the true probability is more extreme than any single estimate suggests.
+        # (Satopää et al. 2014; Good Judgment Project validated this empirically.)
+        _dir = signal.get("direction", "PASS")
+        _est = float(signal.get("our_estimate") or 0)
+        if _dir in ("YES", "NO") and 0.05 < _est < 0.95:
+            _n = _count_agreeing_signals(m, _dir)
+            _alpha = 1.30 if _n >= 3 else (1.15 if _n >= 2 else 1.0)
+            if _alpha > 1.0:
+                _ext = _extremize(_est, _alpha)
+                signal["ext_estimate"]  = round(_ext, 4)
+                signal["ext_edge"]      = round(_ext - float(signal.get("market_price") or 0), 4)
+                signal["ext_n_signals"] = _n
+                signal["ext_alpha"]     = _alpha
 
         if conf_threshold_rank.get(signal.get("confidence", "LOW"), 2) <= threshold_rank and signal.get("direction", "PASS") != "PASS":
             final_signals.append(signal)
