@@ -171,6 +171,10 @@ def compute_leviathan_score(s: dict) -> int:
     if whale.get("whale_detected") and s.get("ob_flag"):
         pts += 3
 
+    ws = s.get("whale_streak", 0)
+    if ws >= 3:   pts += 5
+    elif ws >= 2: pts += 2
+
     if s.get("time_horizon") in ("INTRADAY", "WEEKLY"):
         pts -= 5
 
@@ -334,6 +338,16 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
     # Prices
     lines.append(f"  Market:       {mkt_p}")
     lines.append(f"  Our Estimate: {est_p}")
+    ext_est = s.get("ext_estimate")
+    if ext_est is not None:
+        _n_sig  = s.get("ext_n_signals", 0)
+        _alpha  = s.get("ext_alpha", 1.0)
+        _ext_edge = s.get("ext_edge")
+        _ext_edge_str = f"  ext_edge {_ext_edge*100:+.1f}pp" if _ext_edge is not None else ""
+        lines.append(
+            f"  Adj. Estimate: {_pct(ext_est)}"
+            f"  ({_n_sig} signals agree, α={_alpha:.2f}{_ext_edge_str})"
+        )
     lines.append(f"  Edge:         {edge_s}")
     _ev = _ev_per_contract(direction, s.get("market_price"), s.get("our_estimate"))
     if _ev is not None:
@@ -366,6 +380,9 @@ def _signal_block(s: dict, index: int = 0) -> list[str]:
         fired.append(f"Wide Spread {(s.get('spread_pct') or 0)*100:.0f}%")
     if s.get("whale_reversal"):
         fired.append("Whale Reversal")
+    ws = s.get("whale_streak", 0)
+    if ws >= 2:
+        fired.append(f"Whale Streak x{ws}d")
     if s.get("ob_flag"):
         fired.append(f"Order Book {s.get('ob_direction','?')} {(s.get('ob_imbalance') or 0)*100:.0f}%")
     n_cross = len([e for e in (s.get("ext_markets") or []) if abs(e.get("price_gap") or 0) >= 0.04])
