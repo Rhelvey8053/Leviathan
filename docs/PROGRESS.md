@@ -2,1400 +2,682 @@
 
 ---
 
-## Goal 3c — CSV export module for Power BI (2026-06-19)
-
-### What was added
-
-**New file: `export_to_csv.py`** (project root)
-- `export_csvs(db_path, export_dir)` reads `signals` and `runs` tables from
-  leviathan.db via stdlib `sqlite3` + `csv` (no new dependencies).
-- Writes `data/powerbi_export/signals.csv` and `data/powerbi_export/runs.csv`.
-- Creates the output directory if missing.
-- Returns `{"signals": row_count, "runs": row_count}`.
-- Handles missing DB gracefully: prints a warning, returns zeros, never raises.
-- Runnable standalone (`python export_to_csv.py`) and importable without side effects.
-
-**`main.py` wired (two-line hook after `logger.log_run()`):**
-```python
-try:
-    from export_to_csv import export_csvs
-    counts = export_csvs()
-    print(f"[export] CSVs updated — {counts['signals']} signals, {counts['runs']} runs")
-except Exception as e:
-    print(f"[export] CSV update failed (non-fatal): {e}")
-```
-The pipeline continues normally whether the export succeeds or fails.
-
-**First live export (2026-06-19):** 63 signal rows, 17 run rows written to
-`data/powerbi_export/`.
-
-### What was NOT changed
-
-No schema columns added. No new metrics, heuristics, or analytics.
-No changes to signals logic, scoring, or report generation.
-The only new code is `export_to_csv.py` and the two-line hook in `main.py`.
-
-### Tests
-
-9 new tests in `tests/test_export_to_csv.py` (1231 total, 0 fail).
-No existing test was modified.
-
-Key assertions:
-- Both CSVs created with correct column headers
-- Double-run overwrites cleanly without error
-- Empty DB produces header-only CSVs (zero data rows)
-- Missing DB path returns `{"signals": 0, "runs": 0}` without raising
-
-### Power BI refresh instruction
-
-After each daily run completes, open Power BI Desktop and click
-**Home > Refresh** to pull the updated `signals.csv` and `runs.csv`
-from `data/powerbi_export/`. The files are overwritten on every run —
-no manual export step required.
-
----
-
-## Goal 2c — Resolution-first validation harness (resolve-first-3a branch)
-
-### PART A — Resolution timeline finding (BLUNT)
-
-**Total rows in leviathan.db: 62. Resolved: 4. Pending: 58.**
-
-All 4 resolved outcomes are NO:
-- KXAAAGASD-26APR13-4.125 (real_fill, NO)
-- KXALBUMRELEASEDATEBEY-NEW-JUN01-26 (paper, NO)
-- KXCABLEAVE-26MAY22-26JUN (paper, NO)
-- KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01 (research_probe, NO)
-
-**CRITICAL FINDING: ALL 58 pending rows have MISSING close_time in the DB.**
-The close_time column was added in Session 13 but was never backfilled and the
-main pipeline did not consistently store it for older logged signals.
-
-Inferred close-time distribution from ticker names (not stored in DB):
-- Jul 2026 (<=14d from 2026-06-18): ~25 rows — could resolve by July 1-2, 2026
-- Oct 2026 (~4 months): ~1 row
-- Jan 2027 (~7 months): ~7 rows
-- 2028+ (months to years): ~21 rows (research probes — elections, policy, geopolitics)
-
-**Answer to PART A(a):** 4 rows resolved today (expected ~2 from spec; actual = 4).
-**Answer to PART A(b):** 0 pending rows have close_time stored. All 58 fall in the
-MISSING bucket. Distribution by ticker inference: ~25 close within 14d, ~21 are
-2028+ dated.
-**Answer to PART A(c):** The EARLIEST date when 20 logged rows could possibly have
-resolved is mid-July 2026 at best IF all ~25 July-dated rows resolve and are
-recognized. But those rows lack close_time in the DB, so resolve_outcomes cannot
-automatically bucket them. The 21 research-probe rows are 2028-2029 dated —
-YEARS away from providing any win-rate read.
-
-**BLUNT CONCLUSION: The existing logged data cannot validate the model on a useful
-timescale. Most pending rows have no close_time stored. The 2028+ research probe
-rows are years from resolving. This goal breaks that cycle by logging NEW near-dated
-rows with close_time explicitly stored.**
-
-### PART B — Near-dated paper batch (analysis/resolve_first.py)
-
-New file: `analysis/resolve_first.py`
-Config keys added to `scoring`: `resolve_first_max_days` (default 14),
-`resolve_first_dedup_days` (default 7).
-
-**Selection on 2026-06-18 snapshot (2463 markets, after filter_markets: 26):**
-
-Price band coverage from two-sided candidates (<=14d window):
-- 5-15%: 2 candidates
-- 15-40%: EMPTY
-- 40-60%: EMPTY
-- 60-95%: EMPTY
-
-Selected markets: 2 (both in 5-15% band):
-- KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01 (12d, mid=0.055, HEURISTIC/YES)
-- KXCABLEAVE-26MAY22-26JUL (13d, mid=0.105, DRIFT/YES)
-
-Both were already logged in the last 7 days -> dedup skipped them.
-New rows logged this run: 0 (re-runnable: dedup prevents double-logging).
-
-**Finding: At 14-day window, Kalshi snapshot yields only 2 near-dated markets
-with two-sided books and mid in [0.05, 0.95]. The 15-40%, 40-60%, 60-95% bands
-are EMPTY — almost all near-term markets are tail-probability (< 15% YES).
-To get broad price band coverage, the window must be extended or a fresher
-intraday snapshot obtained during higher-liquidity hours.**
-
-### PART C — Resolution status (2026-06-18)
-
-  Total paper rows: 25 | Resolved: 2 | Pending: 23
-  Pending closing <=14d: 1 (close_time stored)
-  COUNTDOWN: 2 resolved / 20 needed before win-rate is meaningful
-  WIN RATE: NOT YET MEANINGFUL (n=2, need >=10)
-
-### PART D — Fee + payoff assumption
-
-Binary payoff fix IS LIVE in logger.resolve_outcomes (logger.py:563-568):
-  YES at p: win -> +(1-p) - fee_per_unit; loss -> -p - fee_per_unit
-  NO  at p: win -> +p     - fee_per_unit; loss -> -(1-p) - fee_per_unit
-
-OPEN BLOCKER (not fixed here): Kalshi fee_cost is per-fill-event (not per
-contract). If fill_count=1 understates actual contract count, fee_per_unit is
-overstated. NOT verified against Kalshi's published fee schedule. Do not draw
-real-P&L conclusions until verified.
-
-### PART E — Tests
-
-19 new tests in tests/test_resolve_first.py (1158 -> 1208 total, 1208 pass, 0 fail).
-No existing test was modified.
-
-Key assertions:
-- select_near_dated only picks markets closing within max_days
-- select_near_dated only picks two-sided-book markets (bid=0 or ask=0 excluded)
-- Re-running does not double-log tickers already logged in lookback window
-- Logged rows carry close_time so resolution audit can bucket them
-- print_resolution_status refuses to show win-rate % when resolved < 10
-
-### PART F — What this goal did NOT do (HARD FREEZE honoured)
-
-No new heuristic base-rate categories were added.
-No calibration rules added to scorer.SYSTEM_PROMPT or research_probe.PROBE_SYSTEM.
-No Leviathan composite score changes.
-No net_edge / Brier / Kelly / close-horizon / persistence logic changes.
-No new analysis scripts besides resolve_first.py.
-No new flag modes.
-No new report sections in report.py.
-
-### Top 3 next steps (ALL about accumulating and resolving outcomes)
-
-1. **Re-run resolve_first weekly** — especially after July 1-2, 2026 when
-   KXMEDIARELEASEPRISONBREAK, KXTAIWANLVL4, KXUSAEXPANDTERRITORY, KXIMPEACHCABINET
-   markets close. Run resolve_outcomes after close to capture ~25 pending rows.
-2. **Run resolve_outcomes after July 2026 markets close** — the ~25 Jul-dated rows
-   in the DB will resolve by July 8 at the latest. This alone would bring
-   resolved count from 4 to potentially ~29 — crossing the n>=20 gate.
-3. **Do NOT add features until n>=20 resolved** — the model has 1200+ tests and
-   35+ heuristics. More machinery is not the bottleneck. Ground truth is.
-
----
-
-## Goal 2d — Winning-wallet selection criterion fix (smart-money-fix-3b branch)
-
-### PART A — Before state (winning_accounts.json)
-
-Cache contained **0 cached winners** at audit time.
-Per AUDIT.md Section 5, a prior cache showed 3 winners — all with:
-  - resolved_count: 0, win_rate: null
-  - Active positions: World Cup player props, Bitcoin 5-minute Up/Down contracts
-  - Qualified on unrealised PnL of open positions, not verified forecasting skill
-
-How many would survive a resolved_count >= 10 filter: **0**
-
-### PART B — Fix applied (accounts.py)
-
-Three specific changes, no new metrics added:
-
-1. **`_score_wallet` — sports-game exclusion added**
-   - Positions whose titles match `_is_sports_title()` from `analysis/smart_money_scan.py`
-     are now excluded alongside existing coinflip patterns (`_is_coinflip`)
-   - P&L on soccer/World Cup/basketball/NFL game bets is noise, not forecasting skill
-   - `reuse` via lazy import: `from analysis.smart_money_scan import _is_sports_title`
-
-2. **`_score_wallet` + `_is_winner` — resolved metrics only**
-   - Removed `avg_pct_pnl` and `total_cash_pnl` (all-positions unrealised metrics)
-   - Added `resolved_avg_pct_pnl` and `resolved_cash_pnl` (resolved positions only)
-   - `_is_winner` now gates on resolved metrics; open-position P&L cannot qualify a wallet
-
-3. **`discover_winners` — ranking on resolved win rate**
-   - Sort key changed from `(avg_pct_pnl, total_cash_pnl)` to `(win_rate, resolved_cash_pnl)`
-   - Primary sort: resolved win rate. Secondary: realized cash P&L on resolved positions.
-   - A wallet with 80% win rate on 12 resolved bets ranks above one with 60% win rate
-     and 5x more unrealised cash PnL
-
-Config thresholds used (from config.json accounts section):
-  - `min_resolved_count`: 10
-  - `min_win_rate`: 55.0%
-  - `min_cash_pnl`: 100.0  (previously $25 — trivially achievable on luck)
-  - `min_pct_pnl`: 10.0%  (now applied to resolved positions only)
-
-### PART C — After state
-
-**NO VERIFIED SMART MONEY YET — zero wallets meet resolved_count >= 10
-with positive resolved win rate.**
-
-winning_accounts.json rewritten with empty qualifying set.
-
-Implication for main.py: the watchlist boost (flag_path="WATCHLIST", prepended
-to flagged_markets) currently has no trustworthy input from the discovery path.
-The watchlist entries in config.json are from the Polymarket trader list (manually
-curated in Session 3-5); those should be evaluated under the new resolved-outcome
-criterion before their signals are weighted as skill-based evidence.
-The smart-money cross-reference layer should be treated as informational-only
-until verified wallets (resolved_count >= 10, win_rate >= 55%) appear.
-
-### PART D — Tests
-
-14 new tests in tests/test_accounts.py (1203 total on this branch, 0 fail).
-No existing test was modified.
-
-Key assertions:
-- Wallet with 20 open positions at +500% does NOT qualify (resolved_count=0)
-- Wallet with 3 coinflip resolved positions has resolved_count=0 (noise excluded)
-- Sports-game resolved positions (vs., World Cup, FIFA) do not count toward track record
-- 12 real resolved positions with 75% win rate DOES qualify
-- Wallet below resolved_count=10 excluded even with high open-position P&L
-- Ranking: 80% win rate beats 60% win rate + 5x cash PnL (resolved metric wins)
-- avg_pct_pnl (all-positions) no longer present in stats dict
-- Empty winning list sorts without error (honest-empty case)
-
-### PART E — What was NOT added
-
-No new signal types, heuristic rules, scoring dimensions, or analytics.
-Only the accounts.py selection criterion was changed as specified in Goal 2d.
-
-### Top 3 next steps (all about accumulating verified wallets)
-
-1. **Re-run discover_winners as more positions resolve** — the current 0-winner result
-   is correct and honest. Re-run monthly; the threshold only passes verified skill.
-2. **Do not re-enable the watchlist boost in main.py until N>=1 verified wallet exists**
-   — until discovery produces a qualifying wallet, the watchlist signal is based on
-   manually curated addresses (config.json watchlist), not verified forecasters.
-3. **Track resolved_count for config.json watchlist addresses** — run
-   fetch_user_positions on each watchlist address and report resolved_count under
-   the new criterion; this tells us whether the hand-curated list has any track record.
-
----
-
-## Session 15 — 2026-06-18 (autonomous continuation)
-
-### Commits 63–66: Heuristic labels, LV specificity bonus, DB persistence
-
-**Commit 63 — Heuristic labels + 5 new categories + Rules 40-42**
-- `scanner.py get_heuristic_label(market)` — new function (~200 rules) mapping market title
-  patterns to human-readable category strings ("PDUFA date", "crypto ETF", "credit rating change" etc.)
-  Mirrors estimate_base_rate() ordering; first-match wins
-- `scanner.py score_market()`: now computes and returns `heuristic_label` field
-- `scorer.py build_prompt()`: FLAG REASON line now includes `[heuristic label]` suffix
-  (e.g. "FLAG REASON: HEURISTIC — base rate 85% [PDUFA date] leans YES vs market price")
-- New heuristic categories: veto (0.20), tax legislation (0.35), supply chain disruption (0.30),
-  EV adoption milestone (0.45), bond/debt issuance (0.65), unionization/NLRB vote (0.40)
-- Gap fills: gold price ("gold reach/hit/top"), CPI ("consumer price inflation"),
-  housing ("house price/prices"), labor strikes (general/national/transit/teachers/nurses/rail/airline),
-  municipal bankruptcy ("city declare insolvency"), national debt threshold block (0.50)
-- Rule 40: unionization/NLRB elections — pre-election ~35%, scheduled election ~55-65%
-- Rule 41: tax legislation — reconciliation/unified govt ~60-65%, TCJA extension ~55%
-- Rule 42: bond/debt issuance — routine sovereign ~90-95%, shelf active ~80%, exploring ~45%
-- 76 new tests (1072 → 1148 total)
-
-**Commit 64 — LV score heuristic specificity bonus**
-- `report.py compute_leviathan_score()`: adds +8 for HIGH_SPEC labels (PDUFA date,
-  government shutdown avoided, FDA clinical hold, constitutional amendment, NATO Article 5,
-  martial law, volcanic eruption, 25th Amendment) and +4 for MED_SPEC labels (crypto protocol
-  upgrade, debt ceiling resolution, cabinet departure, CEO retention, credit rating change,
-  OPEC production decision, chip export restriction, bond/debt issuance, FDA complete response letter)
-- Rationale: specific, empirically calibrated heuristics deserve higher composite signal quality
-  even with the same net edge as a generic legislative market
-- 8 new tests (1148 total)
-
-**Commit 65 — heuristic_label DB persistence + get_stats_by_heuristic_label()**
-- `logger.py _init_db()`: ADD COLUMN `heuristic_label TEXT` (additive migration, idempotent)
-- `logger.py log_signal()`: persists `heuristic_label` from signal dict
-- `logger.py log_pass()`: persists `heuristic_label` for PASS rows
-- `logger.py get_stats_by_heuristic_label()`: win rate / P&L / avg edge grouped by label
-  (only resolved paper signals with non-NULL label, sorted by win_rate desc)
-  Answers: "which heuristic categories have the best win rate?" — enables post-hoc calibration
-  to validate whether category base rates match observed outcomes
-- `analysis/calibration.py`: BY HEURISTIC LABEL section — table of top-performing categories
-  with colour commentary on calibration quality (≥3 resolved, >60% = well-calibrated)
-- 10 new tests (1148 → 1158 total)
-
----
-
-## Session 14 — 2026-06-18 (autonomous continuation)
-
-### Commits 54–60: Profitability hardening — heuristics, calibration, actionability
-
-**Commit 54 — Iran/geopolitical heuristics + test fix**
-- `scanner.py estimate_base_rate()`: uranium enrichment 20%, regime change 10%, Abraham Accords 20%
-- Extended Abraham Accords patterns to catch "Israel and Saudi Arabia normalize relations" title variant
-- Fixed `test_base_rate_new_categories`: Saudi-Israel normalization now correctly 0.20 (not 0.30)
-- 15 new tests (977 total)
-
-**Commit 55 — Actionability filter + 6 new heuristic categories + Rule 33**
-- `filter_markets()`: `min_hours_to_close` param (default 6h) — markets closing within 6h excluded
-- `config.json`: added `"min_hours_to_close": 6` under markets
-- New scanner heuristics: stock buyback/dividend (0.40), treaty withdrawal (0.20),
-  formal candidacy announcement (0.35), martial law declaration (0.05),
-  social media post/tweet markets (0.75)
-- Treaty patterns placed BEFORE political withdrawal to prevent "withdraw from the [treaty]" false-match
-- Political withdrawal block: restored "withdraw from the" with treaty-specific names catching first
-- `scorer.py` Rule 33: social media post markets — Trump/Musk active-user base rate 85-90%
-- 19 new tests (996 total)
-
-**Commit 56 — 5 more heuristic categories + Rule 34**
-- New scanner heuristics: corporate partnership/licensing (0.35), S&P 500 inclusion (0.50),
-  event attendance (0.65), corporate facility/HQ announcement (0.40)
-- Narrowed tech product "announce a new" pattern — was too broad, now uses specific product names
-- `scorer.py` Rule 34: corporate partnership markets — 'in talks'/'exploring'/'discussions' ≠ signed
-  deal; only official joint press release / regulatory filing qualifies as HIGH confidence
-- 9 new tests (1005 total)
-
-**Commit 57 — Rule 35 FOMC markets + 3 more heuristic categories**
-- `scorer.py` Rule 35: FOMC / rate decision markets — CME FedWatch is the ground truth; do not
-  independently forecast rate path from rhetoric. Only ≥10pp divergence between FedWatch and
-  Kalshi justifies YES/NO. Addendum covers multi-meeting rate path markets.
-- New scanner heuristics: BRICS/SCO membership (0.30), quantitative easing/tightening (0.40),
-  celebrity/high-profile civil legal cases — divorce, custody, defamation (0.45)
-- 7 new tests (1012 total)
-
-**Commit 58 — 5 more heuristic categories + Rule 36 index inclusion**
-- New scanner heuristics: legalization (cannabis/gambling/drugs) (0.30), event cancellation (0.10),
-  athletic record-breaking (0.30), wealth tax/levy (0.15), product/drug recall (0.25)
-- `scorer.py` Rule 36: index inclusion markets (S&P 500/Nasdaq 100/Russell) — ~50% for eligible
-  companies within 6-month windows. All 4 S&P criteria must be met; only official S&P DJ press
-  release qualifies as HIGH confidence
-- 9 new tests (1021 total)
-
-**Commit 62 — 3 more heuristic categories + CBDC false-positive fix**
-- New scanner heuristics:
-  - Recall election (0.15): "recall election", "recall the governor", "recall vote" etc.;
-    placed before snap election (0.25) to catch recall-specific framing
-  - Water crisis / drought (0.30): "water crisis", "lake mead", "drought conditions",
-    "reservoir levels"; placed before generic weather block
-  - Municipal/city bankruptcy (0.10): "municipal bankruptcy", "chapter 9", "city default";
-    placed before corporate bankruptcy (0.15) to catch local govt specifically
-- Bug fix: removed "digital currency" from CBDC block — was a false positive that would
-  score "crypto market cap" questions at 0.15 (CBDC) instead of 0.50 (crypto)
-- 14 new tests (1067 → 1081 total)
-
-**Commit 61 — 4 more heuristic categories + Rule 39 OPEC/chip exports**
-- New scanner heuristics:
-  - OPEC/oil cartel production decision (0.40) — OPEC+ meetings; common on Kalshi;
-    "reduce oil production" / "production quota" patterns; placed before commodity block
-  - Semiconductor/chip export restriction (0.45) — US chip bans/entity list additions;
-    "chip export ban", "export ban list", "nvidia chip export" etc.; placed before antitrust block
-  - Filibuster reform (0.10) — Senate rules changes require 67 votes; historically very rare;
-    placed BEFORE legislative block (0.35) to prevent false-match on "senate"
-  - Housing permits/starts data (0.50) — monthly economic data threshold questions; ~50/50
-    like other macro data releases; placed before housing crash (0.15)
-- `scorer.py` Rule 39: OPEC meetings — delegate consensus language is standard pre-meeting
-  noise; only post-meeting communiqué qualifies as HIGH. Chip export restrictions — "reviewing"
-  / "considering" is background policy noise; only final Federal Register rule qualifies.
-- 19 new tests (1048 → 1067 total)
-
-**Commit 60 — Calibration analytics: whale, watchlist, PASS-rate breakdowns**
-- `logger.py get_stats_by_whale()`: win rate for whale-detected vs non-whale signals
-- `logger.py get_stats_by_watchlist()`: win rate for watchlist-aligned vs non-watchlist signals
-- `logger.py get_pass_rate_by_flag_path()`: PASS% per flag path bucket — identifies which
-  scanner categories are false-positive factories (high PASS rate → noisy category)
-- `analysis/calibration.py`: 3 new sections (whale, watchlist, PASS rate) + 3 new key
-  questions (#8-10) validating whether whale/smart-money costs are justified by win-rate lift
-
-**Commit 59 — 5 more heuristic categories + Rules 37-38**
-- New scanner heuristics:
-  - Blockchain/crypto protocol upgrade (0.65) — testnet-cleared upgrades nearly always activate;
-    placed BEFORE generic crypto block (0.50) to correctly score Ethereum/Bitcoin upgrade markets
-  - Secondary equity offering (0.35) — priced deal near-certain; rumors/exploration remain at 35%
-  - Credit rating change (0.40) — Moody's/S&P/Fitch downgrades/upgrades after watch designation
-  - CBDC adoption (0.15) — digital dollar/euro/yuan; policy adoption is rare in near term
-  - Short seller report (0.30) — Hindenburg/Citron/Muddy Waters targets; fraud claims partial success
-- `scorer.py` Rule 37: crypto network upgrades — testnet-cleared upgrades 85-90%, contentious
-  forks 50%, not-yet-testnet 65%; protocol governance evidence counts unlike product launches
-- `scorer.py` Rule 38: secondary offerings (shelf filing → 75-80%, priced deal → 90%+) and
-  credit ratings (CreditWatch Negative → 70% within 90d, negative outlook → 60% within 24mo)
-- 27 new tests (1021 → 1048 total)
-
----
-
-## Session 13 — 2026-06-18 (autonomous continuation)
-
-### Commits 50–53: Signal quality and calibration improvements
-
-**Commit 50 — Net Edge column in weekly digest**
-- `report.py compile_weekly_digest()`: added `{'Net':>7}` column to MARKETS FLAGGED table
-- Each row shows `net_edge` formatted as `+X.Xpp` or `--` when absent
-- `_week_row()` test helper updated to accept `net_edge` param
-- 4 new tests (882 total)
-
-**Commit 51 — Signal persistence tracking**
-- `logger.py`: `get_signal_history_batch(tickers, days=14)` — single DB query for all tickers,
-  returns prior paper signal rows per ticker (direction, market_price, timestamp)
-- `main.py`: enriches all flagged markets with `prior_appearances`, `prior_yes`, `prior_no`,
-  `direction_consistent`, `first_flagged_price` before pre-sort
-- `_pre_sort_score()`: persistent + consistent 3+ day signals get +3 boost; 2-day consistent +2
-- `scorer.py build_prompt()`: "Signal history" block shows days-seen, YES/NO split with
-  [CONSISTENT]/[MIXED] tag, and price drift since first flag with mispricing deepening/converging note
-- `report.py _signal_block()`: "Nd/14d: xY/yN — consistent/mixed" persistence line
-- 17 new tests (899 total)
-
-**Commit 52 — Calibration feedback loop**
-- `scorer.py build_system_prompt(calibration)`: appends CALIBRATION FEEDBACK section to system
-  prompt when resolved data exists. HIGH win rate < 65% → Claude instructed to downgrade
-  borderline HIGH calls. MED < 55% → more conservative base rates.
-- `scorer.py score_markets()`: accepts `calibration=` param; uses `build_system_prompt()` instead
-  of bare `SYSTEM_PROMPT`
-- `main.py`: calls `logger.get_stats_by_confidence()` and passes to scorer before each Claude run
-- 5 new tests (904 total)
-
-**Commit 53 — Close time tracking + close-horizon calibration**
-- `logger.py`: ADD COLUMN `close_time TEXT` (additive migration)
-  - `log_signal()`: stores `m["close_time"] || m["expiration_time"]`
-  - `get_stats_by_close_horizon()`: buckets resolved paper signals by actual days-to-close at
-    signal time (urgent <1d, short 1-7d, medium 7-30d, long 30d+, no_close)
-- `main.py`: passes `close_time` in both first-pass and second-pass signal dicts
-- `analysis/calibration.py`: BY ACTUAL DAYS-TO-CLOSE section + key question #6
-- 13 new tests (909 total)
-
----
-
-## Session 8 — 2026-06-17 (autonomous continuation)
-
-### Cross-market force-flag + polymarket test suite
-
-**Feature: CROSS_MARKET flag_path**
-
-Implemented cross-market promotion — unflagged markets with a significant
-Polymarket price divergence are now elevated into the scoring queue even if
-no heuristic, drift, or edge signal fired.
-
-Architecture:
-- `polymarket.fetch_and_build_index(config)` — fetches once, returns shared index
-- `polymarket.match_markets(markets, index, config, *, min_gap, min_match_score)` — matches any list
-- `polymarket.enrich_flagged()` — now a thin wrapper over the above (backward compat)
-- `main.py` step 3: collects `unflagged_markets` pool after scoring
-- `main.py` step 4: fetches Polymarket index once, enriches flagged markets, then
-  checks top-N unflagged by volume; promotes any with `abs(gap) ≥ cross_market_min_gap`
-  into `flagged_markets` with `flag_path = "CROSS_MARKET"`
-
-Config keys added to `polymarket` section:
-- `cross_market_promote` (bool, default true)
-- `cross_market_min_gap` (float, default 0.15)
-- `cross_market_max_candidates` (int, default 50)
-
-**New test file: `tests/test_polymarket.py` (24 tests)**
-- `_yes_price`: yes/true/fallback/missing/pre-parsed
-- `build_index`: valid, missing price, missing question, multiple
-- `find_match`: exact, below threshold, empty index, picks best
-- `match_markets`: match, no match, min_gap filter, min_gap passes,
-  no mid_price, empty title, min_match_score override
-- `fetch_and_build_index`: mock fetch call
-- `enrich_flagged`: backward compat
-- Cross-market promotion: gap passes, gap rejected
-
-489 → 513 tests total.
-
-### Git commits this session
-
-1. `67e8a94` — PROGRESS.md + README housekeeping (489 count, Session 7 commit 9)
-2. `6155573` — polymarket refactor + CROSS_MARKET promotion + 24 new tests (513)
-3. `469604f` — CROSS_MARKET flag reason in scorer prompt + 2 scorer tests (515)
-4. `fa3deb5` — 5 new heuristic categories + 13 tests: arrested, testimony, approval, strikes, awards (528)
-5. `81a91cb` — Fix match_markets gap-floor bug: None-price excluded when gap floor > 0 (530)
-6. `454305b` — cross_market_min_match_score guard (0.65) for loose-title false positives (531)
-7. `2756d38` — Calibration rules 12-13: legislative (~35%) + price-level (50/50) (533)
-8. `e70627b` — Recalibrate shutdown/debt-ceiling heuristics (shutdown avoid→0.85, begins→0.15; ceiling raise→0.70, generic→0.65) (537)
-9. `fee5fad` — 5 new heuristics + 17 tests: reelection, diplomatic summits, earnings, stock indices, mortality (554)
-10. `11f0980` — Calibration rules 14-16: earnings (50%), diplomatic summit (40%), reelection (52%) + probe sync (557)
-11. `b7afbf5` — 4 new heuristics + 9 tests: Nobel (10%), UNSC (15%), SEC/FCC approval (40%), CEO appointment (35%) (566)
-12. `83930be` — Calibration rules 17-18: corporate leadership (35%, 8-K evidence required) + UNSC (15%, veto risk) + probe sync (568)
-13. `3919208` — 3 heuristic gap fills + 8 tests: Fed pause/hold (0.50), federal budget (0.40), 25th Amendment (0.05) (576)
-14. `0ca995e` — Update PROGRESS.md with Session 8 commit list (commits 9-12)
-15. `c0c6b89` — 3 more heuristic categories + 7 tests: Pulitzer (0.10), extradition (0.35), primary challenge (0.30) (583)
-16. `68b9b11` — Major BR_NONE gap-fill pass: 10 new heuristic categories + 20 tests (599) — covers political withdrawal/ballot-disqualification year-injection bugs, divestiture, stock split, COVID variant, special election, constitutional amendment
-17. `0e3cf64` — Signal strength composite indicator (★×N in report header when N≥2 corroborating signals) + 9 tests (608)
-18. `2e4ed48` — Signal urgency markers (CLOSING IN Xd), repeat-count labels (REPEAT xN), strength-first sort in _qualifying() + 13 tests (621)
-19. `aa70ad0` — Kelly criterion position sizing in report: full + 1/4 Kelly per signal, formulas for YES and NO + 8 tests (628)
-20. `ab1dbe2` — 3 legal heuristic categories: pardon (35%), plea deal (45%), acquittal (35%) + 12 tests (640)
-21. `95116cf` — HIGH confidence edge gate in main.py: auto-downgrade to MED when abs(edge) < 10pp + 2 tests (642)
-22. `f03efba` — Quality-weighted pre-Claude sort: _pre_sort_score() replaces volume-only ordering in top-N selection
-23. `ec49a89` — TOP PICKS executive summary: top-3 signals by (confidence, strength, edge) in compact 3-line format at report top + 8 tests (649)
-
-## Session 10 — 2026-06-17 (autonomous continuation)
-
-### Calibration rules 23-28, heuristic direction signaling, CLAUDE OVERRIDE
-
-**Calibration rules 23-28 added to `scorer.py` SYSTEM_PROMPT and `analysis/research_probe.py` PROBE_SYSTEM:**
-- Rule 23: AI Capability Milestones — exam passage ~40%, AGI <5%; corrects for training-data optimism bias
-- Rule 24: Bank Failure / Financial System Risk — named bank ~15%, systemic crisis ~10%; only FDIC action counts
-- Rule 25: Emerging Technology Readiness — L4/L5 AV ~25%, quantum RSA <5%, humanoid robots ~15%; timelines slip 2-5×
-- Rule 26: Climate / Environmental Records — hottest year ~40%; crowd already prices trend extrapolation
-- Rule 27: Cryptocurrency / Digital Asset Markets — Rule 13 applies strictly; deviate only if >25pp from 50%
-- Rule 28: Short-Horizon Edge Decay — INTRADAY/WEEKLY markets: require 15pp (not 10pp) + 72h evidence; heuristic base rates are long-run averages, not specific to 3-day closes
-
-**`score_market()` — new `heuristic_direction` field:**
-Added to scanner.py output: "YES" when `base_rate > mid_price + 5pp`, "NO" when below, "NEUTRAL" within buffer, None when no base rate.
-
-**`build_prompt()` — explicit lean annotation in flag reasons:**
-- Before: `"FLAG REASON: EDGE — significant gap between heuristic estimate and market price"`
-- After: `"FLAG REASON: EDGE — heuristic base rate 30% vs market price — leans NO"`
-Anchors Claude's prior before it begins web search; reduces over-confirmation of crowd consensus.
-
-**`report._signal_block()` — CLAUDE OVERRIDE indicator:**
-When Claude's direction opposes the scanner's base rate (>5pp gap), the report now shows:
-`[!] CLAUDE OVERRIDE: Base rate 20% leans NO but Claude called YES — requires strong independent evidence.`
-Human reviewer flag for signals where Claude overrode the conservative heuristic prior.
-
-### Git commits this session
-
-32. `4f8d1a7` — Calibration rules 23-27 + README fix (796 tests)
-33. `2e0f738` — heuristic_direction in score_market() + lean annotation in build_prompt + 8 tests (804)
-34. `55e0448` — Rule 28: short-horizon edge decay for INTRADAY/WEEKLY markets + 1 test (805)
-35. `b7f8ef0` — CLAUDE OVERRIDE indicator in report + 4 tests (809)
-
-## Session 11 — 2026-06-17 (autonomous continuation)
-
-### Short-horizon enforcement, heuristic alignment DB analysis, signal pre-sort
-
-**`logger.py` schema additions (`base_rate`, `heuristic_direction`, `short_horizon`):**
-Three new columns added via additive migration. Enables: (1) calibration analysis of whether
-CLAUDE OVERRIDE signals outperform aligned signals, (2) short-horizon win rate breakdown.
-`log_signal()` persists all three fields. `get_stats_by_heuristic_alignment()` groups resolved
-paper signals into aligned/override/no_heuristic — surfaced in `analysis/backtest.py`.
-
-**Scanner: short-horizon edge decay at filter level (`scanner.py`):**
-Markets with `time_horizon in (INTRADAY, WEEKLY)` now require `raw_edge > 0.15` to fire the
-HEURISTIC/EDGE flag (default threshold is 0.08). Configurable via `short_horizon_edge_threshold`.
-`short_horizon: bool` added to `score_market()` return dict.
-
-**`build_prompt()` — `[!] SHORT HORIZON` warning:**
-Markets closing within 7 days now show explicit Rule 28 context: "Heuristic base rates are
-long-run averages — require 15pp edge AND evidence dated within 72 hours."
-
-**`_pre_sort_score()` — signal convergence and short-horizon penalty:**
-Now counts directional sources (heuristic, Polymarket, ext consensus, drift, whale, order book).
-Adds +3 for 3+ agreeing sources, +1 for 2. Short-horizon markets with score <5 get -2 penalty
-so long-horizon high-quality markets win Claude slots when evidence is weak.
-
-**`report.py` — `[SHORT HORIZON — verify within 72h]` in signal header:**
-Human reviewer can immediately see which signals need extra evidence scrutiny.
-
-### Git commits this session
-
-36. `91cb519` — base_rate + heuristic_direction schema migration + 3 logger tests (816)
-37. `f8bf3b2` — get_stats_by_heuristic_alignment() + backtest section + 6 tests (822)
-38. `f4aa329` — short-horizon edge decay at filter level + 6 scanner tests (828)
-39. `946f54e` — short_horizon end-to-end: DB column + build_prompt warning + 5 tests (833)
-40. `0a7d85e` — pre-sort: signal convergence bonus + short-horizon penalty (833)
-41. `6074aaf` — [SHORT HORIZON] label in daily report + 3 tests (836)
-42. `91acdb3` — filter_stats.py short-horizon suppression analysis + README test count (836)
-43. `54696a9` — net-of-spread edge + watchlist_direction convergence; 12 tests (855)
-44. `67b6e08` — smart dedup post-scoring: dedup_by_event_scored picks best-signal market; 7 tests (862)
-45. `a96a8b0` — vol_spike/price_jump in pre-sort; multi-platform consensus weighting; 9 tests (867)
-46. `83340a3` — cross-market conflict detection + signal strength vol/price; 4 tests (871)
-47. `d0253e7` — net_edge calibration bucketing: get_stats_by_net_edge() + calibration.py section; 4 tests (875)
-48. `0811691` — conflict penalty in pre-sort + net_edge_analysis.py diagnostic (875)
-49. `274b310` — CROSS_MARKET net_edge from Poly gap + backtest net_edge section + config cleanup (875)
-
----
-
-## Session 12 — 2026-06-17 (autonomous continuation)
-
-### Net-of-spread edge, watchlist convergence, smart event dedup
-
-**Net-of-spread edge (`net_edge`):**
-`scanner.py` computes `net_edge = raw_edge - half_spread` so the realizable edge (after paying
-the bid-ask spread to enter) is tracked separately from the theoretical edge. A market with 10pp
-raw edge but 12pp spread has `net_edge = -2pp` — no profit possible. `scorer.py` shows both to
-Claude with [SPREAD CONSUMES EDGE] and [thin net edge] warnings. `report.py` surfaces Net Edge
-in every signal block. `logger.py` persists it as a new column.
-
-**Watchlist direction in convergence:**
-`build_prompt()` SIGNAL SUMMARY now counts `watchlist_direction=YES/NO` as an independent
-directional source when `watchlist_signal=True`. `_pre_sort_score()` convergence counter
-also includes it. Previously watchlist confirmed presence but not direction.
-
-**Smart event dedup (`dedup_by_event_scored()`):**
-New function in `scanner.py` runs post-scoring and picks the best-signal market per event using
-priority: watchlist_signal > net_edge > raw_edge > volume. Previously, dedup ran pre-scoring and
-used raw volume only — could discard the highest-edge market in favour of the most liquid.
-Pipeline in `main.py` and `filter_stats.py` updated to dedup after `score_markets()`.
-
-**vol_spike/price_jump in pre-sort and SIGNAL SUMMARY:**
-`_pre_sort_score()` gets +1 for vol_spike (24h vol ≥ 20% of total) and +2 for price_jump (≥20%
-move from previous price). SIGNAL SUMMARY in `build_prompt()` appends `[VOL_SPIKE]`/`[PRICE_JUMP]`
-tags. External consensus votes now weighted by platform count (capped at 3) in both.
-
-**Cross-market conflict detection:**
-`build_prompt()` shows `[!] HEURISTIC vs POLYMARKET CONFLICT` when base rate direction and
-Polymarket disagree at ≥5pp. Shows `[!] HEURISTIC vs CONSENSUS CONFLICT` when ≥2 external
-platforms oppose the heuristic. Pre-sort penalizes (-2) markets with strong Poly/heuristic
-conflict (≥10pp opposite) and no corroboration. `_signal_strength()` in report.py now includes
-vol_spike and price_jump activity signals.
-
-**Net-of-spread calibration infrastructure:**
-`get_stats_by_net_edge()` buckets resolved paper signals by realizable edge range. Exposed in
-`analysis/calibration.py` (BY NET EDGE section) and `analysis/backtest.py`. `CROSS_MARKET`
-promoted markets get `net_edge` from Poly gap minus half-spread (previously always NULL).
-`analysis/net_edge_analysis.py` — new diagnostic showing live distribution of flagged market
-net_edge with histogram, flag-path breakdown, and top tradeable/worst spread-dominated markets.
-`config.json` — `short_horizon_edge_threshold` made explicit (was hardcoded default).
-
----
-
-## Session 9 — 2026-06-17 (autonomous continuation)
-
-### Brier score calibration + digest integration
-
-Added Brier score as the primary calibration metric for tracking signal quality over time.
-
-**`logger.get_brier_score()`** — computes `mean((estimate - outcome_binary)^2)` for all
-resolved paper signals. YES WIN → binary=1; YES LOSS → 0; NO WIN → 0; NO LOSS → 1.
-Returns `{brier_score, n, label}` where label ∈ EXCELLENT (≤0.10) / GOOD (≤0.20) / FAIR (≤0.25) / POOR (>0.25).
-Research probe rows are excluded — Brier score is paper-signal calibration only.
-
-**`analysis/backtest.py`** — Brier score shown in COMBINED SUMMARY section with calibration guidance.
-
-**`report.compile_weekly_digest()`** — accepts optional `brier=` param; displays Brier score in
-TRACK RECORD section of the weekly email with label and n.
-
-**`main.py`** — passes `brier=logger.get_brier_score()` to `compile_weekly_digest()` on Sunday digest runs.
-
-**7 new tests (684 total):**
-- `test_logger.py` +4: pending (None score), perfect (≈0.0), random (≈0.25), probe exclusion
-- `test_report.py` +3: Brier shown in digest, PENDING when None, absent when param omitted
-
-### Git commits this session
-
-24. `02af675` — Add Brier score calibration metric (684 tests): logger.get_brier_score(),
-    backtest display, weekly digest integration, 7 new tests
-25. `c4875d9` — Major heuristic gap-fill pass: 11 new categories + 40 tests (714)
-    Minimum wage (25%), national emergency (25%), nuclear plant accident (5%),
-    nuclear weapons (5%), NATO Article 5 (5%), troop withdrawal (30%),
-    commodity/energy prices (40%), interest rate thresholds, retail/consumer (45%),
-    inflation thresholds (50%), wildfire (35%), tech product releases (55%), concert/tour (45%),
-    immigration legislation extension. BR_NONE on 20-title sample: 0%.
-26. `7edf3c9` — Calibration rules 21-22: geopolitical escalation + natural disaster severity (716)
-    Rule 21: invasion 15%, NATO Article 5 5%, military strike 15%, coup 10% — don't chase rhetoric
-    Rule 22: wildfire 35%, hurricane 45%, earthquake 30% — weather forecasts already priced
-27. `1568279` — Add confidence breakdown: get_stats_by_confidence() + backtest section (719)
-    logger.get_stats_by_confidence() groups win rate/PnL by HIGH/MED/LOW confidence level
-28. `fa99b2d` — Second BR_NONE gap-fill pass: 12 new categories + 36 tests (743)
-    "be acquired" / "be taken over", "go bankrupt", bank failure (15%), gun control (20%),
-    currency depreciation (40%), company valuation (35%), tech market competition (35%),
-    social media age restrictions (30%), corporate leadership retention (65%),
-    volcanic eruption (5%), common currency (10%), economic performance comparisons (50%)
-29. `65d81d6` — Third BR_NONE gap-fill pass: 13 new categories + 22 tests (765)
-30. `8b6a540` — Fourth BR_NONE gap-fill pass: 12 new categories + 20 tests (785)
-    "acquire" verb forms, spending bill, GDP phrasing, corporate market entry,
-    production/delivery milestones, independence referendum, military recapture,
-    AR glasses, AI capability milestones, AI regulation, climate records, calibration
-    rule alignment fixes
-31. `d34aace` — Final BR_NONE gap-fill: athlete retirement, trailer release, AGI (791)
-    VALIDATED on real Kalshi snapshot (28 filtered markets): BR_NONE = 0/28 = 0.0%
-    Student loan forgiveness (30%), healthcare reform (20%), rejoin international agreement (25%),
-    data leak / gov't hack, civil war (25%), political scandal (45%),
-    autonomous vehicle (25%), quantum computing (10%), Mars mission (15%),
-    renewable energy threshold (40%), housing market correction (20%)
-
----
-
-## Session 7 — 2026-06-17 (autonomous continuation)
-
-### Testing + heuristic quality pass
-
-All work continued autonomously from Session 6. Focus: close coverage gaps in
-test suite and tighten heuristic base rate accuracy.
-
-**New tests added (383 → 489):**
-- `test_logger.py` +11: `get_stats_by_sig()` (zero coverage before), `log_run`, `get_recent_tickers`, `get_week_signals`
-- `test_report.py` +14: `_qualifying()` (PASS-direction exclusion, threshold, second_pass bypass, sort order)
-- `test_report.py` +9: `_signal_block` additions (spread, whale, OB, watchlist, Polymarket, ext_markets, smart_money)
-- `test_scorer.py` +24: liquidity context, CROSS-MARKET, POLYMARKET, WHALE ALERT, REVERSAL SIGNAL, ORDER BOOK, SPREAD SIGNAL, SMART MONEY, multi-market numbering, horizon notes, EDGE flag reason
-- `test_report.py` +10: `compile_weekly_digest()` (header, empty, direction counts, dedup, stats, flag_path table)
-- `test_report.py` +20: `compile_report()` (header, empty, new/repeat sections, whale, track record, probe stats, flag path, short-term watchlist, run stats, horizon grouping)
-- `test_scanner.py` +25: new heuristic categories (fired/dismissed, govt shutdown, debt ceiling, CR/omnibus, antitrust, DPRK)
-
-**New heuristic base rate categories in `scanner.py`:**
-- Fired/dismissed (0.25) — before "resign" (0.20); requires word-bounded " fired " to avoid "misfired"
-- Government shutdown (0.15) — government shutdown / partial shutdown / avert a shutdown
-- Debt ceiling (0.15) — debt ceiling / debt limit / raise the debt ceiling
-- Continuing resolution / omnibus (0.40) — placed BEFORE "signed into law" (0.35) to avoid ordering bug
-- Antitrust/FTC/DOJ blocking (0.40)
-- North Korea / DPRK (0.40) — placed BEFORE "nuclear deal" (0.20); uses " dprk " and explicit phrases
-
-**False positive fixes:**
-- "release" and "show" removed from entertainment catch-all — too broad (hit Fed minutes, data reports)
-- "season" bare match removed — was hitting "wildfire season", "flu season", etc.
-  Replaced with specific: "new season", "season premiere", "season finale", "season 2"..."season 9"
-- "fired" bare match replaced with " fired ", "be fired", "get fired", etc. (avoids "misfired")
-
-**Calibration:** all PROGRESS.md open items from Session 6 remain (Prison Break settlement, flag_path outcome data, KXMLBDEBUT-KANDERSON spread, cross-market force-flag architecture).
-
-### Git commits this session
-
-1. `92cb49c` — get_stats_by_sig, log_run, get_recent_tickers, get_week_signals tests (394)
-2. `4768a1b` — _qualifying and _signal_block coverage in test_report (408)
-3. `5969cf8` — build_prompt coverage for liquidity, ext_markets, poly, whale, OB, spread, smart money (432)
-4. `61cc019` — compile_weekly_digest tests (442)
-5. `cdae26f` — compile_report tests (457)
-6. `b5872ce` — 6 new heuristic categories + 25 test cases, README 380→474
-7. `14a67d4` — entertainment false positive fix (release/show)
-8. `04f12bf` — fired substring fix, season catch-all fix
-9. `5c3e1ed` — FOMC/unemployment/price/IPO/legislative/TikTok expansion (489 tests)
-
----
-
-## Session 6 — 2026-06-17
-
-### Signal coverage: flagged market count 9 → 15
-
-Added new heuristic base rates and fixed several stale-threshold bugs across analysis scripts.
-
-**`scanner.py` — new base rate patterns:**
-- Cabinet departure: `"member of trump's cabinet"`, `"leave the cabinet"`, etc. → 0.65 (high historical turnover)
-- Congressional control: `"control the senate"`, `"senate majority"`, `"flip the house"`, etc. → 0.50 (election cycle coin-flip)
-
-**`analysis/filter_stats.py` — diagnostic improvements:**
-- Added `--snapshot` flag: reads from `data/snapshots/` instead of live API (~3s vs ~90s)
-- Added prompt-time signal counts: `vol_spike` (24h vol ≥20% of total) and `price_jump` (last vs prev ≥20%)
-- Fixed drop-reason price calculation to use two-sided bid/ask logic (same as scanner.py)
-
-**`report.py` + `main.py` — flag path surfacing:**
-- Signal block header now shows `[HEURISTIC]` / `[DRIFT]` tag so recipients know why a market was flagged
-- Fired signals list adds `"Heuristic Base Rate XX%"` when flag_path=HEURISTIC
-- `main.py` passes `base_rate` through to the signal dict
-
-**`analysis/drift_diagnosis.py` — correctness fixes:**
-- Applied two-sided bid/ask fix (bid>0 AND ask>0) to mid-price calculation; was generating spurious drift for one-sided markets
-- Part B `drift?` column and Part C baseline now read `drift_min_abs`/`drift_min_pct` from config instead of hardcoded 0.0/5%
-
-**New tests:** `tests/test_report.py` (8 tests) + 7 new parametrized base rate cases in `test_scanner.py` → 339 total (was 324).
-
-**`scorer.py` — calibration rules expanded:**
-- Added Rule 5 (IPO announcement): base rate ~25% per 3-6 month window; "confidentially filed" / "banks hired" are NOT evidence of imminent announcement — only public S-1 filing counts
-- Added Rule 6 (cabinet departure): base rate ~65% within first 20 months; market below 50% likely underpriced — weight historical turnover heavily
-- Added Rule 7 (sports debut): base rate ~35% for unconfirmed prospects; only active roster assignment + confirmed start date counts as strong evidence
-- Renumbered HIGH CONFIDENCE to Rule 9, EDGE REQUIREMENT to Rule 10
-
-**`scorer.py` `build_prompt()` — FLAG REASON line:**
-- Each market in the scored prompt now gets a line explaining why it was flagged:
-  `FLAG REASON: HEURISTIC base rate mismatch 65% vs market price`
-  `FLAG REASON: DRIFT — market price has moved significantly from last traded price`
-  `FLAG REASON: WATCHLIST — top Polymarket traders have open positions on this market`
-
-**`scorer.py` `build_prompt()` — SIGNAL CONFLICT detection:**
-- When `drift_flag=True` AND `base_rate` is set AND the two signals point in opposite directions, appends:
-  `SIGNAL CONFLICT: DRIFT suggests YES (mean revert) but BASE RATE (35%) suggests NO. Weight the base rate over drift for fundamental mispricing; use drift only as a secondary timing cue.`
-
-**`analysis/research_probe.py`:**
-- `PROBE_SYSTEM` synced with scorer.py rules 5 (IPO), 6 (cabinet), 7 (sports debut), 8 (HIGH CONFIDENCE), 9 (EDGE REQUIREMENT)
-
-**`analysis/drift_diagnosis.py` + `analysis/flag_mode_compare.py`:**
-- Both scripts now read `drift_min_abs`/`drift_min_pct` from config instead of hardcoded values
-- `flag_mode_compare.py` report now shows dynamic thresholds instead of stale "86%" / "0.0/0.05" text
-
-**`analysis/threshold_sweep.py`:**
-- `classify_flag_path()` refactored to read `m.get("flag_path")` directly (was re-running edge logic from scratch)
-- Removed stale `_edge_threshold` tagging loop
-
-**New tests:** `tests/test_report.py` (8 tests) + 7 new base rate cases in `test_scanner.py` + 8 new scorer tests → 347 total (was 324). Session 6 further added 5 SIGNAL CONFLICT tests → 352 total.
-
-### Git commits this session
-
-1. `e625a1c` — Cabinet/senate base rates, filter_stats --snapshot, vol/price signals
-2. `0b05818` — flag_path in report header, heuristic base rate in signals, test_report
-3. `d08e304` — drift_diagnosis uses config thresholds and two-sided bid/ask fix
-4. `3b45bb2` — scorer calibration rules 5-7 (IPO/cabinet/sports debut), FLAG REASON line in prompts, 8 scorer tests (347 total)
-5. `4c680eb` — system prompt rule presence tests, test count to 347
-6. `3571d91` — DRIFT/HEURISTIC signal conflict warning + 5 unit tests (352 total)
-
-### Open items (carried forward)
-
-1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01`) settles 2026-07-08 — run `resolve_outcomes` after that date.
-2. **Flag_path outcome data** — 0 resolved paper signals. Once 10+ markets resolve, `get_stats_by_flag_path()` shows signal path win rates.
-3. **KXMLBDEBUT-KANDERSON**: bid=0.55, ask=0.99, mid=0.77 — unusual 44-cent spread worth monitoring.
-4. **Cross-market force-flag** — markets with significant Polymarket/Metaculus divergence but no heuristic or drift are not promoted. Requires architecture change: run ext_markets cross-ref on unflagged markets before flagging, or add a post-step-4 second-promotion pass.
-
----
-
-## Session 5 — 2026-06-17
-
-### Watchlist pipeline direction enrichment
-
-Enriched the watchlist signal pipeline so Claude sees *which way* top Polymarket traders are positioned, not just that they have a position:
-
-**`analysis/smart_money_scan.py`** — `save_signals_cache()` now writes a `ticker_details` dict alongside `kalshi_tickers`:
-```json
-"ticker_details": {
-  "KXABRAHAMSA-29-JAN20": {
-    "consensus_direction": "NO",
-    "trader_count": 2,
-    "total_position_val": 15000.0,
-    "kalshi_title": "Will Saudi Arabia join BRICS..."
-  }
-}
-```
-Primary source is `grouped_signals`; falls back to flat `kalshi_signals` if grouping produced no data.
-
-**`scanner.py`** — `tag_watchlist_overlap()` gained an optional `ticker_details` parameter. When provided, matching markets are annotated with `watchlist_direction`, `watchlist_position_val`, and `watchlist_trader_count`.
-
-**`main.py`** — Extracts `_ticker_details` from the signals cache JSON and passes it to `tag_watchlist_overlap()`.
-
-**`scorer.py`** — WATCHLIST SIGNAL prompt now surfaces trader count, combined $ position, and consensus direction:
-```
-WATCHLIST SIGNAL: 2 trader(s) ($15,000 combined) on Polymarket hold significant
-open positions on a related market — pointing NO. These are top-20 traders by
-monthly PnL — weight this signal; they have demonstrated edge over thousands of trades.
-```
-
-**Tests:** 5 new `tag_watchlist_overlap` tests for `ticker_details` parameter (293 total, all pass).
-
-### Git commits this session
-
-1. `70791c7` — Enrich watchlist pipeline with direction/value/trader context (293 tests)
-
-### Open items
-
-1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-27JUL01`) settles 2026-07-08.
-2. **Run a fresh daily scan** to verify entity contradiction guard eliminates the 3 FPs.
-3. **Flag_path outcome data** — 0 resolved paper signals. Once 10+ markets resolve, `get_stats_by_flag_path()` will show signal path win rates.
+## Current State (2026-06-28)
+
+**What Leviathan does today:**
+Kalshi prediction market intelligence bot. Scans the full Kalshi catalog, scores flagged markets via Claude+websearch, cross-references Polymarket smart money, and emails a structured daily report.
+
+**Test suite:** 1342 tests, 0 failures (248 commits)
+
+**Pipeline steps:**
+1. Fetch Kalshi markets → filter by volume, price band, close time, high-price gate (≥0.85 excluded)
+2. Score markets: heuristic base rates (35+ categories), drift detection, whale alerts, Polymarket cross-ref
+3. Claude+websearch scoring with calibration rules and signal convergence pre-sort
+4. Compile report: TOP PICKS, BETTING QUEUE (urgency-sorted), EV/contract per signal, UPCOMING RESOLUTIONS
+5. Email via Gmail SMTP; export to Power BI CSVs after each run
+
+**Active features:**
+- 35+ heuristic base rate categories; EDGE/DRIFT/HEURISTIC/WATCHLIST/CROSS_MARKET flag paths
+- Smart money watchlist with daily drift alerts and direction enrichment
+- Research probe experiment (stratified sample, forward scoring into DB)
+- Real fill tracking separated from paper signals in all stats
+- CSV export for Power BI (whitelist-filtered `signals.csv` + `runs.csv` with computed cols)
+- Machine-readable backlog (`backlog.json`, 25 items: 11 done, 9 locked, 3 blocked)
+- High-price filter (≥0.85 mid_price excluded pre-scoring)
+- Betting queue: top 5 unplaced signals sorted by `(edge×0.6) + (1/days×0.4)`
+- EV/contract displayed in signal blocks and top picks
+
+**Sample size (2026-06-28):** ~4 resolved paper signals.
+- Next gate: Brier tracking at n≥25, edge decay at n≥30
+- Per-category gates fire at n≥15 resolved per heuristic category
+- Per-wallet gates fire at n≥10 resolved per smart-money wallet
 
 ---
 
 ## Goal 1b — pytest suite for logger and scanner
 
-**Branch:** `tests-1b`
-**Result:** 81 tests, 0 failures, exit 0
+**Branch:** `tests-1b` | **Result:** 81 tests, 0 failures
 
 ### Coverage
 
 **logger.py — `resolve_outcomes`**
-- All 5 payoff cases verified to the cent:
-  - YES at 0.30, resolves YES → +0.70 ✓
-  - YES at 0.30, resolves NO  → −0.30 ✓
-  - NO  at 0.30, resolves NO  → +0.30 ✓
-  - NO  at 0.30, resolves YES → −0.70 ✓
-  - blank direction           →  0.00 ✓
-- Confirmed reads `market_price`, not `edge` (separate test with `edge=0.25, market_price=0.30`; expects +0.70 not +0.75)
-- Skips already-resolved rows — only unresolved rows trigger API calls
-- Leaves rows untouched when Kalshi API returns unsettled result
+- All 5 payoff cases verified to the cent (YES-win, YES-loss, NO-win, NO-loss, blank direction)
+- Confirmed reads `market_price`, not `edge`
+- Skips already-resolved rows; leaves rows untouched when Kalshi returns unsettled
 
 **logger.py — `get_stats`**
-- `win_rate` is `None` when `resolved == 0`
-- Computes correctly with 2 WIN + 1 LOSS (66.7%)
-- `log_signal` writes blank `outcome`/`result` → `resolved` count stays 0 until `resolve_outcomes` runs
-- Round-trip test confirms blank-outcome convention is consistent between `log_signal`, `resolve_outcomes`, and `get_stats`
+- `win_rate` is None when `resolved == 0`
+- Round-trip confirms blank-outcome convention between `log_signal`, `resolve_outcomes`, `get_stats`
 
 **scanner.py — `filter_markets`**
-- Price bounds: mid < 0.05 or > 0.95 dropped; boundaries 0.05 and 0.95 kept
-- Volume: below per-bucket minimum dropped; above global max dropped
-- Close-time: no `close_time` field dropped; `expiration_time` fallback accepted; beyond 180d dropped
-- Efficient-market keywords: CPI/Federal Reserve titles dropped
+- Price bounds, volume limits, close-time window, efficient-market keyword drop
 
 **scanner.py — `classify_time_horizon`**
-- 15 boundary cases covering INTRADAY / WEEKLY / MONTHLY / QUARTERLY / LONG
-
-**scanner.py — `score_market` flag logic**
-- `base_rate is None` and `mid_price` set → `flag=True` (dominant real-world trigger)
-- Edge > 0.08 → `flag=True`
-- Edge small but drift > 5% → `flag=True`
-- `mid_price is None` (no bid/ask) → `flag=False`
+- 15 boundary cases: INTRADAY / WEEKLY / MONTHLY / QUARTERLY / LONG
 
 **Regression: per-$1 payoff convention**
-- 4 × 7 = 28 parametrized cases covering YES-win, YES-loss, NO-win, NO-loss at prices 0.10–0.90
-- Will break loudly if anyone changes notional size or flips the formula
-
-### Bugs found during testing
-
-None. All logic was already correct after Goal 1 remediation. The tests confirm the P&L fix is wired correctly end-to-end.
-
-### Top 3 recommended next steps
-
-1. **Add `test_whales.py`** — `detect_whale_activity` and `scan_all_markets` are completely untested. The whale flag feeds the second signal path in `main.py` and is never covered by any automated check.
-
-2. **Add `test_report.py`** — `compile_report` and `send_report` have no tests. Email sending should be mocked; test that signal cards render correctly and that `[SECOND PASS — LOW CONVICTION]` is stamped on second-pass signals.
-
-3. **Integration smoke test** — a single end-to-end test that mocks all external calls (Kalshi, Polymarket, Claude CLI) and runs `main.main()` to verify the pipeline completes without exception and logs at least one run row to the DB. This would catch wiring regressions that unit tests on individual modules can't see.
+- 28 parametrized cases at prices 0.10–0.90 for all four payoff cases
 
 ---
 
 ## Goal 1c — Threshold sweep over live Kalshi snapshot
 
-**Branch:** `sweep-1c`
-**Snapshot:** `data/snapshots/markets_20260616_043836.json` — 2,428 markets from 400 events (prod)
-**Grid:** 27 combinations (edge × price bounds × volume multiplier)
-**Full report:** `reports/threshold_sweep.md`
+**Branch:** `sweep-1c` | **Snapshot:** 2,428 markets (prod, 2026-06-16)
 
-### Key finding
-
-**100% flag rate across all 27 combinations.** Every market that survives `filter_markets` is immediately flagged by `score_market`. No threshold knob changes this.
-
-Flag path breakdown at production settings (edge=0.08, price=[0.05,0.95], vol×1.0):
-
-| Path | Count | Share |
-|------|-------|-------|
-| `BR_NONE` (base_rate=None fallback) | 14 | 67% |
-| `EDGE` (heuristic base rate + edge > threshold) | 7 | 33% |
-| `DRIFT` (order-book mid drift) | 0 | 0% |
-
-The `BR_NONE` fallback fires on every market type the scanner has no heuristic for — which is most of them. The filter is the only real gate.
-
-### Recommended config
-
-**Stick with production thresholds.** Moving price bounds to [0.10, 0.90] halves the candidate count (21 → 11) but still flags everything. The candidate volume (21 markets) is already workable for Claude to score. The real improvement is in the flag logic: the `BR_NONE` catch-all should be replaced with a require-signal rule (only flag if `EDGE`, `DRIFT`, or `whale` fired — not just "has a price").
-
-### Top 3 next steps
-
-1. **Fix the BR_NONE catch-all** — require at least one real anomaly signal (edge > threshold, drift > 5%, or whale detected) for a market to be flagged. This turns `score_market` from a pass-through into actual pre-filtering, reducing Claude calls and improving signal quality.
-
-2. **Expand heuristic base rates** — the current list covers ~8 market types (rain, elections, IPOs, etc.). Adding sports outcomes, crypto prices, and legislative events would convert more BR_NONE flags into EDGE flags with real edge estimates.
-
-3. **Re-run sweep after flag logic change** — once BR_NONE is tightened, re-snapshot and re-sweep to confirm the flag rate drops and EDGE/DRIFT flags are the majority path.
+**Finding:** 100% flag rate across all 27 threshold combinations. The `BR_NONE` fallback fires on every market the scanner has no heuristic for. Flag path at production settings (edge=0.08): BR_NONE 14/21 (67%), EDGE 7/21 (33%), DRIFT 0/21 (0%). `strict_with_heuristic` mode recommended to eliminate the BR_NONE catch-all.
 
 ---
 
 ## Goal 1d — Config-driven flag modes + comparison report
 
 **Branch:** `flag-modes-1d`
-**Snapshot:** `data/snapshots/markets_20260616_043836.json` — 2,428 markets (prod, same as 1c)
-**Full report:** `reports/flag_modes.md`
 
-### What changed
+`scanner.score_market` now reads `config.markets.flag_mode`:
+- `passthrough` — original: flag if edge OR BR_NONE OR drift
+- `strict_anomaly_only` — drift-only (whale applies post-hoc)
+- `strict_with_heuristic` — drift OR (heuristic base rate AND edge > threshold)
 
-`scanner.score_market` now reads `config.markets.flag_mode` (default `"passthrough"`) to control the flag condition. Three modes:
+Each scored market returns `flag_path` (EDGE / BR_NONE / DRIFT / HEURISTIC / None) and `flag_mode`.
 
-| Mode | Flag trigger |
-|------|-------------|
-| `passthrough` | `raw_edge > threshold` OR `base_rate is None` OR `drift` (original behavior) |
-| `strict_anomaly_only` | `drift_flag` only (whale applies post-hoc via main.py) |
-| `strict_with_heuristic` | `drift_flag` OR `(base_rate is not None AND raw_edge > threshold)` |
+**Finding:** Drift is far more active than Goal 1c suggested — `flag_path` ordering bug had masked DRIFT under BR_NONE. 18 of 21 filtered markets have `drift_flag=True` at pct-only threshold. `strict_with_heuristic` recommended.
 
-Each scored market now returns `flag_path` (`EDGE` / `BR_NONE` / `DRIFT` / `HEURISTIC` / `None`) and `flag_mode`.
-
-### Candidate counts at production thresholds
-
-| Mode | Survived filter | Flagged | % flagged | EDGE | BR_NONE | DRIFT | HEURISTIC |
-|------|----------------|---------|-----------|------|---------|-------|-----------|
-| `passthrough` | 21 | 21 | 100.0% | 7 | 14 | 0 | 0 |
-| `strict_anomaly_only` | 21 | 18 | 85.7% | 0 | 0 | 18 | 0 |
-| `strict_with_heuristic` | 21 | 18 | 85.7% | 0 | 0 | 18 | 0 |
-
-> **Note:** These are candidate volumes only. Signal correctness cannot be judged until markets resolve.
-
-### Key finding
-
-**Drift is far more active than Goal 1c suggested.** The threshold_sweep classifier checked `BR_NONE` before `DRIFT`, so drift markets were mis-classified as `BR_NONE` and DRIFT appeared as 0. With the corrected `flag_path` logic, 18 of 21 filtered markets have `drift_flag=True` — the order-book mid is >5% away from last traded price on 86% of candidates.
-
-On this snapshot, `strict_anomaly_only` and `strict_with_heuristic` are equivalent (HEURISTIC=0 because no heuristic-matched market survived filter without also having drift). On a snapshot with more heuristic matches (rain forecasts, political markets with large price gaps), they would diverge.
-
-### Recommendation
-
-**Use `strict_with_heuristic`.** It removes the 14 BR_NONE catch-all flags while keeping markets where a heuristic estimate meaningfully disagrees with price. The config default remains `"passthrough"` — no silent behavior change until Reed switches.
-
-### Tests
-
-17 new tests added to `tests/test_scanner.py` (98 total, all pass). Key pins:
-- BR_NONE-no-anomaly market does NOT flag under `strict_anomaly_only`
-- Drift-only market flags under all three modes
-- Heuristic edge flags as `HEURISTIC` under `strict_with_heuristic`
-- Unknown `flag_mode` raises `ValueError`
-
-### Top 3 next steps
-
-1. **Switch config to `strict_with_heuristic`** — the BR_NONE catch-all is confirmed noise. Until this is switched, every run sends 100% of filtered markets to Claude regardless of signal quality.
-
-2. **Add more heuristic base rates** — on today's snapshot HEURISTIC=0 because no heuristic-matched markets survived without drift. Adding sports outcomes, crypto price levels, and legislative events would surface the HEURISTIC path and improve the `strict_with_heuristic` advantage over `strict_anomaly_only`.
-
-3. **Log `flag_path` to the DB** — `log_signal` in logger.py should persist `flag_path` and `flag_mode` alongside each signal so resolved outcomes can be segmented by flag type (e.g., do DRIFT flags resolve correctly more often than HEURISTIC flags?).
+17 new tests (98 total).
 
 ---
 
 ## Goal 1e — Attribution fix + drift recalibration
 
 **Branch:** `drift-fix-1e`
-**Snapshot:** `data/snapshots/markets_20260616_043836.json` — same as 1c/1d
-**Full report:** `reports/flag_modes.md` (updated with all four parts)
 
-### Attribution bug (fixed)
+**Attribution bug fixed:** Each scored market now returns independent booleans `sig_edge`, `sig_drift`, `sig_br_none` computed before mode branching. `flag_path` still records which branch fired (mode-dependent).
 
-`flag_path` recorded only the first branch to fire, so results varied by mode even for the same signal. Under `passthrough`, BR_NONE was checked before DRIFT — markets with both signals were labelled BR_NONE, and DRIFT appeared as 0 in the comparison table.
+**Drift recalibration:** `compute_drift_signal` now requires BOTH `abs_drift > drift_min_abs` AND `pct_drift > drift_min_pct` (both from config). Config keys default to current behavior (abs=0.0, pct=0.05).
 
-**Fix:** Each scored market now returns three independent boolean fields:
-- `sig_edge`: `raw_edge > threshold`
-- `sig_drift`: passes both abs AND pct drift thresholds
-- `sig_br_none`: `base_rate is None and mid_price is not None`
+Drift-fire rate at abs>0.03, pct>0.05: 52% (down from 86% pct-only). Recommended starting point.
 
-These are computed before any mode branching and are identical across all modes. The `flag_path` field still records which branch caused the flag (mode-dependent).
-
-**Corrected signal presence (mode-independent, 21 filtered markets):**
-
-| Signal | Count | % of filtered |
-|--------|-------|---------------|
-| `sig_edge` | 7 | 33% |
-| `sig_drift` | 18 | 86% |
-| `sig_br_none` | 14 | 67% |
-| Both edge AND drift | 7 | 33% |
-
-Key finding: under `passthrough`, DRIFT=0 in the old flag_path table but `sig_drift`=18. All 7 EDGE markets also have drift. The 14 BR_NONE markets had their drift masked by the BR_NONE branch firing first.
-
-### Drift recalibration
-
-**Root cause of 86% drift-fire rate:** `compute_drift_signal` previously used only a percentage threshold (`>5%`). A 0.5-cent move at a 5-cent price = 10% drift — triggering on bid/ask rounding noise.
-
-**Fix:** `compute_drift_signal` now requires BOTH:
-- `abs_drift > drift_min_abs` (new config key, default `0.0`)
-- `pct_drift > drift_min_pct` (was hardcoded `0.05`, now from config)
-
-Config keys are at current-behavior defaults (`drift_min_abs=0.0, drift_min_pct=0.05`) — pending Reed's choice from the grid.
-
-**Drift-by-price-bucket diagnosis:**
-
-| Bucket | N | Drift% (pct>5%) | Avg abs |
-|--------|---|----------------|---------|
-| Low [0.05-0.15) | 11 | 100% | 0.027 |
-| MidLo [0.15-0.35) | 3 | 67% | 0.028 |
-| Mid [0.35-0.65) | 5 | 80% | 0.034 |
-| High [0.65-0.95] | 2 | 50% | 0.055 |
-
-**Threshold sweep (drift-fire rate as % of 21 filtered markets):**
-
-| drift_min_abs | pct>5% | pct>7% | pct>10% | pct>15% | pct>20% |
-|---------------|--------|--------|---------|---------|---------|
-| abs>0.01 | 71% | 71% | 57% | 38% | 38% |
-| abs>0.02 | 67% | 67% | 52% | 33% | 33% |
-| abs>0.03 | 52% | 52% | 38% | 24% | 24% |
-| abs>0.04 | 38% | 38% | 24% | 14% | 14% |
-| abs>0.05 | 10% | 10% | 5% | 0% | 0% |
-
-**Recommended starting point: `abs>0.03, pct>0.05`** — drops from 18 to 11 drift flags (52%), eliminating 0.5-1.5 cent noise moves. The (0.03, 0.10) cell (38%) is the next step. No mode is selective until drift is tightened — currently 86% of filtered markets pass the pct-only gate.
-
-### Tests
-
-9 new tests added to `tests/test_scanner.py` (107 total, all pass). Key pins:
-- Market with both edge AND drift: `sig_edge=True` AND `sig_drift=True` under all three modes, regardless of which sets `flag_path`
-- `sig_br_none=True` only on markets with no heuristic match
-- Tiny abs move (0.005) at low price suppressed when `drift_min_abs=0.02`
-- Both conditions required: large abs + small pct = no flag; small abs + large pct = no flag
-
-### Top 3 next steps
-
-1. **Reed sets `drift_min_abs` and `drift_min_pct`** — the sweep grid is in `reports/flag_modes.md`. Recommended start: (0.03, 0.05). This is the one change that makes the drift signal meaningful rather than noise-dominated.
-
-2. **Re-run `flag_mode_compare.py` after choosing drift thresholds** — the report regenerates automatically from config. The updated drift-fire rate will determine whether `strict_with_heuristic` is actually selective or still forwards most filtered markets.
-
-3. **Log `sig_*` fields to the DB** — now that `sig_edge`, `sig_drift`, and `sig_br_none` are always computed, logging them alongside each signal enables future analysis of which signal types predict correct outcomes (once markets resolve).
+9 new tests (107 total).
 
 ---
 
 ## Goal 2a — Real Kalshi fills pulled into ledger
 
-**Branch:** `real-fills-2b`
-**DB backup:** `leviathan.db.bak_2b` (taken before any schema changes)
+**Branch:** `real-fills-2b` | **Backup:** `leviathan.db.bak_2b`
 
-### What changed
+**kalshi.py:** `fetch_fills()` (GET /portfolio/fills, cursor-paginated) and `fetch_positions()` added. GET-only.
 
-**kalshi.py:** `fetch_fills()` (GET /portfolio/fills, cursor-paginated) and `fetch_positions()` (GET /portfolio/positions) added. Both are GET-only, mirror the existing RSA auth pattern exactly, and warn on empty response without crashing.
+**logger.py schema:** 11 new columns via idempotent `ALTER TABLE`. Existing rows tagged `source='paper'`. New columns: `source`, `from_signal`, `signal_call_id`, `direction_aligned`, `entry_price`, `fill_count`, `fill_fee`, `contract_type`, `segment`, `resolution_date`, `logged_under`.
 
-**logger.py schema:** 11 new columns added via idempotent, PRAGMA-checked `ALTER TABLE` (never drops or truncates). Existing 24 signals tagged `source='paper'`. New columns: `source`, `from_signal`, `signal_call_id`, `direction_aligned`, `entry_price`, `fill_count`, `fill_fee`, `contract_type`, `segment`, `resolution_date`, `logged_under`.
+`pull_real_fills()`: inserts as `source='real_fill'`, matches tickers against paper signals.
+`resolve_outcomes()`: uses `entry_price` for real fills; subtracts `fill_fee / fill_count` per unit.
+`get_stats()`: paper-only. `get_stats_real()`: real-fill-only. Never blended.
 
-`pull_real_fills()`: fetches all fills, inserts as `source='real_fill'`, matches each fill's ticker against prior paper signals, sets `from_signal`, `signal_call_id`, and `direction_aligned`.
+**Live run (2026-06-16):** 15 fills pulled, 5 matched paper signals, 4 direction-aligned, 1 contradictory. 1 resolved (KXAAAGASD-26APR13-4.125, YES→NO, LOSS, −$0.73). 14 open (July 2026 expiry).
 
-`resolve_outcomes()`: extended to handle real fills — uses `entry_price` (actual trade price) instead of `market_price`; subtracts `fill_fee / fill_count` per unit from P&L.
-
-`get_stats()`: now filters to `source='paper'` only. New `get_stats_real()` for real fill stats. Paper and real fill rows never blend in any stats query.
-
-### Fills pulled (live run 2026-06-16)
-
-| Metric | Value |
-|--------|-------|
-| Total fills pulled | 15 |
-| Matched a prior Leviathan signal | 5 |
-| Direction-aligned with signal | 4 |
-| Direction-contradictory | 1 |
-| Already resolved | 1 |
-| Open (pending July settlement) | 14 |
-
-**The 1 resolved fill:** KXAAAGASD-26APR13-4.125, direction=YES, resolved NO → LOSS, net P&L = -$0.73 (including fee). This is the only bet with a settled outcome so far.
-
-**The 14 open fills** are mostly July 2026 expiry markets (KXUSAEXPANDTERRITORY-26JUL01, KXTAIWANLVL4-26JUL01, KXIMPEACHCABINET-26JUL01 ×3, KXMEDIARELEASEPRISONBREAK-27JUL01 ×3, KXTVSEASONRELEASETHELASTOFUS-27JUL, KXIMPEACHCABINET-27JAN01 ×2, KXAILEGISLATION-27JAN01 ×2). They will auto-resolve when `resolve_outcomes` is called after market settlement.
-
-**Signal-matched fills:**
-- KXUSAEXPANDTERRITORY: NO fill, signal NO → aligned
-- KXTAIWANLVL4: NO fill, signal NO → aligned
-- KXIMPEACHCABINET-26JUL01: 2 YES fills (aligned) + 1 NO fill (contradictory — covers both sides)
-
-> **Note:** The real-bet sample (15 fills, 5 signal-matched) is far too small for statistical inference. It provides directional evidence that trades are being tracked correctly, not proof of model quality. Signal correctness requires resolved outcomes across many bets.
-
-> **Note on fee units:** Kalshi's `fee_cost` in the fills API response appears to be total dollar cost per fill event (not per contract). If `fill_count=1` understates actual contract count, fee-per-unit in resolved P&L may be overstated. Recommend verifying fee amounts against Kalshi's fee schedule before drawing P&L conclusions.
-
-### Tests
-
-13 new tests added to `tests/test_logger.py` (120 total, all pass). Key pins:
-- Schema migration idempotent (safe to run twice)
-- Existing rows survive migration and get tagged `source='paper'`
-- Fill matching known ticker → `from_signal=1`, correct `direction_aligned`
-- Fill on unknown ticker → `from_signal=0`, `signal_call_id=NULL`
-- Real-fill P&L net of fees with correct binary payoff (YES win/loss)
-- Unresolved real fill stays unresolved without error
-- `get_stats()` excludes real fills; `get_stats_real()` excludes paper signals
-
-### Top 3 next steps
-
-1. **Verify fee_cost units with Kalshi** — the resolved trade shows a large fee relative to contract price. Confirm whether `fee_cost` is total dollars for the fill or per-contract, and whether `count=1` reflects actual contract count. This affects real P&L accuracy.
-
-2. **Set drift thresholds and re-run the scanner** — the open July fills show active real bets. Once drift is recalibrated (Goal 1e recommendation: abs>0.03), re-run the scanner with `strict_with_heuristic` to see which of those open positions Leviathan would re-flag today.
-
-3. **Add `flag_path` and `sig_*` to log_signal** — now that real fills are tracked, logging the signal attribution (which signal type triggered the paper call) enables apples-to-apples comparison: do DRIFT-flagged signals outperform BR_NONE ones once both sets resolve?
+13 new tests (120 total).
 
 ---
 
-## Goal 2b — Research-probe experiment (research-probe-2c)
+## Goal 2b — Research probe experiment
 
-**Branch:** `research-probe-2c`
-**Result:** 133 tests, 0 failures, exit 0. First live run: 3 markets probed.
+**Branch:** `research-probe-2c` | **Result:** 133 tests, first live run 3 markets probed
 
-### Architecture
+**Architecture:**
+- Part A: Stratified sample across 5 volume tiers (thin <500 to liquid >150k), quotas summing to ~50 markets. Includes filter_markets rejects. Annotated with `filter_pass` bool and `vol_tier`.
+- Part B: Claude+websearch probe per market, bounded by `max_probe_markets`. Expects JSON response with `{ticker, claude_estimate, predicted_direction, confidence, rationale}`.
+- Part C: `logger.log_probe()` inserts `source='research_probe'`, never blends with paper or real_fill stats.
+- Part D: `resolve_outcomes()` handles probe rows. `get_stats_probe()` reports hit rate for high-divergence calls.
 
-`analysis/research_probe.py` implements a four-part experiment:
-
-**Part A — Stratified sample:** 5 volume tiers (thin <500, light 500-5k, medium 5-50k, heavy 50-150k, liquid >150k) with per-tier quotas summing to ~50 markets. Deliberately includes filter_markets rejects — the point is to test for edge *outside* the funnel. Each market annotated with `filter_pass` (bool) and `vol_tier`.
-
-**Part B — Claude+websearch probe:** Claude CLI called with `--allowedTools WebSearch` per market. Expects JSON response: `{ticker, claude_estimate, predicted_direction, confidence, rationale}`. ANTHROPIC_API_KEY excluded from env so CLI uses Pro OAuth. Bounded by `max_probe_markets` (config: `scoring.max_probe_markets`, default 10). Sequential, not parallel. Call count and total runtime printed per run.
-
-**Part C — Research-probe segment in DB:** Each result inserted via `logger.log_probe()` with `source='research_probe'` and `segment='research_probe'` — a fourth bucket that never blends with paper, real_fill, or edge_thesis in stats queries. Fields: `ticker`, `market_price_at_probe`, `claude_estimate`, `divergence` (estimate − price), `predicted_direction`, `confidence`, `rationale`, `runtime_ms`.
-
-**Part D — Forward scoring:** `resolve_outcomes()` handles probe rows naturally (queries blank outcome, matches ticker to Kalshi API). `get_stats_probe(high_divergence_threshold=0.10)` reports total probes, resolved count, hit rate, high-divergence subset stats (|div| ≥ threshold), and a plain-language verdict (PENDING / PARTIAL / COMPLETE).
-
-### First live run — 2026-06-16
-
-**Snapshot:** 2026-06-16T04:38:36Z (2428 markets)
-
-**Stratified sample composition (50 markets):**
-
-| Volume tier       | Count | Filter survivors |
-|-------------------|-------|-----------------|
-| thin (<500)       | 12    | 0               |
-| light (500-5k)    | 12    | 0               |
-| medium (5-50k)    | 10    | 0               |
-| heavy (50-150k)   | 8     | 0               |
-| liquid (>150k)    | 8     | 0               |
-| **Total**         | **50**| **0/50**        |
-
-Note: 0 filter survivors is expected — the snapshot was from an early morning fetch when most liquid markets had thin spreads; all 50 markets failed min_volume or other filters at that timestamp.
-
-**Markets probed (3 of 10 — run halted by monthly spend limit):**
-
-| Ticker | Market price | Claude estimate | Divergence | Direction | Confidence |
-|--------|-------------|----------------|------------|-----------|------------|
-| KXNEXTDNCCHAIR-45-FSHA | 0.195 | 0.080 | −0.115 | NO | MED |
-| ECMOV-28NOV07-DEM211T538 | 0.045 | 0.050 | +0.005 | PASS | MED |
-| KXVPRESNOMD-28-ZMAM | 0.005 | 0.005 | +0.000 | PASS | HIGH |
-
-**Call count:** 3 CLI invocations, avg 61s/market, total 183.6s
-**Probe rows in DB:** 3 (source='research_probe'), unresolved — awaiting market settlement
-
-### Core assumption being tested
-
-Can AI+websearch research find mispricings that the market hasn't priced? The answer is **PENDING resolution** — not yet known. The divergences logged above are hypotheses only. Once the probed markets settle, `get_stats_probe()` will report whether Claude's predicted directions were correct and whether high-divergence calls (|div| ≥ 0.10) beat the market at a statistically meaningful rate.
-
-### Test suite
-
-13 new tests in `tests/test_research_probe.py` (all offline, tmp DB, CLI mocked):
-- `test_stratified_sample_includes_filter_rejects` — thin-volume markets appear with filter_pass=False
-- `test_stratified_sample_respects_target_n` — sample never exceeds target_n
-- `test_stratified_sample_annotates_filter_pass` — every market has filter_pass bool
-- `test_stratified_sample_covers_multiple_volume_tiers` — ≥3 tiers represented
-- `test_log_probe_inserts_research_probe_row` — source='research_probe', correct fields
-- `test_probe_rows_excluded_from_paper_stats` — get_stats() ignores probe rows
-- `test_probe_rows_excluded_from_real_fill_stats` — get_stats_real() ignores probe rows
-- `test_resolved_probe_direction_correct_scores_win` — YES predicted + YES resolved → WIN
-- `test_resolved_probe_direction_wrong_scores_loss` — YES predicted + NO resolved → LOSS
-- `test_unresolved_probe_stays_pending` — blank result stays blank
-- `test_get_stats_probe_pending_verdict` — before resolution, verdict contains "PENDING"
-- `test_get_stats_probe_high_divergence_subset` — |div|≥0.10 subset computed correctly
-- `test_run_probe_respects_max_probe_cap` — run halts at max_probe_markets
-
-### Next steps
-
-1. **Re-run the probe** once Claude Pro spend limit resets — target the full 10-market cap to build a larger hypothesis set, then repeat weekly as markets resolve.
-2. **Add `filter_pass` context to probe output** — the current run shows 0 filter survivors; investigate whether the snapshot timing (4am UTC) explains this or whether the filter thresholds are too strict.
-3. **Track divergence calibration** — once 20+ probe rows resolve, compute calibration error (average |claude_estimate − actual_outcome|) vs. the market's calibration error to measure research alpha.
+**First live run (2026-06-16):** 3 markets probed (run halted by spend limit), 3 probe rows logged, all pending resolution.
 
 ---
 
 ## Session 3 — Smart money signal quality + pipeline wiring (2026-06-17)
 
-**Test count:** 230 → 231 (all passing)
+**Test count:** 230 → 231
 
-### Problem: cross-reference was producing ~127 noisy signals
+### Problem: cross-reference noise (127 noisy signals → 15 clean)
 
-The Polymarket-to-Kalshi title matching was generating false positives because:
-1. SequenceMatcher uses character-level similarity — "Will Saudi Arabia join the Abraham Accords?" scored 52% against a Scottie Scheffler golf market purely because both titles share the phrase structure "Will ... win the ..."
-2. Sports game bets (outcome="No" on "Will Germany win on 2026-06-25?") passed through `_is_binary_position()` because the outcome itself is binary — the problem was in the title, not the outcome
-3. No minimum word-overlap gate; single-word matches (e.g., "mayoral") could score above threshold
+`analysis/smart_money_scan.py` fixes:
+- Added `_SPORTS_TITLE_PATTERNS` and `_is_sports_title()` — filters soccer game lines, tournament bets
+- 2-keyword minimum gate in `_match_to_kalshi()` eliminates character-similarity false positives
+- Match threshold raised from 0.30 → 0.50
+- `kalshi_title` added to signal dict
 
-### Fixes applied
+**Watchlist force-flag bug fixed:** `main.py` now explicitly force-flags `watchlist_signal=True` markets with `flag_path="WATCHLIST"` and prepends them to `flagged_markets`. Previously they were silently dropped if no drift or edge fired.
 
-**`analysis/smart_money_scan.py`:**
+**Probe calibration sync:** Full 6-rule CALIBRATION RULES block from `scorer.py` synced into `PROBE_SYSTEM`. Per-market time-horizon context added to probe prompts.
 
-Added `_SPORTS_TITLE_PATTERNS` and `_is_sports_title(title)` to detect soccer game lines, competition winner bets, and major sports tournaments by title keywords (`" vs. "`, `"win on 202"`, `"world cup"`, `"nba"`, `"super bowl"`, etc.).
-
-Added a **2-keyword minimum gate** in `_match_to_kalshi()`: before computing any score, `len(poly_words & kalshi_words) < 2` skips the candidate. This eliminates all character-similarity false positives where the underlying topic is completely different.
-
-Raised match threshold from `0.30` → `0.50`.
-
-Added `kalshi_title` to the signal dict so the matched Kalshi market name is available in reports (previously only the ticker was stored).
-
-Result: 127+ noisy signals → **15 clean cross-references** on the 2026-06-17 live run.
-
-**Signal quality (2026-06-17 live run):**
-
-| Kalshi ticker | Trader | Position | Match |
-|---|---|---|---|
-| KXMAKERFIELDBY-27JAN01-GRE | 0x2c3350 | $253k NO | 72% |
-| KXLONDONMAYOR-28MAY01-ZPOL | wan123 / denizz | $82k / $26k NO | 62% |
-| CONTROLS-2028-R/D | wan123 | $22k / $21k | 59% |
-| KXRTICKET-28NOV07-JVANEKIR | wan123 | $21k YES | 65% |
-| KXABRAHAMSY-29-JAN20 | denizz | $12k / $7k / $2k NO | 66–72% |
-| KXABRAHAMSA-29-JAN20 | denizz | $4k / $1k NO | 51–83% |
-| SENATEUT-28-R/D | wan123 / Erasmus | $6k / $2k | 68–70% |
-| SENATEFL-28-R | wan123 | $1k NO | 100% |
-| EUEXIT-30 | denizz | $13k NO | 60% |
-
-### Bug fix: watchlist markets were silently dropped
-
-`scanner.score_markets()` sorts watchlist-tagged markets first but does not set `flag=True`. `main.py` then filtered `flagged_markets = [m for m in scored_markets if m.get("flag")]`, which silently dropped any watchlist market that lacked drift or heuristic edge.
-
-**Fix in `main.py`:** After `score_markets()`, any market with `watchlist_signal=True` and `flag=False` is explicitly force-flagged with `flag_path="WATCHLIST"` and prepended to `flagged_markets`. These markets now reliably reach Claude scoring. `watchlist_signal` is also passed through to the final signal dict so it appears in the email report.
-
-### Probe calibration sync
-
-`research_probe.py`'s `PROBE_SYSTEM` prompt had no calibration rules — it was a single sentence. A live Prison Break market probe returned 82% YES on a 5.5% market, demonstrating the risk of uncalibrated tail overconfidence.
-
-Synced the full **6-rule CALIBRATION RULES** block from `scorer.py` into `PROBE_SYSTEM`:
-1. Tail probability — require extraordinary evidence to set estimate >30% on a sub-15% market
-2. Source chain — verify sources are truly independent before citing "multiple sources confirm X"
-3. Announced vs completed — "announced" is not "completed" by the deadline
-4. Entertainment/media — treat streaming release dates with extreme skepticism (~25% base rate)
-5. High confidence threshold — only HIGH when primary-source evidence directly addresses the deadline
-6. Edge requirement — only call YES/NO if estimate differs from market by ≥10pp
-
-Also added per-market time-horizon context to probe prompts (`closes within 7 days — near-term catalysts most relevant`, etc.) so Claude weights evidence appropriately.
-
-### Research probe: watchlist prioritisation
-
-`run_probe()` now loads `data/smart_money/latest_signals.json` and force-inserts watchlist tickers at the front of the probe queue before filling remaining slots from the stratified sample. The divergence table annotates watchlist markets with `[WL]`. This ensures confirmed smart money positions are always probed first within the `max_probe_markets` cap.
-
-### Report improvements
-
-- **`_smart_money_section()`**: cross-references now sorted by `match_score × position_val` (quality-weighted); shows `kalshi_title` below each row so both the Polymarket title and matched Kalshi market are visible; column added for `match_score`
-- **Signal block**: `watchlist_signal=True` adds "Watchlist: Top Polymarket Trader" to the Signals fired line
-- **Header**: "Smart Money" line now shows count of Kalshi cross-references (`N Kalshi x-refs from top Polymarket traders`)
-- **Track record**: probe stats block added (`probe_stats` parameter passed from `main.py`)
-
-### Other fixes
-
-- `daily_smart_money.py`: now calls `save_signals_cache()` after each scan (was missing — ticker cache was not being updated by the scheduled job); fixed Windows cp1252 crash caused by `→` character in print statement
-- `logger.py` `resolve_outcomes()`: added 3-attempt exponential backoff (1.5s, 3.0s) for Kalshi API overload errors; rate-limit sleep bumped 0.25s → 0.3s
-- `main.py`: snapshot saved after every market fetch so analysis scripts always have a fresh catalog
-- `analysis/smart_money_scan.py`: markdown report table now includes `kalshi_title` column; sorted by quality-weighted position size
-
-### Tests
-
-1 new test: `test_watchlist_flag_path_override` — verifies that an unflagged watchlist market gets `flag=True` and `flag_path="WATCHLIST"` when the main.py force-flag logic runs. (231 total, all passing)
-
-### Open items
-
-1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-27JUL01`) settles 2026-07-08 — run `resolve_outcomes({})` after that date to write the official result. Currently manually scored as LOSS.
-2. **Senate/Makerfield/Abraham Accords tickers** — these are 2027–2029 markets; they are now in the scoring queue via watchlist boost but will not resolve for months. Monitor for price drift as confirming signal.
-3. **`filter_pass` context in probe** — stratified sample showed 0 filter survivors in the 4am UTC snapshot. Consider sampling from a fresher snapshot or relaxing filter thresholds in the probe path.
+**Other fixes:** `daily_smart_money.py` now calls `save_signals_cache()` after each scan; Windows cp1252 crash fixed; `resolve_outcomes()` adds 3-attempt exponential backoff for Kalshi API overload; snapshot saved after every market fetch.
 
 ---
 
 ## Session 4 — Signal quality hardening + flag_path analytics (2026-06-17)
 
-**Test count:** 231 → 286 (all passing)
+**Test count:** 231 → 286
 
 ### Entity contradiction guard
 
-Remaining false positives from the Session 3 live scan (15 signals, 3 known FPs):
+`_entity_contradiction(poly_title, kalshi_title)` in `smart_money_scan.py`:
+- US state check (46-word frozenset, padded matching prevents "jersey" → "New Jersey" false match)
+- City check (25 major world cities)
+- Org check (6 exclusive org groups: OPEC, EU/Brexit, NATO, IMF, WTO, ASEAN)
 
-| FP ticker | Mismatch type | Example |
-|---|---|---|
-| EUEXIT-30 | Org group | "leave OPEC" matched "leave EU" |
-| SENATEUT-28-R/D | US state | "Texas Senate" matched "Utah Senate" |
-| KXLONDONMAYOR | City | "LA Mayor" matched "London Mayor" |
-
-**Fix:** `_entity_contradiction(poly_title, kalshi_title)` in `analysis/smart_money_scan.py`:
-- **US state check**: extracts state words from both titles using a 46-word frozenset (omits Carolina/Dakota to avoid treating NC vs SC as contradictory). Padded matching (` texas ` not `texas`) prevents "jersey" from false-matching "New Jersey".
-- **City check**: 25 major world cities; both must name a city AND they must differ.
-- **Org check**: 6 exclusive organization groups (OPEC, EU/Brexit, NATO, IMF, WTO, ASEAN). Each group is a frozenset; titles that reference organizations from different groups are rejected.
-
-Called inside `_match_to_kalshi()` before computing score — no overhead if 2-keyword gate fails first.
-
-**Tests:** 18 new tests in `tests/test_smart_money.py` covering all three mismatch types and verifying legitimate matches are NOT rejected.
+Called before score computation — no overhead if 2-keyword gate fails first. 18 new tests.
 
 ### Signal grouping
 
-`_group_signals_by_ticker(signals)` added. Multiple traders pointing at the same Kalshi market produce one aggregated entry with:
-- `total_position_val`: sum of all trader positions
-- `trader_count`: unique traders (deduplicated by name)
-- `directions`: `{"YES": N, "NO": M}` vote tallies
-- `consensus_direction`: "YES" / "NO" / "MIXED" / "UNKNOWN"
+`_group_signals_by_ticker(signals)` aggregates per-ticker: `total_position_val`, `trader_count`, `directions` vote tallies, `consensus_direction`. 7 new tests.
 
-Grouped summary printed to console after the flat signal list. The `result` dict includes both `"kalshi_signals"` (flat per-trader list) and `"grouped_signals"` (aggregated by ticker).
+### Heuristic base rates expanded (35 categories, was 18)
 
-**Tests:** 7 new tests covering aggregation, direction voting, MIXED consensus, trader dedup, empty input, and UNKNOWN direction.
+10 new groups: legislative passage (0.35), presidential veto (0.20), executive orders (0.45), senate confirmation (0.55), resign/step down (0.20), pardon (0.35), sanctions (lift 0.20, impose 0.45), nuclear deal (0.20), Supreme Court (0.50), economic indicators (0.50), crypto price (0.50), hurricanes (0.45), diplomatic recognition (0.30), lawsuit settlement (0.40), NATO/EU accession (0.25–0.35). 25 new tests.
 
-### Expanded heuristic base rates (35 categories, was 18)
+### flag_path and watchlist_signal in logger
 
-Added 10 new market category groups to `scanner.estimate_base_rate()`:
+Two new columns via additive migration: `flag_path TEXT`, `watchlist_signal INTEGER DEFAULT 0`.
+`get_stats_by_flag_path()`: win rate + P&L segmented by signal path (resolved paper only).
+Flag_path win-rate table added to `compile_report()` and `compile_weekly_digest()`. 6 new tests.
 
-| Category | Base rate | Rationale |
-|---|---|---|
-| Legislative passage | 0.35 | Bills with Kalshi presence have some momentum but most don't pass |
-| Presidential veto | 0.20 | Vetoes are rarer than passage |
-| Executive orders | 0.45 | Fairly common executive action |
-| Senate confirmation | 0.55 | Most nominees confirmed historically |
-| Resign/step down | 0.20 | Rare for sitting officials |
-| Presidential pardon | 0.35 | Relatively common during administrations |
-| Lift sanctions | 0.20 | Harder to lift than impose (checked first in order) |
-| Impose sanctions | 0.45 | Fairly common US/EU action |
-| Nuclear deal/accord | 0.20 | Hard diplomatic outcomes |
-| Supreme Court / rulings | 0.50 | Genuinely uncertain |
-| Economic indicators (CPI/GDP/jobs) | 0.50 | 50/50 for specific threshold questions |
-| Crypto price markets | 0.50 | Symmetric around any given level |
-| Hurricanes / tropical storms | 0.45 | Uncertain once tracked |
-| Diplomatic recognition | 0.30 | Uncommon unilateral actions |
-| Lawsuit settlement | 0.40 | Moderate base rate |
-| NATO/EU accession | 0.25–0.35 | Hard but possible within 5-year horizons |
+**Commits:** `461a7a5`, `92fc8f5`, `9d8bde0`, `5f6fcc4`
 
-**Order note:** "lift sanctions" checked before "impose sanctions" because "will the EU lift sanctions on Russia" contains "sanctions on" which would otherwise match the impose group. More-specific patterns always precede less-specific ones.
+---
 
-**Tests:** 25 new tests in `tests/test_scanner.py` pinning each new category.
+## Session 5 — Watchlist pipeline direction enrichment (2026-06-17)
 
-**Impact:** More markets now get a `base_rate` in `strict_with_heuristic` mode, enabling the `HEURISTIC` flag_path for markets where Claude+websearch would find real edge. Previously these markets were dropped entirely in strict mode.
+**Test count:** 286 → 293
 
-### `flag_path` and `watchlist_signal` in logger
-
-Two new columns added via additive schema migration (safe on existing `leviathan.db`):
-- `flag_path TEXT` — EDGE / BR_NONE / DRIFT / HEURISTIC / WATCHLIST
-- `watchlist_signal INTEGER DEFAULT 0`
-
-`log_signal()` now persists both. Both signal dicts in `main.py` (primary and second-pass) forward `flag_path` from the market object.
-
-**New function:** `get_stats_by_flag_path()` — returns win rate, total calls, wins, and hypothetical P&L broken down by flag path. Only paper signals with a resolved outcome. Enables outcome segmentation once markets settle.
-
-**Tests:** 6 new tests covering column presence, flag_path persistence (three cases), and `get_stats_by_flag_path` (basic, resolved-only, excludes real fills).
-
-### Report: win rate by flag_path
-
-`compile_report()` and `compile_weekly_digest()` now accept `flag_path_stats` parameter and render a compact table in the track record section:
-
+`save_signals_cache()` now writes `ticker_details` dict alongside `kalshi_tickers`:
+```json
+"ticker_details": {
+  "KXABRAHAMSA-29-JAN20": {
+    "consensus_direction": "NO", "trader_count": 2,
+    "total_position_val": 15000.0, "kalshi_title": "..."
+  }
+}
 ```
-  Win Rate by Signal Path  (resolved only):
-    Path            Total  Wins    Win%       P&L
-    --------------  -----  ----  ------  --------
-    WATCHLIST           3     3    100%     $2.10
-    HEURISTIC           5     3     60%     $0.85
-    DRIFT               8     4     50%     $0.20
-    EDGE                2     1     50%     $0.40
-```
+`tag_watchlist_overlap()` uses `ticker_details` to annotate `watchlist_direction`, `watchlist_position_val`, `watchlist_trader_count`. WATCHLIST SIGNAL block in scorer shows trader count, combined $ position, and direction. 5 new tests.
 
-`main.py` fetches and passes `logger.get_stats_by_flag_path()` in both normal and fallback report paths.
+---
 
-### Git commits this session
+## Session 6 — Signal coverage: flagged market count 9 → 15 (2026-06-17)
 
-1. `461a7a5` — Entity contradiction guard + signal grouping + 24 new tests (255 total)
-2. `92fc8f5` — Expanded heuristic base rates, 25 new tests (280 total)
-3. `9d8bde0` — flag_path/watchlist_signal schema + get_stats_by_flag_path + 6 tests (286 total)
-4. `5f6fcc4` — Flag_path win-rate table in daily and weekly reports
+**Test count:** 293 → 352
 
-### Open items
+**New heuristic categories:** Cabinet departure (0.65), congressional control (0.50).
 
-1. **Prison Break market** (`KXMEDIARELEASEPRISONBREAK-27JUL01`) settles 2026-07-08 — unchanged.
-2. **Run a fresh daily scan** to verify entity contradiction guard eliminates the 3 FPs (EUEXIT/SENATEUT/KXLONDONMAYOR).
-3. **Flag_path outcome data** — currently 0 resolved paper signals. Once 10+ markets resolve, `get_stats_by_flag_path()` will show whether WATCHLIST or HEURISTIC has higher win rate than raw EDGE/DRIFT.
+**`analysis/filter_stats.py`:** `--snapshot` flag reads cached snapshots (~3s vs ~90s). Added `vol_spike` (24h vol ≥20% of total) and `price_jump` (last vs prev ≥20%) prompt-time signals.
+
+**Report improvements:** Signal block header shows `[HEURISTIC]`/`[DRIFT]` tag; `"Heuristic Base Rate XX%"` in fired signals list when `flag_path=HEURISTIC`.
+
+**Calibration rules 5-7:** IPO announcement (25% base, only S-1 filing counts as strong evidence), cabinet departure (65%, weight historical turnover heavily), sports debut (35%, only confirmed roster + start date counts).
+
+**`build_prompt()` — FLAG REASON line:** Each market explains why it was flagged. **SIGNAL CONFLICT detection:** When drift and base rate point opposite directions, appends conflict warning.
+
+**Commits:** `e625a1c`, `0b05818`, `d08e304`, `3b45bb2`, `4c680eb`, `3571d91`
+
+---
+
+## Session 7 — Testing + heuristic quality pass (2026-06-17)
+
+**Test count:** 352 → 489
+
+**New test coverage:** `test_logger.py` +11, `test_report.py` +53 (qualifying, signal blocks, weekly digest, compile_report), `test_scorer.py` +24 (liquidity context, all flag paths, horizon notes), `test_scanner.py` +25 (6 new heuristic categories).
+
+**New heuristic categories:** Fired/dismissed (0.25, word-bounded to avoid "misfired"), government shutdown (0.15), debt ceiling (0.15), continuing resolution/omnibus (0.40), antitrust/FTC/DOJ (0.40), North Korea/DPRK (0.40, placed before "nuclear deal" to prevent false match).
+
+**False positive fixes:** `"release"` and `"show"` removed from entertainment catch-all; bare `"season"` replaced with specific patterns ("new season", "season premiere", etc.); `"fired"` replaced with padded word-boundary match.
+
+**Commits:** `92cb49c`, `4768a1b`, `5969cf8`, `61cc019`, `cdae26f`, `b5872ce`, `14a67d4`, `04f12bf`, `5c3e1ed`
+
+---
+
+## Session 8 — Cross-market force-flag + polymarket test suite (2026-06-17)
+
+**Test count:** 489 → 649
+
+**CROSS_MARKET flag path:** Unflagged markets with significant Polymarket price divergence promoted into the scoring queue even with no heuristic/drift/edge signal.
+
+Architecture:
+- `polymarket.fetch_and_build_index(config)` — fetches once, returns shared index
+- `polymarket.match_markets(markets, index, config, *, min_gap, min_match_score)` — matches any list
+- `main.py` step 3: `unflagged_markets` pool collected after scoring
+- `main.py` step 4: top-N unflagged by volume promoted at `abs(gap) ≥ cross_market_min_gap`
+
+Config keys: `cross_market_promote`, `cross_market_min_gap` (0.15), `cross_market_max_candidates` (50).
+
+**`test_polymarket.py`:** 24 new tests covering yes_price, build_index, find_match, match_markets, enrich_flagged, cross-market promotion.
+
+Additional work this session:
+- Quality-weighted `_pre_sort_score()` replacing volume-only ordering
+- Signal strength composite indicator (★×N when N≥2 corroborating sources)
+- Signal urgency markers (CLOSING IN Xd), repeat-count labels (REPEAT xN)
+- Kelly criterion position sizing in report (full + ¼ Kelly, YES and NO formulas)
+- HIGH confidence edge gate: auto-downgrade to MED when abs(edge) < 10pp
+- TOP PICKS executive summary (top-3 by confidence/strength/edge at report top)
+- Legal heuristics: pardon (35%), plea deal (45%), acquittal (35%)
+- 3 heuristic gap fills: Fed pause/hold (0.50), federal budget (0.40), 25th Amendment (0.05)
+- 5 new heuristics: arrested/testimony/approval/strikes/awards
+- Various calibration rules, recalibrations (shutdown 0.85 avoid / 0.15 begins; debt ceiling 0.70 raise)
+- PROGRESS.md + README housekeeping
+
+**Commits 1–23** (see original for full list)
+
+---
+
+## Session 9 — Brier score calibration + digest integration (2026-06-17)
+
+**Test count:** 649 → 791
+
+**Brier score:** `logger.get_brier_score()` computes `mean((estimate − outcome_binary)^2)` for resolved paper signals. Labels: EXCELLENT (≤0.10), GOOD (≤0.20), FAIR (≤0.25), POOR (>0.25). Research probe rows excluded.
+
+Surfaced in `analysis/backtest.py` COMBINED SUMMARY and `report.compile_weekly_digest()` TRACK RECORD section.
+
+**BR_NONE gap-fill passes (commits 25-31):** 4 passes adding 48 heuristic categories, validated on a 28-market real Kalshi snapshot: BR_NONE = 0/28 = 0.0%.
+
+Categories added include: minimum wage (0.25), national emergency (0.25), nuclear plant accident (0.05), nuclear weapons (0.05), NATO Article 5 (0.05), troop withdrawal (0.30), commodity/energy prices (0.40), inflation thresholds (0.50), wildfire (0.35), tech product releases (0.55), "be acquired" / "be taken over", bank failure (0.15), gun control (0.20), currency depreciation (0.40), company valuation (0.35), volcanic eruption (0.05), athlete retirement, trailer release, AGI, and many others.
+
+`get_stats_by_confidence()` groups win rate/P&L by HIGH/MED/LOW confidence.
+
+**Commits 24–31:** `02af675`, `c4875d9`, `7edf3c9`, `1568279`, `fa99b2d`, `65d81d6`, `8b6a540`, `d34aace`
+
+---
+
+## Session 10 — Calibration rules 23-28, heuristic direction signaling, CLAUDE OVERRIDE (2026-06-17)
+
+**Test count:** 791 → 809
+
+**Calibration rules 23-28 in `scorer.py` and `research_probe.py`:**
+- Rule 23: AI Capability Milestones — exam passage ~40%, AGI <5%
+- Rule 24: Bank Failure / Financial System Risk — named bank ~15%, systemic ~10%
+- Rule 25: Emerging Technology Readiness — L4/L5 AV ~25%, quantum RSA <5%
+- Rule 26: Climate / Environmental Records — hottest year ~40%
+- Rule 27: Crypto / Digital Assets — Rule 13 applies strictly; deviate only if >25pp from 50%
+- Rule 28: Short-Horizon Edge Decay — INTRADAY/WEEKLY: require 15pp (not 10pp) + 72h evidence
+
+**`score_market()` — `heuristic_direction`:** "YES" / "NO" / "NEUTRAL" / None based on base rate vs mid price.
+
+**`build_prompt()` — lean annotation:** "FLAG REASON: EDGE — heuristic base rate 30% vs market price — leans NO"
+
+**`report._signal_block()` — CLAUDE OVERRIDE indicator:** When Claude's direction opposes scanner base rate by >5pp, shows `[!] CLAUDE OVERRIDE: Base rate 20% leans NO but Claude called YES — requires strong independent evidence.`
+
+**Commits 32–35:** `4f8d1a7`, `2e0f738`, `55e0448`, `b7f8ef0`
+
+---
+
+## Session 11 — Short-horizon enforcement, alignment analytics (2026-06-17)
+
+**Test count:** 809 → 875
+
+**`logger.py` schema additions:** `base_rate`, `heuristic_direction`, `short_horizon` columns via additive migration. `get_stats_by_heuristic_alignment()` groups paper signals into aligned/override/no_heuristic.
+
+**Scanner: short-horizon edge decay at filter level:** Markets with `time_horizon in (INTRADAY, WEEKLY)` require `raw_edge > 0.15` (configurable `short_horizon_edge_threshold`). `short_horizon: bool` in `score_market()` return dict.
+
+**`build_prompt()` — `[!] SHORT HORIZON` warning:** Rule 28 context injected for markets closing within 7 days.
+
+**`_pre_sort_score()` enhancements:**
+- Signal convergence bonus: +3 for 3+ agreeing directional sources, +1 for 2
+- Short-horizon penalty: markets with score <5 get −2 so long-horizon signals win Claude slots
+- vol_spike (+1) and price_jump (+2) boosts
+
+**Net-of-spread edge (`net_edge`):** `scanner.py` computes `net_edge = raw_edge − half_spread`. Surfaced in scorer prompt with [SPREAD CONSUMES EDGE] / [thin net edge] warnings. `get_stats_by_net_edge()` in calibration.
+
+**Smart event dedup (`dedup_by_event_scored()`):** Runs post-scoring, uses priority: watchlist_signal > net_edge > raw_edge > volume. Previously pre-scoring, volume-only.
+
+**`[SHORT HORIZON — verify within 72h]` in signal header.**
+
+**Commits 36–49** (see original for full list)
+
+---
+
+## Session 12 — Net-of-spread edge, watchlist convergence, conflict detection (2026-06-17)
+
+Merged into Session 11 above. Key additions:
+- `watchlist_direction` counted as independent directional source in convergence scoring
+- Cross-market conflict detection in `build_prompt()`: `[!] HEURISTIC vs POLYMARKET CONFLICT`, `[!] HEURISTIC vs CONSENSUS CONFLICT`
+- Pre-sort penalizes (−2) strong Poly/heuristic conflict with no corroboration
+- `analysis/net_edge_analysis.py` diagnostic for live distribution of flagged market net_edge
+- `CROSS_MARKET` promoted markets get `net_edge` from Poly gap minus half-spread
+
+---
+
+## Session 13 — Signal quality and calibration improvements (2026-06-18)
+
+**Test count:** 875 → 909
+
+**Commit 50 — Net Edge column in weekly digest**
+`compile_weekly_digest()`: `{'Net':>7}` column in MARKETS FLAGGED table, formatted `+X.Xpp`. 4 new tests.
+
+**Commit 51 — Signal persistence tracking**
+`logger.get_signal_history_batch(tickers, days=14)` — single query for all tickers.
+`main.py` enriches signals with `prior_appearances`, `prior_yes`, `prior_no`, `direction_consistent`, `first_flagged_price`.
+`_pre_sort_score()`: persistent + consistent 3+ day signals get +3 boost; 2-day +2.
+`scorer.build_prompt()`: "Signal history" block shows days-seen, YES/NO split, [CONSISTENT]/[MIXED], price drift note.
+`report._signal_block()`: "Nd/14d: xY/yN — consistent/mixed" persistence line. 17 new tests.
+
+**Commit 52 — Calibration feedback loop**
+`scorer.build_system_prompt(calibration)`: appends CALIBRATION FEEDBACK when resolved data exists. LOW/MED/HIGH confidence thresholds surfaced as instructions to Claude.
+`main.py`: calls `logger.get_stats_by_confidence()` before each Claude run. 5 new tests.
+
+**Commit 53 — Close time tracking + close-horizon calibration**
+`logger.py`: ADD COLUMN `close_time TEXT` (additive). `log_signal()` stores `close_time || expiration_time`.
+`get_stats_by_close_horizon()`: buckets resolved signals by days-to-close at signal time.
+`analysis/calibration.py`: BY ACTUAL DAYS-TO-CLOSE section. 13 new tests.
+
+---
+
+## Session 14 — Profitability hardening (2026-06-18)
+
+**Test count:** 909 → 1081
+
+20 commits (54–62) adding heuristic categories, calibration rules, and analytics:
+
+**Key additions:**
+- Rule 33: Social media post markets — Trump/Musk active-user base rate 85-90%
+- Rule 34: Corporate partnership — "in talks"/"exploring" ≠ signed deal
+- Rule 35: FOMC / rate decision — CME FedWatch is ground truth; deviate only if ≥10pp from FedWatch
+- Rule 36: Index inclusion — ~50% for eligible companies; only official S&P DJ press release is HIGH
+- Rule 37: Crypto network upgrades — testnet-cleared 85-90%, contentious forks 50%
+- Rule 38: Secondary offerings (shelf 75-80%, priced deal 90%+) and credit ratings (CreditWatch Neg 70%)
+- Rule 39: OPEC meetings — only post-meeting communiqué is HIGH; chip export — only Federal Register rule is HIGH
+- Min-hours-to-close filter: `min_hours_to_close: 6` excludes markets closing within 6h
+- Actionability filter, vol_spike / price_jump pre-sort signals
+- `analysis/calibration.py`: whale, watchlist, PASS-rate breakdown sections
+
+New heuristic categories: stock buyback/dividend (0.40), treaty withdrawal (0.20), formal candidacy (0.35), martial law (0.05), social media post (0.75), corporate partnership (0.35), S&P 500 inclusion (0.50), event attendance (0.65), BRICS/SCO membership (0.30), quantitative easing/tightening (0.40), celebrity civil cases (0.45), recall election (0.15), water crisis/drought (0.30), municipal bankruptcy (0.10), OPEC production decision (0.40), semiconductor/chip export restriction (0.45), filibuster reform (0.10), housing permits/starts (0.50), blockchain/crypto protocol upgrade (0.65), secondary equity offering (0.35), credit rating change (0.40), CBDC adoption (0.15), short seller report (0.30), Iran/geopolitical: uranium enrichment (0.20), regime change (0.10).
+
+CBDC false-positive fix: removed "digital currency" from CBDC block (was false-matching crypto market cap).
+
+---
+
+## Session 15 — Heuristic labels, LV specificity bonus, DB persistence (2026-06-18)
+
+**Test count:** 1081 → 1158
+
+**Commit 63 — Heuristic labels + 5 new categories + Rules 40-42**
+`scanner.get_heuristic_label(market)` — ~200 rules mapping title patterns to human-readable category strings ("PDUFA date", "crypto ETF", etc.). First-match wins.
+`score_market()` returns `heuristic_label`.
+`build_prompt()` FLAG REASON now includes `[heuristic label]` suffix.
+New categories: veto (0.20), tax legislation (0.35), supply chain disruption (0.30), EV adoption milestone (0.45), bond/debt issuance (0.65), unionization/NLRB vote (0.40).
+Rules 40-42: unionization elections, tax legislation (reconciliation/TCJA extension), bond/debt issuance.
+76 new tests.
+
+**Commit 64 — LV score heuristic specificity bonus**
+`report.compute_leviathan_score()`: +8 for HIGH_SPEC labels (PDUFA date, government shutdown avoided, FDA clinical hold, constitutional amendment, NATO Article 5, martial law, volcanic eruption, 25th Amendment), +4 for MED_SPEC labels (crypto protocol upgrade, debt ceiling resolution, cabinet departure, CEO retention, credit rating change, OPEC production decision, chip export restriction, bond/debt issuance, FDA complete response letter).
+8 new tests.
+
+**Commit 65 — heuristic_label DB persistence + `get_stats_by_heuristic_label()`**
+`logger._init_db()`: ADD COLUMN `heuristic_label TEXT` (additive migration).
+`log_signal()` and `log_pass()` persist `heuristic_label`.
+`get_stats_by_heuristic_label()`: win rate / P&L / avg edge grouped by label (resolved paper signals only, sorted by win_rate desc).
+`analysis/calibration.py`: BY HEURISTIC LABEL section.
+10 new tests.
+
+---
+
+## Goal 2c — Resolution-first validation harness (2026-06-18)
+
+**Branch:** `resolve-first-3a`
+
+### PART A — Resolution timeline finding
+
+**DB state at audit (2026-06-18):** 62 total rows. Resolved: 4 (all NO). Pending: 58.
+
+All 58 pending rows have MISSING `close_time` — column was added in Session 13 but never backfilled. Inferred distribution: ~25 close Jul 2026, ~1 Oct 2026, ~7 Jan 2027, ~21 are 2028+ (research probes — elections, policy, geopolitics).
+
+**Conclusion:** Existing data cannot validate the model on a useful timescale. Research-probe rows are years from resolving. This goal breaks the cycle by logging new near-dated rows with `close_time` explicitly stored.
+
+### PART B — Near-dated paper batch (`analysis/resolve_first.py`)
+
+Config keys: `resolve_first_max_days` (14), `resolve_first_dedup_days` (7).
+
+**2026-06-18 run:** 2 near-dated candidates at ≤14d (both in 5-15% price band). Both already logged within dedup window — 0 new rows logged. Re-runnable without double-logging.
+
+### PART C — Resolution status (2026-06-18)
+
+Paper rows: 25 | Resolved: 2 | Pending: 23 | Closing ≤14d: 1
+COUNTDOWN: 2 resolved / 20 needed before win-rate is meaningful.
+
+### PART D — Fee + payoff assumption
+
+Binary payoff fix live in `logger.resolve_outcomes`. OPEN: Kalshi `fee_cost` is per-fill-event, not per-contract. If `fill_count=1` understates actual contract count, fee_per_unit is overstated. Verify against Kalshi fee schedule before drawing real P&L conclusions.
+
+### PART E — Tests
+
+19 new tests in `tests/test_resolve_first.py` (1158 → 1208 total). Key assertions: select_near_dated only picks two-sided-book markets; re-running does not double-log; logged rows carry `close_time`; `print_resolution_status` refuses to show win-rate % when resolved < 10.
+
+---
+
+## Goal 2d — Winning-wallet selection criterion fix (2026-06-18)
+
+**Branch:** `smart-money-fix-3b`
+
+### PART A — Before state
+
+Cache: 0 cached winners. Prior cache showed 3 winners — all with `resolved_count: 0, win_rate: null`, qualifying on unrealised P&L of open positions (World Cup player props, Bitcoin 5-minute Up/Down contracts). None would survive `resolved_count >= 10`.
+
+### PART B — Fix applied (`accounts.py`)
+
+Three targeted changes:
+1. `_score_wallet`: sports-game exclusion added alongside existing coinflip patterns. Lazy import: `from analysis.smart_money_scan import _is_sports_title`.
+2. `_score_wallet` + `_is_winner`: replaced `avg_pct_pnl` / `total_cash_pnl` (all-positions unrealised) with `resolved_avg_pct_pnl` / `resolved_cash_pnl`. `_is_winner` gates on resolved metrics only.
+3. `discover_winners`: sort key changed to `(win_rate, resolved_cash_pnl)`. Primary: resolved win rate. Secondary: realized cash P&L on resolved positions.
+
+Config thresholds: `min_resolved_count: 10`, `min_win_rate: 55.0%`, `min_cash_pnl: 100.0`, `min_pct_pnl: 10.0%` (applied to resolved positions only).
+
+### PART C — After state
+
+NO VERIFIED SMART MONEY — 0 wallets meet `resolved_count >= 10`. `winning_accounts.json` rewritten empty. Watchlist signals should be treated as informational-only until verified wallets appear.
+
+### PART D — Tests
+
+14 new tests in `tests/test_accounts.py` (1203 total on branch, 0 fail). Key assertions: wallet with 20 open positions at +500% does NOT qualify; sports-game resolved positions excluded; 12 real resolved positions at 75% win rate DOES qualify; ranking by resolved win rate beats all-position P&L.
+
+---
+
+## Goal 3c — CSV export module for Power BI (2026-06-19)
+
+**New file:** `export_to_csv.py`
+- `export_csvs(db_path, export_dir)` reads `signals` and `runs` tables via stdlib `sqlite3` + `csv`
+- Writes `data/powerbi_export/signals.csv` and `data/powerbi_export/runs.csv`
+- Handles missing DB gracefully; returns `{"signals": N, "runs": N}`
+
+**`main.py` hook:** Two-line try/except after `logger.log_run()`. Pipeline continues on export failure.
+
+**First live export:** 63 signal rows, 17 run rows.
+
+**Power BI refresh:** After each run, open Power BI Desktop → Home > Refresh.
+
+**Tests:** 9 new tests in `tests/test_export_to_csv.py` (1231 total, 0 fail).
+
+---
+
+## Goal 3d — NULL-to-empty string fix for Power BI (2026-06-20)
+
+**Commit:** `459c440`
+
+DAX expressions like `= ""` and `= "LOSS"` fail on `NULL` values in Power BI. Fix: `_STRING_COLS` frozenset identifies string-typed columns. `_null_to_empty()` converts `None → ""` only in those columns; numeric columns left as-is.
+
+Confirmed on real DB: 59 empty strings and 4 LOSS values in `result` column with zero NaN.
+
+**Tests:** 11 new tests in `tests/test_export_to_csv.py`.
+
+---
+
+## Goal 3e — 5 report improvements (2026-06-21)
+
+**Commit:** `b3b79e9`
+
+1. **`_smart_money_section(show_detail=False)`** — omits per-trader cross-refs and largest positions when no qualifying signals fire. Reduces noise on quiet days.
+
+2. **Sports bets filtered from Largest Open Positions** via `_is_sports_title()`; shows note when <3 non-sports remain; capped at 8 rows.
+
+3. **"Next resolution: YYYY-MM-DD (N days)"** in report header when unresolved paper signals have `close_time` stored. Backed by new `logger.get_next_resolution_date()`.
+
+4. **UPCOMING RESOLUTIONS section** (14-day window) after WHALE ACTIVITY. Uses `logger.get_upcoming_resolutions(days=14)`. Shows placeholder when empty.
+
+5. **Truncation and formatting:** tickers (28 chars), titles (42+...), trader names (18), Kalshi titles (45). Kalshi Targets capped at 15 rows. Duplicate footer removed. Weekly digest title 35 chars.
+
+**Tests:** Many new tests added to `test_report.py` (large block covering all 5 changes).
+
+---
+
+## Goal 3f — Column whitelist + computed columns at export (2026-06-21)
+
+**Commit:** `80bd251`
+
+Only analysis-relevant columns written to `signals.csv`; pipeline plumbing (`run_id`, `outcome`, `fill_count`, `fill_fee`, `from_signal`, etc.) dropped at export time. DB is never touched.
+
+**`WHITELIST`** (30 columns including computed): `call_id`, `date`, `ticker`, `title`, `source`, `direction`, `confidence`, `confidence_rank`, `flag_path`, `time_horizon`, `horizon_rank`, `market_price`, `edge`, `net_edge`, `base_rate`, `result`, `is_resolved`, `is_win`, `pnl_if_traded`, `pnl_scaled`, `leviathan_score`, `lv_band`, `close_time`, `sig_edge`, `sig_drift`, `sig_br_none`, `watchlist_signal`, `whale_detected`, `heuristic_label`, `short_horizon`.
+
+**`_add_computed_cols(row)`** derives 7 columns at export time: `is_resolved` (0/1), `is_win` (0/1), `confidence_rank` (0/1/2), `horizon_rank` (0–4), `date` (timestamp prefix), `pnl_scaled` (×10 for per-$10 notional), `lv_band` (score bucket label).
+
+**Tests:** Many new tests in `tests/test_export_to_csv.py`.
+
+---
+
+## Goal 3g — Export hardening: sentinel cleanup + validation report (2026-06-21)
+
+**Commit:** `fad6802`
+
+5 targeted fixes:
+1. All string columns strip `None`/`"None"`/`"nan"`/`"NaT"` sentinels (not just `None`)
+2. `is_win` is `None` (blank in CSV) for unresolved rows — Power BI `SUM()` ignores them; only 0/1 for resolved
+3. `lv_band` emits `"Unscored"` when `leviathan_score` is NULL so charts show a readable label
+4. `confidence_rank` and `horizon_rank` default to `0` (not blank) when source column is empty
+5. Post-export validation report: row counts, win/loss split, win rate, net P&L, >50% blank-rate warnings per column
+
+**Tests:** Large new block in `tests/test_export_to_csv.py`.
+
+**Bugfix follow-up (2026-06-23, commit `06f0392`):** `real_fill` rows store order side (`BUY`/`SELL`) in the `confidence` column. Guard in `_add_computed_cols` blanks any value not in `{HIGH, MED, LOW}` so Power BI slicers aren't polluted.
+
+---
+
+## Goal 3h — Machine-readable backlog with CLI and tests (2026-06-23)
+
+**Commit:** `6790118`
+
+**`backlog.json`** (21 items at creation): structured backlog with `trigger` gates (`{"all": [{"metric": ..., "op": ">=", "value": N}]}`), `depends_on` dependency graph, and `metrics_glossary` defining the 4 live metrics.
+
+**`backlog.py`** importable engine:
+- `parse_trigger(s)` — parses `"metric>=N,metric2>=M"` to trigger dict; `"manual"` or `""` → `{"all": []}`
+- `determine_status(trigger, unmet_deps)` → `"ready"` / `"locked"` / `"blocked"`
+- `validate_item(item, others, glossary)` → list of error strings
+- `load_backlog(path)` / `save_backlog(path, data)`
+- CLI subcommands: `status` (prints ready/locked/blocked/done tables), `add` (validates and appends)
+
+**`tests/test_backlog.py`:** 22 tests covering structure, parse_trigger, determine_status, add subcommand (valid/duplicate/bad-area/bad-metric/missing-dep all checked), and status exit code.
+
+---
+
+## Goal 3i — Weekly backlog checker with metrics engine (2026-06-23)
+
+**Commit:** `fcbfadd`
+
+**`backlog_checker.py`:**
+- Computes 4 live metrics from `leviathan.db`: `resolved_count`, `resolved_count_per_category_max`, `resolved_count_per_wallet_max`, `fills_count`
+- Evaluates locked item triggers against live metrics
+- CLI prompt mode: C (complete) / M (mark done) / S (skip) per item
+- `--email` mode: formats a BACKLOG block for weekly digest with no writes to `backlog.json`
+- Regenerates `BACKLOG.md` on every run
+- 22 `execute_action` stubs for future automation
+
+**`tests/test_backlog_checker.py`:** 13 tests covering metric computation, trigger evaluation, email block formatting, and BACKLOG.md generation.
+
+---
+
+## Goal 3j — Complete all 8 ready backlog items (2026-06-23)
+
+**Commit:** `eada564` | **Result:** 1331 tests, 0 failures
+
+8 items completed in one commit:
+
+1. **trade-reconciliation**: DB confirmed at 13 `real_fill` rows; marked done.
+
+2. **realfill-dedup**: Guard in `export_to_csv.py` warns on duplicate pending `real_fill` tickers. 2 tests.
+
+3. **sample-size-gates + wilson-intervals**: `_wilson_ci()` added to `report.py`. Wilson score confidence intervals shown in daily/weekly track record and probe block (`p ± X.Xpp @ 95% CI [lo, hi]`). 6 tests.
+
+4. **title-scraping-fix**: `fetch_market_with_retry()` in `kalshi.py` — 2s retry on blank/fallback titles. Audited DB: 13 rows had `title=ticker` (blank at ingest time).
+
+5. **smart-money-drift-alerts**: `_parse_sm_snapshot()` and SMART MONEY DRIFT block in `report.py` — compares yesterday's vs today's `.md` snapshot to detect wallet position changes.
+
+6. **backtest-harness**: `backtest.py` with `BacktestRunner` class (`load`, `match`, `stats`, `report`); `sample_resolutions.csv`. 15 tests.
+
+7. **empirical-base-rates-poly**: `base_rates.py` with `BASE_RATES` dict, `load_empirical_rates()`, `merge_rates()` (shrinkage-lite blending of empirical and heuristic rates), CLI. 9 tests.
+
+8. **backlog.json**: All 8 ready items set to `"status": "done"`. `backlog.py status` extended to show Done bucket.
+
+---
+
+## Goal 4a — High-price filter, EV/contract display, betting queue (2026-06-23)
+
+**Commit:** `7d22881` | **Result:** 1342 tests, 0 failures (current)
+
+### High-price filter (`core/scanner.py`)
+
+`apply_high_price_filter(markets)` removes markets where `mid_price >= 0.85`. Returns `(kept_list, filtered_count)`.
+
+`score_markets()` now returns `tuple[list[dict], int]` — callers must unpack: `scored, hp_filtered = scanner.score_markets(...)`.
+
+Markets at ≥0.85 have near-certain implied probability; risk/reward makes them unattractive regardless of edge. Printed as `[FILTERED] ticker — market price XX% above 0.85 threshold, low return potential`.
+
+### EV per contract (`core/report.py`)
+
+`_ev_per_contract(direction, market_price, estimate)` — per-$10 notional contract:
+- YES: `(estimate − market_price) × 10`
+- NO:  `(market_price − estimate) × 10`
+- Returns `"$+X.XX"` or `None` if inputs missing/invalid
+
+Shown in signal blocks and TOP PICKS summary. Example: market at 16.5¢, estimate 35% YES → EV $+1.85/contract.
+
+### Betting queue (`core/report.py`)
+
+`_betting_queue(db_path, top_n=5)` — reads pending paper signals via SQLite read-only URI (`file:{db_path}?mode=ro`):
+- Excludes tickers that have a matching `real_fill` row (already placed)
+- Excludes markets with `market_price >= 0.85`
+- Urgency: `(edge × 0.6) + (1/days_to_close × 0.4)` (days from `close_time`)
+- Shows top 5 by urgency: ticker, direction, edge, market price, days to close
+
+Inserted in `compile_report` after TOP PICKS, before NEW SIGNALS. `compile_report` signature gains `db_path=None`.
+
+### RUN STATISTICS update
+
+Added `Filtered (high price): N` line to the RUN STATISTICS block. `run_meta["high_price_filtered"]` populated from `score_markets()` tuple.
+
+### `main.py` wiring
+
+- `scored_markets, hp_filtered = scanner.score_markets(filtered, config)`
+- `run_meta["high_price_filtered"] = hp_filtered`
+- Both `compile_report` calls pass `db_path=logger.DB_PATH`
+
+### Tests
+
+11 new tests in Part D of `tests/test_report.py`:
+- High-price filter at 0.90 is filtered; at 0.84 passes through; None passes with warning
+- EV YES and NO calculations verified to cent
+- EV shown in signal block and top picks
+- Betting queue excludes real_fill tickers
+- Betting queue sorts by urgency
+- Betting queue shows max 5
+- RUN STATISTICS contains filtered high-price count
+
+2 existing `test_scanner.py` tests updated: `results, _ = scanner.score_markets(...)` tuple unpack.
+
+---
+
+## Smart money daily scans
+
+`scripts/daily_smart_money.py` runs automatically, fetching Polymarket positions for 20 watchlist traders, cross-referencing to Kalshi markets by title similarity, and committing results to `data/smart_money/YYYY-MM-DD.md`.
+
+| Date | Positions | Kalshi signals |
+|------|-----------|----------------|
+| 2026-06-20 | 369 | 15 |
+| 2026-06-21 | 400 | 15 |
+| 2026-06-22 | 433 | 16 |
+| 2026-06-23 | 416 | 16 |
+| 2026-06-24 | 458 | 11 |
+| 2026-06-25 | 477 | 12 |
+| 2026-06-26 | 390 | 12 |
+| 2026-06-27 | 334 | 13 |
+| 2026-06-28 | 255 | 13 |
+| 2026-06-29 | 323 | 14 |
