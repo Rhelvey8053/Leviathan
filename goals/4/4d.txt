@@ -1,0 +1,76 @@
+/goal Goal 4b's EV floor (config["betting"]["min_ev_pct_of_unit"] = 0.50) is too strict and needs to be reduced, with the reasoning made explicit in config rather than left as a magic number. Manual analysis of data/powerbi_export/signals.csv (52 historical signals with edge values) shows only 2/52 (3.8%) ever had edge >= 50pp, which is what a 50% EV floor at $10 units requires ((estimate - market_price) >= 0.50). At config.json's own edge_threshold of 0.08, the EV floor as currently set would shrink an already-filtered queue down to roughly 1 in 26 of everything scanned — likely emptying the betting queue most days, which works against accumulating the resolved-signal data this project currently needs (per goal 3a, n>=20 resolved is the near-term priority). Proven by: pytest exits 0, a printed before/after showing how many of the same 52 historical signals would clear the OLD 50% floor vs. the NEW floor, and confirmation the floor is read from config (not hardcoded) so it can be tuned again without a code change.
+
+SCOPE — touch config.json and whatever file(s) goal 4b actually added the EV floor check to (find it — it was specified as core/report.py's _betting_queue, but confirm by reading the actual code on disk before assuming the prior goal was implemented exactly as written) and test files only. Do NOT touch scanner.py's edge_threshold/short_horizon_edge_threshold (those gate what gets flagged in the first place — this goal is only about the SEPARATE EV floor that gates what shows in the betting queue after flagging already happened) and do NOT touch unit_size itself.
+
+PART A — FIND WHAT 4B ACTUALLY BUILT (no changes yet). Locate the EV floor logic 4b added: the config key (expected config["betting"]["min_ev_pct_of_unit"], confirm the actual key name on disk), the function that reads it and filters candidates, and the "Filtered (EV < X% of $Y unit): N" line in the betting queue output. State plainly what the current value is and confirm it matches 0.50 (if it doesn't, state what it actually is and adjust this goal's targets accordingly rather than blindly forcing 0.50 -> 0.25).
+
+PART B — LOWER THE FLOOR, WITH THE REASONING IN CONFIG. Change
+config["betting"]["min_ev_pct_of_unit"] from 0.50 to 0.25 (i.e. $2.50 EV
+floor at $10 units, requiring a 25pp edge gap rather than 50pp). Add a
+comment immediately above the "betting" block in config.json (config.json
+doesn't support inline comments natively — if it's parsed as strict JSON,
+add the rationale to a sibling key like "_betting_notes" or to a comment in
+whatever code reads this config, your call, but the reasoning must be
+discoverable by a human reading the repo, not just buried in a commit
+message) stating: this value was lowered from 0.50 after a historical check
+showed 0.50 would have passed only ~4% of logged signals; 0.25 is a
+provisional middle ground while resolved-signal count is still low (n<20
+per goal 3a), and should be revisited once a real win-rate/EV read exists.
+
+Do not hardcode 0.25 as a second magic number alongside the first — it must
+remain a single config value that's trivially editable, the same way 0.50
+was (this goal does not undo 4b's "no hardcoded literal" requirement, it
+just changes what the literal's value is).
+
+PART C — QUANTIFY THE NEW FLOOR AGAINST THE SAME HISTORICAL DATA. Using
+data/powerbi_export/signals.csv (or leviathan.db if available — prefer the
+DB if it exists, since the CSV may be a stale export), recompute how many
+of the historically logged signals would clear the NEW 0.25 floor vs. the
+OLD 0.50 floor. Print both counts side by side in the transcript. This is
+not a backtest of profitability — it is purely a sanity check that the new
+floor doesn't accidentally still empty the queue, and that it's measurably
+less restrictive than before.
+
+PART D — TESTS. Assert:
+  - config["betting"]["min_ev_pct_of_unit"] is 0.25 (or whatever PART A
+    determined the correct corrected value should be, if 4b's actual
+    implementation differs from what was originally specified)
+  - the existing EV-floor boundary tests from goal 4b (candidate at exactly
+    the floor, $0.01 above, $0.01 below) are updated to reflect the new
+    floor value, not deleted — if 4b wrote those tests against 0.50, update
+    the expected dollar amounts to match 0.25, and state in a comment that
+    the threshold changed and why
+  - a signal with a 30pp edge (which would have failed the old 50% floor
+    but passes the new 25% floor) now appears in betting queue output in a
+    constructed test case — this is the regression test that actually
+    proves the loosening took effect, not just that the config number
+    changed
+  - a signal with a 20pp edge still does NOT appear (confirms the floor is
+    still a real filter, not effectively disabled)
+  - all other goal 4b tests (watchlist gating, fee-aware EV) still pass
+    unmodified — this goal touches only the floor threshold, nothing else
+    4b built
+  - no test was deleted to make this pass
+pytest exits 0 with output shown.
+
+PART E — VERIFY. Run a dry-run of the daily report generator and show the
+BETTING QUEUE block's "Filtered (EV < X% of $Y unit): N" line with the new
+threshold, using synthetic candidates that span both sides of the new floor,
+so the printed output itself (not just test assertions) demonstrates the
+queue is no longer empty by default.
+
+PART F — REPORT. Append to docs/PROGRESS.md: state plainly that 4b's
+initial 50% floor was found to be too strict against real historical data
+(2/52 signals, ~3.8%, would have cleared it), that it's been lowered to 25%
+as a provisional value pending more resolved data, and that the value
+remains config-driven so it can be tuned again — explicitly note this is
+NOT a claim that 25% is the "correct" floor, just a less-extreme starting
+point chosen because the prior value was demonstrated to be impractical
+given current data volume. Top next step: revisit this floor once n>=20
+resolved signals exist and a real win-rate read is possible (per goal 3a),
+since the right floor should eventually be derived from observed edge
+decay / fee impact, not picked by feel.
+
+git add -A && git commit -m "Lower betting queue EV floor from 50% to 25% of unit size based on historical edge distribution"
+
+Or stop after 8 turns.
