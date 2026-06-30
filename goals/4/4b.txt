@@ -1,0 +1,181 @@
+/goal Fix three correctness gaps found in a manual audit of goal 4a's output: (1) unit size and EV floor are not actually enforced anywhere despite EV being displayed, (2) the watchlist smart-money path bypasses the resolved-track-record gate that sources/accounts.py already enforces, and (3) net_edge/EV are computed pre-fee everywhere, overstating true expected value. Proven by: pytest exits 0, a dry-run of the daily report shows the betting queue with sub-floor candidates actually removed (not just sorted lower), a watchlist trader who fails _is_winner is shown as excluded with a stated reason, and one printed before/after edge comparison showing the fee haircut on a real signal from leviathan.db. Work on a branch named ev-floor-and-account-merge-4b with small descriptive commits.
+
+SCOPE — touch config.json, core/report.py, core/scanner.py, sources/accounts.py, analysis/smart_money_scan.py, core/kalshi.py (read-only fee lookup only), and test files only. Do NOT touch leviathan.db rows directly (back up to leviathan.db.bak_4b first if any migration is needed), backlog.json (edit via backlog.py CLI only), or scorer.py's prompt/estimation logic — this goal is about gating and arithmetic, not changing what gets estimated.
+
+====================================================
+PART A — single source of truth for unit size + EV floor
+====================================================
+Add to config.json under a new "betting" block:
+  "betting": {
+    "unit_size": 10,
+    "min_ev_pct_of_unit": 0.50
+  }
+
+Replace every hardcoded `10` / `$10` contract-size literal with a read from
+config["betting"]["unit_size"]. Confirmed locations from the audit (search for
+more — this list is a floor, not a ceiling):
+  - core/report.py: _ev_per_contract() (lines ~41-54, the `* 10` literals)
+  - core/report.py: any other "$10/contract" formatting strings
+  - analysis/backtest.py: _fmt_pnl / per_contract=10.0 default and print labels
+  - analysis/calibration.py: _pnl() per_contract=10.0 default and print labels
+
+_ev_per_contract and any duplicate EV math must take unit_size as a parameter
+(threaded from config), not a hardcoded literal. Do not silently change
+historical pnl_if_traded values already in the DB — those were computed at
+whatever unit size was live at the time; this is a forward-looking config fix.
+
+In core/report.py's _betting_queue(): after computing `ev` for each candidate,
+ADD AN ACTUAL FILTER (not just a sort key) that drops any candidate where
+  abs(ev_dollars) < unit_size * min_ev_pct_of_unit
+Candidates removed by this filter must be counted and shown in a line under
+the queue: "Filtered (EV < {pct}% of ${unit_size} unit): N". Do not just bury
+sub-floor candidates lower in the sort — they must not appear in the top_n at
+all, and the count must be visible so the discipline is auditable.
+
+Run analysis/backtest.py or equivalent against the current leviathan.db
+contents and print: how many of the historically logged signals would have
+cleared a 50% EV floor at $10 units (i.e. needed a >=50pp edge between
+our_estimate and market_price). State the number plainly in PART F's report
+— if it's a very small fraction, say so; do not soften it.
+
+====================================================
+PART B — merge watchlist promotion into the resolved-track-record gate
+====================================================
+Today, sources/accounts.py's discover_winners()/_is_winner() correctly gates
+on resolved positions only (min_resolved_count, min_win_rate, coin-flip/sports
+exclusion). Separately, config.json's "accounts.watchlist" (20 hardcoded
+addresses with a manually-entered, never-recomputed "monthly_pnl" figure)
+feeds analysis/smart_money_scan.py -> core/scanner.py's tag_watchlist_overlap,
+which gives watchlist_signal the #1 sort priority ahead of flag/net_edge, and
+main.py promotes watchlist-tagged markets into flagged_markets even when they
+didn't otherwise flag. The watchlist path never calls _is_winner and has no
+resolved_count or win_rate check.
+
+Fix: before a watchlist trader's open positions are allowed to set
+watchlist_signal = True or influence sort/promotion, that trader's wallet
+must independently clear sources/accounts._is_winner() against its OWN
+resolved positions (same thresholds: min_resolved_count, min_win_rate,
+min_cash_pnl, min_pct_pnl, same coin-flip/sports exclusion). Concretely:
+
+  1. In analysis/smart_money_scan.py's fetch_watchlist_positions (or a new
+     thin wrapper), for each watchlist entry call accounts.fetch_user_positions
+     + accounts._score_wallet on that address, then accounts._is_winner(stats,
+     config). Cache this verification result alongside the existing position
+     cache (same TTL is fine, or its own — your call, just don't refetch on
+     every call).
+  2. If a watchlist trader fails _is_winner, their open positions must NOT set
+     watchlist_signal / watchlist_direction / watchlist_position_val on any
+     market in core/scanner.py, and must NOT be eligible for the
+     flagged_markets promotion in main.py. Log clearly which traders were
+     excluded and why, e.g.:
+       "[watchlist] EXCLUDED <name> (<address>) — resolved_count=3 (<10
+        required), win_rate=N/A — config-listed monthly_pnl is unverified
+        and ignored"
+  3. Traders who DO pass _is_winner keep full current behavior (sort
+     priority, promotion into flagged_markets).
+  4. The static "monthly_pnl" field in config.json stays for human reference
+     only (it is what got these addresses onto the list in the first place)
+     but must never again be the sole basis for a signal-affecting decision.
+     Add a one-line comment in config.json above "watchlist" stating this.
+  5. Do not delete or shrink the watchlist list itself — just gate what it's
+     allowed to do downstream.
+
+This directly intersects backlog.json's existing locked items
+"per-wallet-track-record" and "skill-vs-luck-weighting" and the blocked
+"wallet-tracking-dashboard" — do not create duplicate backlog entries for
+this; if those items are still blocked on conditions this goal satisfies,
+note that in PART F but leave backlog.json item status changes to a human
+decision (do not unlock/change status of locked or blocked items yourself).
+
+====================================================
+PART C — fee-aware edge at signal-generation time
+====================================================
+Today, core/scanner.py computes net_edge = raw_edge - half_spread with no fee
+term, and core/report.py's _ev_per_contract uses the same fee-free price.
+Fees are only ever applied in core/logger.py's resolve_outcomes(), and only
+for source == 'real_fill' rows — paper signals report fee-free edge forever.
+
+Add a pure function (core/scanner.py or a new core/fees.py, your call) that
+computes Kalshi's per-contract fee given price and contract count using
+Kalshi's published fee schedule (round up, standard formula —
+fee ~= ceil(0.07 * price * (1 - price) * contracts * 100) / 100 in dollars;
+verify the exact current multiplier/rounding against Kalshi's fee docs rather
+than assuming this is exact, and cite where you got it in a code comment).
+
+Use this to compute a fee-adjusted net_edge_after_fee and
+ev_after_fee_per_contract at the SAME point net_edge is currently computed
+in scanner.py, store both the existing fee-free fields (do not remove them —
+they may be referenced elsewhere) and the new after-fee fields on the signal
+dict, and persist the after-fee fields as new columns in the signals table
+(migrate leviathan.db: back up to leviathan.db.bak_4b first, additive
+columns only, no data loss, existing rows can have NULL for the new columns).
+
+Wire the after-fee EV into the EV floor filter from PART A — the floor in
+_betting_queue must check ev_after_fee, not the fee-free ev, since the
+fee-free number is what's currently overstating real opportunity.
+
+Produce the printed before/after comparison required by the proof criteria:
+pick one real signal currently in leviathan.db, show its fee-free net_edge
+and EV, its fee-adjusted net_edge and EV, and the dollar/percentage delta.
+
+====================================================
+PART D — TESTS
+====================================================
+Assert:
+  - _ev_per_contract / equivalent EV math reads unit_size from config, not
+    a hardcoded 10
+  - changing config["betting"]["unit_size"] changes the EV output for a
+    known input
+  - _betting_queue actually removes (not just deprioritizes) a candidate
+    whose abs(ev) is below unit_size * min_ev_pct_of_unit, and the removed
+    count is reported
+  - a candidate at exactly the floor and one $0.01 above pass through; one
+    $0.01 below is filtered (boundary test)
+  - a watchlist trader with resolved_count < min_resolved_count is excluded
+    from watchlist_signal / promotion, with the exclusion logged
+  - a watchlist trader who DOES pass _is_winner still gets full current
+    behavior (no regression)
+  - fee calculation matches a hand-computed example at a known price/contract
+    count (state the example and expected value in the test itself)
+  - net_edge_after_fee and ev_after_fee_per_contract are always <= the
+    fee-free versions in absolute value (fees never improve edge)
+  - existing fee-free fields/columns are untouched and existing tests for
+    them still pass without modification
+pytest exits 0 with output shown.
+
+====================================================
+PART E — verify
+====================================================
+Run a dry-run of the daily report generator and show:
+1. The BETTING QUEUE block with the new "Filtered (EV < X% of $Y unit): N"
+   line, showing it actually shrank the queue vs. goal 4a's behavior
+2. The watchlist scan log output showing at least one EXCLUDED line with a
+   stated reason (or, if every current watchlist trader happens to pass,
+   show the verification check actually ran by printing each trader's
+   resolved_count/win_rate next to their config monthly_pnl)
+3. The one before/after fee comparison from PART C
+
+====================================================
+PART F — report
+====================================================
+Append to docs/PROGRESS.md (or BACKLOG.md if PROGRESS.md doesn't exist —
+check first, don't create a duplicate):
+  - The PART A finding: how many historical signals would have cleared a 50%
+    EV floor at $10 units, stated plainly
+  - The PART B finding: how many of the 20 watchlist traders currently pass
+    _is_winner vs. how many were riding on unverified monthly_pnl alone
+  - The PART C finding: the magnitude of the fee haircut on the example
+    signal, and whether it's large enough to flip any currently-flagged
+    signal's net_edge from positive to negative
+  - Explicit statement that no scorer.py estimation logic, no new heuristic,
+    and no backlog.json status field was changed by this goal — this was a
+    gating and arithmetic fix only
+  - Top 3 next steps, all about either (a) tightening the EV floor further
+    once real distribution data exists, (b) deciding what to do with
+    watchlist traders who keep failing _is_winner (drop from list vs. keep
+    monitoring for skill drift), or (c) validating the fee formula against
+    an actual real_fill row once one exists
+
+git add -A && git commit -m "Enforce EV floor with configurable unit size, gate watchlist promotion on resolved track record, add fee-aware edge"
+
+Or stop after 18 turns.

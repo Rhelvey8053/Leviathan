@@ -681,3 +681,45 @@ Added `Filtered (high price): N` line to the RUN STATISTICS block. `run_meta["hi
 | 2026-06-27 | 334 | 13 |
 | 2026-06-28 | 255 | 13 |
 | 2026-06-29 | 323 | 14 |
+
+---
+
+## Goal 4b — EV Floor, Watchlist Gating, Fee-Aware Edge  (2026-06-29)
+
+### Files changed
+- **config.json** — added `betting.unit_size=10` and `betting.min_ev_pct_of_unit=0.50` block; added `watchlist_note` clarifying monthly_pnl values are human-reference only
+- **core/fees.py** — new file; `kalshi_fee(price, contracts)` using the Kalshi variance formula: `ceil(0.07 * p * (1-p) * contracts * 100) / 100`
+- **core/scanner.py** — computes `net_edge_after_fee` for every scored market
+- **main.py** — computes `ev_after_fee_per_contract` after Claude direction is known
+- **core/logger.py** — additive migration adds `net_edge_after_fee REAL` and `ev_after_fee_per_contract REAL` columns
+- **core/report.py** — `_ev_float`/`_ev_per_contract` accept `unit_size`; `_betting_queue` applies hard EV floor filter (not sort); shows filtered count footer
+- **analysis/backtest.py** — fully threaded with `unit_size` from config
+- **analysis/calibration.py** — all 9 `_print_table()` calls and heuristic label section updated with `unit_size`
+- **analysis/smart_money_scan.py** — `_verify_watchlist_trader()` helper gates each watchlist address through `accounts._score_wallet` + `accounts._is_winner`; cache invalidated when `verified` field absent
+- **tests/test_4b.py** — new; 41 tests for PART A/B/C
+
+### Findings: PART A — EV floor historical analysis
+- DB as of 2026-06-29: 31 signals with a direction and valid prices
+- **2 signals (6.5%)** clear the $5.00 EV floor after fees (50% of $10/unit)
+- **29 signals (93.5%)** would be filtered
+- Most historical signals had 10-30pp edge producing $1-3 EV/contract — below the $5 floor. The floor is intentionally strict: signals need ~60pp+ edge at mid-prices to clear it after the Kalshi fee haircut.
+
+### Findings: PART B — watchlist gate
+- All 20 watchlist traders require passing 5 gates: min_resolved_count, min_win_rate, min_positions, min_pct_pnl, min_cash_pnl
+- Dry-run proof: trader with 3 resolved positions is EXCLUDED ("only 3 resolved positions (need >=10)"); trader with 12 resolved positions at 100% win rate is VERIFIED
+- Non-verified traders cannot set `watchlist_signal=True` or influence Kalshi signal promotion
+
+### Findings: PART C — fee haircut magnitude
+- At p=0.50 (max variance): fee = $0.18 per 10 contracts (1.8% of unit)
+- At p=0.30: fee = $0.15; at p=0.10: fee = $0.07
+- Example signal at mp=0.69: EV before fee = $+1.95, fee = $0.15, EV after = $+1.80 (7.7% reduction)
+- Fee impact is modest in isolation but decisive against a $5 floor on thin-edge signals
+
+### Scope confirmation
+- No changes to scorer.py or backlog.json
+- No new heuristics, calibration rules, signals, or analytics beyond Goal 4b spec
+
+### Next steps (v2 backlog)
+1. Auto-resolve outcomes when Kalshi markets close (update `result` + `pnl_if_traded` automatically)
+2. Run `_verify_watchlist_trader` against live Polymarket API to establish which of the 20 seeded traders actually pass the track-record gate
+3. Consider a tiered EV floor (e.g., 30% of unit for HIGH confidence, 50% for MED/LOW) once there are enough resolved signals to calibrate empirically

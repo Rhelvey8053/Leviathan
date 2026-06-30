@@ -1808,6 +1808,11 @@ def test_ev_shown_in_top_picks():
 import sqlite3
 import tempfile
 
+# Tests in this section use a zero EV floor so they can focus on placement
+# exclusion, urgency sorting, and max-N behavior without needing signals that
+# clear the 50%-of-unit floor introduced in Goal 4b.
+_NO_FLOOR_CFG = {"betting": {"unit_size": 10, "min_ev_pct_of_unit": 0.0}}
+
 
 def _make_bq_db(tmp_path, pending_rows=None, fill_tickers=None):
     db = tmp_path / "bq_test.db"
@@ -1851,7 +1856,7 @@ def test_betting_queue_excludes_real_fill_tickers(tmp_path):
         ],
         fill_tickers=["KXPLACED"],
     )
-    lines = report._betting_queue(db_path=db)
+    lines = report._betting_queue(db_path=db, config=_NO_FLOOR_CFG)
     full = "\n".join(lines)
     assert "KXUNPLACED" in full
     assert "Already placed" in full
@@ -1870,7 +1875,7 @@ def test_betting_queue_sorts_by_urgency(tmp_path):
             {"ticker": "KXNEAR", "call_id": "n1", "edge": 0.20, "close_time": near},
         ],
     )
-    lines = report._betting_queue(db_path=db)
+    lines = report._betting_queue(db_path=db, config=_NO_FLOOR_CFG)
     full = "\n".join(lines)
     near_pos = full.find("KXNEAR")
     far_pos  = full.find("KXFAR")
@@ -1887,7 +1892,7 @@ def test_betting_queue_shows_max_5(tmp_path):
             for i in range(8)
         ],
     )
-    lines = report._betting_queue(db_path=db)
+    lines = report._betting_queue(db_path=db, config=_NO_FLOOR_CFG)
     rank_lines = [l for l in lines if l.strip().startswith(("1 ", "2 ", "3 ", "4 ", "5 ", "6 "))]
     assert len(rank_lines) <= 5
 
