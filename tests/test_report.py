@@ -42,14 +42,13 @@ def _signal(**kwargs):
 def test_heuristic_flag_path_shown_in_header():
     s = _signal(flag_path="HEURISTIC", base_rate=0.55)
     lines = report._signal_block(s, index=1)
-    header = lines[0]
-    assert "[HEURISTIC]" in header
+    assert "[HEURISTIC]" in "\n".join(lines)
 
 
 def test_drift_flag_path_shown_in_header():
     s = _signal(flag_path="DRIFT")
     lines = report._signal_block(s, index=1)
-    assert "[DRIFT]" in lines[0]
+    assert "[DRIFT]" in "\n".join(lines)
 
 
 def test_no_flag_path_no_bracket():
@@ -92,7 +91,7 @@ def test_heuristic_signal_absent_when_base_rate_none():
 def test_second_pass_label_shown():
     s = _signal(second_pass=True)
     lines = report._signal_block(s, index=1)
-    assert "SECOND PASS" in lines[0]
+    assert "SECOND PASS" in "\n".join(lines)
 
 
 # ─── Drift signal in fired list ───────────────────────────────────────────────
@@ -682,14 +681,13 @@ def test_signal_strength_multi_corroboration():
 
 
 def test_signal_strength_shown_in_header_when_two_or_more():
-    """★×N label appears when signal_strength >= 2."""
+    """★×N label appears somewhere in signal block when signal_strength >= 2."""
     s = _signal(
         flag_path="HEURISTIC",
         poly={"price_gap": 0.15, "poly_price": 0.55, "poly_question": "Q", "match_score": 0.80},
     )
     lines = report._signal_block(s, index=1)
-    header = lines[0]
-    assert "★" in header
+    assert "★" in "\n".join(lines)
 
 
 def test_signal_strength_not_shown_in_header_when_one():
@@ -725,26 +723,24 @@ def test_qualifying_falls_back_to_edge_when_strength_equal():
 # ─── urgency marker ───────────────────────────────────────────────────────────
 
 def test_urgency_closing_today_shown_when_days_left_zero():
-    """Markets expiring ≤0 days away show CLOSING TODAY/TOMORROW."""
+    """Markets expiring <=0 days away show CLOSING TODAY/TOMORROW."""
     from datetime import datetime, timezone, timedelta
     tomorrow = (datetime.now(timezone.utc) + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ")
     s = _signal(close_time=tomorrow)
-    lines = report._signal_block(s)
-    ticker_line = lines[1]
-    assert "CLOSING TODAY/TOMORROW" in ticker_line or "CLOSING IN" in ticker_line
+    full = "\n".join(report._signal_block(s))
+    assert "CLOSING TODAY/TOMORROW" in full or "CLOSING IN" in full
 
 
 def test_urgency_closing_in_two_days():
-    """Markets closing in ~2 days show CLOSING IN Nd (1 ≤ N ≤ 3)."""
+    """Markets closing in ~2 days show CLOSING IN Nd (1 <= N <= 3)."""
     from datetime import datetime, timezone, timedelta
     # Add 23h buffer so floor truncation doesn't drop below expected band
     close_dt  = datetime.now(timezone.utc) + timedelta(days=2, hours=12)
     days_left = (close_dt - datetime.now(timezone.utc)).days
     close = close_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     s = _signal(close_time=close)
-    lines = report._signal_block(s)
-    ticker_line = lines[1]
-    assert f"CLOSING IN {days_left}d" in ticker_line
+    full = "\n".join(report._signal_block(s))
+    assert f"CLOSING IN {days_left}d" in full
 
 
 def test_urgency_closing_in_six_days():
@@ -754,9 +750,8 @@ def test_urgency_closing_in_six_days():
     days_left = (close_dt - datetime.now(timezone.utc)).days
     close = close_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     s = _signal(close_time=close)
-    lines = report._signal_block(s)
-    ticker_line = lines[1]
-    assert f"closes in {days_left}d" in ticker_line
+    full = "\n".join(report._signal_block(s))
+    assert f"closes in {days_left}d" in full
 
 
 def test_urgency_absent_when_far_future():
@@ -764,9 +759,8 @@ def test_urgency_absent_when_far_future():
     from datetime import datetime, timezone, timedelta
     close = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
     s = _signal(close_time=close)
-    lines = report._signal_block(s)
-    ticker_line = lines[1]
-    assert "closes in" not in ticker_line and "CLOSING IN" not in ticker_line
+    full = "\n".join(report._signal_block(s))
+    assert "closes in" not in full and "CLOSING IN" not in full
 
 
 # ─── repeat count marker ──────────────────────────────────────────────────────
@@ -798,11 +792,10 @@ def test_repeat_absent_for_new_signal():
 # ─── HIGH confidence downgrade label ─────────────────────────────────────────
 
 def test_confidence_downgraded_label_shown_when_flagged():
-    """[conf downgraded: edge<10pp] appears in header when confidence_downgraded is set."""
+    """[conf downgraded: edge<10pp] appears in signal block when confidence_downgraded is set."""
     s = _signal(confidence="MED", confidence_downgraded=True)
     lines = report._signal_block(s, index=1)
-    header = lines[0]
-    assert "conf downgraded" in header
+    assert "conf downgraded" in "\n".join(lines)
 
 
 def test_confidence_downgraded_label_absent_normally():
@@ -816,12 +809,12 @@ def test_confidence_downgraded_label_absent_normally():
 # ─── Short-horizon label in signal block ─────────────────────────────────────
 
 def test_short_horizon_label_shown_when_true():
-    """[SHORT HORIZON] label appears in header when short_horizon=True."""
+    """[SHORT HORIZON 72h] label appears in signal block when short_horizon=True."""
     s = _signal(short_horizon=True, time_horizon="WEEKLY")
     lines = report._signal_block(s, index=1)
-    header = lines[0]
-    assert "SHORT HORIZON" in header
-    assert "72h" in header
+    full = "\n".join(lines)
+    assert "SHORT HORIZON" in full
+    assert "72h" in full
 
 
 def test_short_horizon_label_absent_when_false():
@@ -1156,18 +1149,18 @@ def test_leviathan_score_clamps_to_zero():
 
 
 def test_leviathan_score_shown_in_signal_block_header():
-    """[LV:XX/Y] label appears in the header line of _signal_block."""
+    """[LV:XX/Y] label appears somewhere in the _signal_block output."""
     s = _signal(confidence="HIGH", net_edge=0.12)
-    header = report._signal_block(s, index=1)[0]
-    assert "[LV:" in header
+    full = "\n".join(report._signal_block(s, index=1))
+    assert "[LV:" in full
 
 
 def test_leviathan_score_header_value_matches_function():
-    """[LV:XX/Y] value in header matches compute_leviathan_score() output."""
+    """[LV:XX/Y] value in block matches compute_leviathan_score() output."""
     s = _signal(confidence="HIGH", net_edge=0.12)
     expected = report.compute_leviathan_score(s)
-    header = report._signal_block(s, index=1)[0]
-    assert f"[LV:{expected}/" in header
+    full = "\n".join(report._signal_block(s, index=1))
+    assert f"[LV:{expected}/" in full
 
 
 def test_leviathan_score_band_a_shown_for_high_scores():
@@ -1178,20 +1171,20 @@ def test_leviathan_score_band_a_shown_for_high_scores():
         watchlist_signal=True, watchlist_direction="YES",
     )
     score = report.compute_leviathan_score(s)
-    header = report._signal_block(s, index=1)[0]
+    full = "\n".join(report._signal_block(s, index=1))
     if score >= 70:
-        assert "/A]" in header
+        assert "/A]" in full
     else:
-        assert "/B]" in header or "/C]" in header
+        assert "/B]" in full or "/C]" in full
 
 
 def test_leviathan_score_band_d_shown_for_low_scores():
     """LV scores < 40 show band D."""
     s = _signal(confidence="LOW", net_edge=-0.10, time_horizon="INTRADAY", pass_count=4)
     score = report.compute_leviathan_score(s)
-    header = report._signal_block(s, index=1)[0]
+    full = "\n".join(report._signal_block(s, index=1))
     if score < 40:
-        assert "/D]" in header
+        assert "/D]" in full
 
 
 def test_leviathan_score_shown_in_weekly_digest():
@@ -1821,12 +1814,13 @@ def _make_bq_db(tmp_path, pending_rows=None, fill_tickers=None):
         CREATE TABLE signals (
             call_id TEXT, ticker TEXT, direction TEXT, market_price REAL,
             our_estimate REAL, edge REAL, close_time TEXT,
-            confidence TEXT, result TEXT, source TEXT, timestamp TEXT
+            confidence TEXT, result TEXT, source TEXT, timestamp TEXT,
+            title TEXT
         );
     """)
     for r in (pending_rows or []):
         conn.execute(
-            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 r.get("call_id", r["ticker"]),
                 r["ticker"], r.get("direction", "YES"),
@@ -1834,13 +1828,14 @@ def _make_bq_db(tmp_path, pending_rows=None, fill_tickers=None):
                 r.get("edge", 0.25), r.get("close_time", "2026-07-10T00:00:00Z"),
                 r.get("confidence", "MED"), "", "paper",
                 r.get("timestamp", "2026-06-20T00:00:00Z"),
+                r.get("title", ""),
             )
         )
     for tk in (fill_tickers or []):
         conn.execute(
-            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (tk, tk, "YES", 0.20, 0.50, 0.30, None, "MED", "", "real_fill",
-             "2026-06-20T00:00:00Z")
+             "2026-06-20T00:00:00Z", "")
         )
     conn.commit()
     conn.close()
