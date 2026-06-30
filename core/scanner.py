@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from core.fees import kalshi_fee
 
 # Time horizon buckets: (label, min_days_inclusive, max_days_exclusive)
 BUCKETS = [
@@ -2005,6 +2006,14 @@ def score_market(market: dict, config: dict) -> dict:
     half_spread = (yes_ask - yes_bid) / 2 if (yes_bid > 0 and yes_ask > 0) else 0
     net_edge = round(raw_edge - half_spread, 6) if raw_edge is not None else None
 
+    # Fee-adjusted edge: subtract Kalshi's per-contract fee from net_edge.
+    # Fee is direction-independent — same structure for YES or NO contracts.
+    # Converts fee (dollars) to probability units by dividing by unit_size.
+    unit_size = config.get("betting", {}).get("unit_size", 10)
+    fee_dollars = kalshi_fee(mid_price, unit_size) if mid_price is not None else 0.0
+    fee_as_pp = fee_dollars / unit_size if unit_size > 0 else 0.0
+    net_edge_after_fee = round(net_edge - fee_as_pp, 6) if net_edge is not None else None
+
     spread = compute_spread_signal(yes_bid, yes_ask, mid_price or 0)
     drift  = compute_drift_signal(mid_price or 0, market, drift_min_abs, drift_min_pct)
 
@@ -2069,6 +2078,7 @@ def score_market(market: dict, config: dict) -> dict:
         "heuristic_label":     heuristic_label,
         "raw_edge":            raw_edge,
         "net_edge":            net_edge,
+        "net_edge_after_fee":  net_edge_after_fee,
         "heuristic_direction": heuristic_direction,
         "flag":                flag,
         "flag_path":           flag_path,

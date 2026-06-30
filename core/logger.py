@@ -107,6 +107,8 @@ def _init_db() -> None:
             "close_time            TEXT",
             "leviathan_score       INTEGER",
             "heuristic_label       TEXT",
+            "net_edge_after_fee    REAL",
+            "ev_after_fee_per_contract REAL",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -206,8 +208,9 @@ def log_signal(signal: dict) -> None:
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
                  base_rate,net_edge,heuristic_direction,short_horizon,time_horizon,
-                 close_time,leviathan_score,heuristic_label)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 close_time,leviathan_score,heuristic_label,
+                 net_edge_after_fee,ev_after_fee_per_contract)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -237,6 +240,8 @@ def log_signal(signal: dict) -> None:
                 signal.get("close_time"),
                 _to_int(signal.get("leviathan_score")),
                 signal.get("heuristic_label"),
+                _to_float(signal.get("net_edge_after_fee")),
+                _to_float(signal.get("ev_after_fee_per_contract")),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")

@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from core import kalshi, scanner, whales, scorer, logger, report
+from core.fees import kalshi_fee
 from sources import polymarket, external_markets, accounts
 from analysis.smart_money_scan import run_smart_money_scan, save_report as save_sm_report
 
@@ -32,8 +33,13 @@ def load_config() -> dict:
 
 
 def estimate_cost(token_info: dict, model: str) -> float:
-    # Scoring runs via claude CLI (Pro subscription) — no per-token API billing
-    return 0.0
+    """API-equivalent cost at claude-sonnet-4-6 pricing ($3/$15 per M tokens).
+    Actual run uses Pro subscription — no direct per-token API bill."""
+    input_tokens  = token_info.get("input_tokens", 0)
+    output_tokens = token_info.get("output_tokens", 0)
+    if not input_tokens and not output_tokens:
+        return 0.0
+    return (input_tokens * 3.0 + output_tokens * 15.0) / 1_000_000
 
 
 def _extremize(p: float, alpha: float) -> float:
@@ -645,6 +651,7 @@ def main():
             "sig_br_none":          m.get("sig_br_none", False),
             "close_time":           m.get("close_time") or m.get("expiration_time"),
             "run_id":               run_id,
+            "net_edge_after_fee":   m.get("net_edge_after_fee"),
         }
 
         # HIGH confidence gate: downgrade to MED if edge is below minimum threshold.
@@ -665,6 +672,16 @@ def main():
             if not _has_corroboration:
                 signal["confidence"] = "MED"
                 signal["confidence_downgraded"] = True
+
+        # Fee-adjusted EV per unit — computed here since direction is now known from Claude.
+        _dir_ev  = signal.get("direction", "PASS")
+        _mp_ev   = float(signal.get("market_price") or 0)
+        _est_ev  = signal.get("our_estimate")
+        _unit    = config.get("betting", {}).get("unit_size", 10)
+        if _dir_ev in ("YES", "NO") and _mp_ev > 0 and _est_ev is not None:
+            _fee = kalshi_fee(_mp_ev, _unit)
+            _ev_ff = (float(_est_ev) - _mp_ev) * _unit if _dir_ev == "YES" else (_mp_ev - float(_est_ev)) * _unit
+            signal["ev_after_fee_per_contract"] = round(_ev_ff - _fee, 4)
 
         # Extremizing: when ≥2 independent sources agree with Claude's direction,
         # the true probability is more extreme than any single estimate suggests.

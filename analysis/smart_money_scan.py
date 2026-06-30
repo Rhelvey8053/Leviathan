@@ -36,7 +36,13 @@ def _cache_fresh(ttl_hours: float) -> bool:
     try:
         data = json.load(open(CACHE_PATH, encoding="utf-8"))
         age  = (datetime.now(timezone.utc).timestamp() - data.get("ts", 0)) / 3600
-        return age < ttl_hours
+        if age >= ttl_hours:
+            return False
+        # Invalidate if any entry lacks the verified field (old cache format)
+        for entry in data.get("data", {}).values():
+            if "verified" not in entry:
+                return False
+        return True
     except Exception:
         return False
 
@@ -103,6 +109,71 @@ def _is_sports_title(title: str) -> bool:
     return any(pat in t for pat in _SPORTS_TITLE_PATTERNS)
 
 
+def _verify_watchlist_trader(
+    addr: str, config: dict
+) -> tuple[bool, str | None, dict | None, list[dict]]:
+    """
+    Fetch all positions for a watchlist address, score via accounts._score_wallet,
+    and gate via accounts._is_winner.
+
+    Returns (verified, fail_reason, stats, all_positions).
+    fail_reason is None when verified=True.
+    all_positions is the raw API response (includes resolved) for open-position filtering.
+    """
+    cfg          = config.get("accounts", {})
+    min_resolved = cfg.get("min_resolved_count", 10)
+    min_win_rate = cfg.get("min_win_rate", 55.0)
+    min_pos      = cfg.get("min_positions", 5)
+    min_pct      = cfg.get("min_pct_pnl", 10.0)
+    min_cash     = cfg.get("min_cash_pnl", 100.0)
+
+    all_positions = accounts.fetch_user_positions(addr)
+    stats         = accounts._score_wallet(all_positions)
+
+    if not stats:
+        return False, "no positions returned from API", None, []
+
+    if stats["resolved_count"] < min_resolved:
+        return (
+            False,
+            f"only {stats['resolved_count']} resolved positions (need >={min_resolved})",
+            stats, all_positions,
+        )
+
+    if stats["win_rate"] is None or stats["win_rate"] < min_win_rate:
+        wr = stats["win_rate"]
+        return (
+            False,
+            f"win rate {wr:.1f}% < {min_win_rate:.0f}% threshold" if wr is not None else "win rate unavailable",
+            stats, all_positions,
+        )
+
+    if stats["position_count"] < min_pos:
+        return (
+            False,
+            f"only {stats['position_count']} total positions (need >={min_pos})",
+            stats, all_positions,
+        )
+
+    avg_pct = stats.get("resolved_avg_pct_pnl")
+    if avg_pct is None or avg_pct < min_pct:
+        return (
+            False,
+            f"resolved avg pct PnL {avg_pct}% < {min_pct:.0f}% threshold",
+            stats, all_positions,
+        )
+
+    cash = stats.get("resolved_cash_pnl", 0.0) or 0.0
+    if cash < min_cash:
+        return (
+            False,
+            f"resolved cash PnL ${cash:.2f} < ${min_cash:.0f} threshold",
+            stats, all_positions,
+        )
+
+    return True, None, stats, all_positions
+
+
 def fetch_watchlist_positions(config: dict, force: bool = False) -> dict[str, list[dict]]:
     """
     Returns {trader_name: {address, monthly_pnl, positions}} for each watchlist entry.
@@ -122,9 +193,23 @@ def fetch_watchlist_positions(config: dict, force: bool = False) -> dict[str, li
         name    = entry["name"]
         addr    = entry["address"]
         monthly = entry.get("monthly_pnl", 0)
-        positions = accounts.fetch_user_positions(addr)
-        open_pos  = [
-            p for p in positions
+
+        verified, fail_reason, stats, all_positions = _verify_watchlist_trader(addr, config)
+
+        if not verified:
+            print(f"  EXCLUDED  {name:<18}  reason: {fail_reason}")
+            result[name] = {
+                "address":     addr,
+                "monthly_pnl": monthly,
+                "positions":   [],
+                "verified":    False,
+                "fail_reason": fail_reason,
+                "stats":       stats,
+            }
+            continue
+
+        open_pos = [
+            p for p in all_positions
             if not p.get("redeemable")
             and float(p.get("currentValue") or 0) >= min_val
         ]
@@ -133,6 +218,9 @@ def fetch_watchlist_positions(config: dict, force: bool = False) -> dict[str, li
             "address":     addr,
             "monthly_pnl": monthly,
             "positions":   open_pos,
+            "verified":    True,
+            "fail_reason": None,
+            "stats":       stats,
         }
         print(f"  {name:<18}  ${monthly/1e6:.1f}M/mo  {len(open_pos)} open positions >= ${min_val:,}")
 
@@ -346,6 +434,10 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
     total_pos     = 0
 
     for name, data in trader_data.items():
+        if not data.get("verified", True):
+            print(f"\n  EXCLUDED  {name}  — {data.get('fail_reason', 'unverified')}")
+            continue
+
         positions = data.get("positions", [])
         if not positions:
             continue

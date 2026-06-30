@@ -34,16 +34,14 @@ def _pct(v, default="—"):
 
 
 def _fmt_pnl(v, per_contract=10.0):
-    """
-    Convert per-$1 PnL fraction to dollar-based P&L assuming $10/contract.
-    """
+    """Convert per-$1 PnL fraction to dollar-based P&L at the configured unit size."""
     try:
         return f"${float(v) * per_contract:+.2f}"
     except Exception:
         return "—"
 
 
-def _print_section(title: str, rows: list[dict]) -> None:
+def _print_section(title: str, rows: list[dict], unit_size: float = 10.0) -> None:
     if not rows:
         print(f"\n  (no {title.lower()} rows)")
         return
@@ -60,7 +58,7 @@ def _print_section(title: str, rows: list[dict]) -> None:
     print(f"  Wins:        {len(wins)}")
     print(f"  Losses:      {len(losses)}")
     print(f"  Win rate:    {f'{win_rate:.1f}%' if win_rate is not None else '— (none resolved)'}")
-    print(f"  Net PnL:     {_fmt_pnl(total_pnl)} (at $10/contract)")
+    print(f"  Net PnL:     {_fmt_pnl(total_pnl, unit_size)} (at ${unit_size:.0f}/contract)")
 
     if resolved:
         print()
@@ -72,7 +70,7 @@ def _print_section(title: str, rows: list[dict]) -> None:
             price   = _pct(r.get("market_price") or r.get("market_price_at_probe"), "—")
             out     = (r.get("outcome") or "?")[:3]
             result  = (r.get("result") or "?")[:4]
-            pnl     = _fmt_pnl(r.get("pnl_if_traded"))
+            pnl     = _fmt_pnl(r.get("pnl_if_traded"), unit_size)
             conf    = (r.get("confidence") or "")[:4]
             print(f"  {ticker:<30}  {dir_:<3}  {price:>6}  {out:<3}  {result:<4}  {pnl:>8}  {conf}")
 
@@ -121,6 +119,7 @@ def main(resolve: bool = True):
     if os.path.exists(cfg_path):
         with open(cfg_path, encoding="utf-8") as f:
             config = json.load(f)
+    unit_size = float(config.get("betting", {}).get("unit_size", 10))
 
     # Resolve outcomes via Kalshi API
     if resolve:
@@ -155,14 +154,14 @@ def main(resolve: bool = True):
     print(_rule("="))
     print("PAPER SIGNALS (simulated — main.py runs)")
     print(_rule("-"))
-    _print_section("paper signals", paper_rows)
+    _print_section("paper signals", paper_rows, unit_size)
 
     # ── Research probes ───────────────────────────────────────────────────────
     print()
     print(_rule("="))
     print("RESEARCH PROBES (analysis/research_probe.py runs)")
     print(_rule("-"))
-    _print_section("probe", probe_rows)
+    _print_section("probe", probe_rows, unit_size)
     _probe_breakdown(probe_rows)
 
     # ── Real fills ────────────────────────────────────────────────────────────
@@ -170,7 +169,7 @@ def main(resolve: bool = True):
     print(_rule("="))
     print("REAL FILLS (actual Kalshi positions)")
     print(_rule("-"))
-    _print_section("real fills", fill_rows)
+    _print_section("real fills", fill_rows, unit_size)
 
     # ── Signal type breakdown ─────────────────────────────────────────────────
     flag_stats  = logger.get_stats_by_flag_path()
@@ -185,14 +184,15 @@ def main(resolve: bool = True):
         print("CONFIDENCE BREAKDOWN  (paper signals, resolved only)")
         print(_rule("-"))
         print()
-        print(f"  {'Level':<6}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}")
+        pnl_lbl = f"P&L (${unit_size:.0f})"
+        print(f"  {'Level':<6}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}")
         print(f"  {'-'*6}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
         for lvl in ("HIGH", "MED", "LOW"):
             d = conf_stats[lvl]
             if not d["total"]:
                 continue
             wr_s  = f"{d['win_rate']:.0f}%" if d["win_rate"] is not None else "—"
-            pnl_s = _fmt_pnl(d["total_pnl"]) if d["total_pnl"] is not None else "—"
+            pnl_s = _fmt_pnl(d["total_pnl"], unit_size) if d["total_pnl"] is not None else "—"
             print(f"  {lvl:<6}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
     if flag_stats or sig_stats:
@@ -200,17 +200,18 @@ def main(resolve: bool = True):
         print(_rule("="))
         print("SIGNAL TYPE ANALYSIS  (paper signals, resolved only)")
         print(_rule("-"))
+        pnl_lbl = f"P&L (${unit_size:.0f})"
 
         if flag_stats:
             resolved_fp = [r for r in flag_stats if r.get("total", 0) > 0]
             if resolved_fp:
                 print()
                 print("  By flag path:")
-                print(f"  {'Path':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}")
+                print(f"  {'Path':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}")
                 print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
                 for r in resolved_fp:
                     wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
-                    pnl_s = _fmt_pnl(r["total_pnl"]) if r["total_pnl"] is not None else "—"
+                    pnl_s = _fmt_pnl(r["total_pnl"], unit_size) if r["total_pnl"] is not None else "—"
                     print(f"  {r['flag_path']:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
         if sig_stats:
@@ -218,7 +219,7 @@ def main(resolve: bool = True):
             if any_sig:
                 print()
                 print("  By signal presence (markets can have multiple):")
-                print(f"  {'Signal':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}")
+                print(f"  {'Signal':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}")
                 print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
                 labels = {
                     "sig_edge":    "EDGE",
@@ -230,7 +231,7 @@ def main(resolve: bool = True):
                     if not r.get("total"):
                         continue
                     wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
-                    pnl_s = _fmt_pnl(r["total_pnl"]) if r["total_pnl"] is not None else "—"
+                    pnl_s = _fmt_pnl(r["total_pnl"], unit_size) if r["total_pnl"] is not None else "—"
                     print(f"  {label:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
     # ── Time-horizon breakdown ────────────────────────────────────────────────
@@ -242,14 +243,15 @@ def main(resolve: bool = True):
         print("TIME HORIZON BREAKDOWN  (paper signals, resolved only)")
         print(_rule("-"))
         print()
-        print(f"  {'Horizon':<12}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        pnl_lbl = f"P&L (${unit_size:.0f})"
+        print(f"  {'Horizon':<12}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}  {'Avg Edge':>8}")
         print(f"  {'-'*12}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
         for bucket in ("INTRADAY", "WEEKLY", "MONTHLY", "QUARTERLY", "LONG"):
             d = horizon_stats[bucket]
             if not d["total"]:
                 continue
             wr_s   = f"{d['win_rate']:.0f}%"   if d["win_rate"]  is not None else "—"
-            pnl_s  = _fmt_pnl(d["total_pnl"])  if d["total_pnl"] is not None else "—"
+            pnl_s  = _fmt_pnl(d["total_pnl"], unit_size)  if d["total_pnl"] is not None else "—"
             edge_s = f"{d['avg_edge']*100:.1f}pp" if d["avg_edge"] is not None else "—"
             print(f"  {bucket:<12}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
 
@@ -264,7 +266,8 @@ def main(resolve: bool = True):
         print()
         print("  Does Claude's direction agree with the heuristic base-rate lean?")
         print()
-        print(f"  {'Group':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        pnl_lbl = f"P&L (${unit_size:.0f})"
+        print(f"  {'Group':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}  {'Avg Edge':>8}")
         print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
         labels = {
             "aligned":      "Aligned",
@@ -276,7 +279,7 @@ def main(resolve: bool = True):
             if not d["total"]:
                 continue
             wr_s   = f"{d['win_rate']:.0f}%"   if d["win_rate"]  is not None else "—"
-            pnl_s  = _fmt_pnl(d["total_pnl"])  if d["total_pnl"] is not None else "—"
+            pnl_s  = _fmt_pnl(d["total_pnl"], unit_size)  if d["total_pnl"] is not None else "—"
             edge_s = f"{d['avg_edge']*100:.1f}pp" if d["avg_edge"] is not None else "—"
             print(f"  {label:<16}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
         if align_stats["override"]["total"] > 0 and align_stats["aligned"]["total"] > 0:
@@ -305,7 +308,8 @@ def main(resolve: bool = True):
             "strong":          ">10pp net edge",
             "no_data":         "no spread data",
         }
-        print(f"  {'Bucket':<18}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        pnl_lbl = f"P&L (${unit_size:.0f})"
+        print(f"  {'Bucket':<18}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}  {'Avg Edge':>8}")
         print(f"  {'-'*18}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
         for b in ("spread_dominant", "thin", "good", "strong", "no_data"):
             d = ne_stats[b]
@@ -313,7 +317,7 @@ def main(resolve: bool = True):
                 continue
             label  = bucket_labels[b]
             wr_s   = f"{d['win_rate']:.0f}%"      if d["win_rate"]  is not None else "--"
-            pnl_s  = _fmt_pnl(d["total_pnl"])     if d["total_pnl"] is not None else "--"
+            pnl_s  = _fmt_pnl(d["total_pnl"], unit_size)     if d["total_pnl"] is not None else "--"
             edge_s = f"{d['avg_edge']*100:.1f}pp"  if d["avg_edge"]  is not None else "--"
             print(f"  {label:<18}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
         thin_plus = sum(ne_stats[b]["total"] for b in ("thin", "good", "strong"))
@@ -344,7 +348,7 @@ def main(resolve: bool = True):
     print(f"  Total rows:   {len(all_rows)}")
     print(f"  Resolved:     {len(all_resolved)}")
     print(f"  Win rate:     {f'{all_wr:.1f}%' if all_wr is not None else '— (none resolved)'}")
-    print(f"  Net PnL:      {_fmt_pnl(all_pnl)} (at $10/contract)")
+    print(f"  Net PnL:      {_fmt_pnl(all_pnl, unit_size)} (at ${unit_size:.0f}/contract)")
     bs = brier.get("brier_score")
     bs_n = brier.get("n", 0)
     bs_label = brier.get("label", "")

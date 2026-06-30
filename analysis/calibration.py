@@ -9,6 +9,7 @@ Usage:
     python analysis/calibration.py
 """
 
+import json
 import os
 import sys
 
@@ -24,7 +25,17 @@ def _rule(c="="):
     return c * W
 
 
+def _load_unit_size() -> float:
+    cfg_path = os.path.join(ROOT, "config.json")
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            return float(json.load(f).get("betting", {}).get("unit_size", 10))
+    except Exception:
+        return 10.0
+
+
 def _pnl(v, per_contract=10.0):
+    """Convert per-$1 PnL fraction to dollar-based P&L at the configured unit size."""
     try:
         return f"${float(v) * per_contract:+.2f}"
     except Exception:
@@ -39,8 +50,9 @@ def _edge(v):
     return f"{float(v)*100:.1f}pp" if v is not None else "--"
 
 
-def _print_table(rows, key_label="Group", key_col="flag_path"):
-    print(f"  {key_label:<18}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+def _print_table(rows, key_label="Group", key_col="flag_path", unit_size=10.0):
+    pnl_lbl = f"P&L (${unit_size:.0f})"
+    print(f"  {key_label:<18}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}  {'Avg Edge':>8}")
     print(f"  {'-'*18}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
     for r in rows:
         key   = str(r.get(key_col) or r.get("flag_path") or "?")
@@ -49,7 +61,7 @@ def _print_table(rows, key_label="Group", key_col="flag_path"):
         if not total:
             continue
         print(f"  {key:<18}  {total:>5}  {wins:>4}  {_wr(r.get('win_rate')):>6}"
-              f"  {_pnl(r.get('total_pnl')):>10}  {_edge(r.get('avg_edge')):>8}")
+              f"  {_pnl(r.get('total_pnl'), unit_size):>10}  {_edge(r.get('avg_edge')):>8}")
 
 
 def main():
@@ -59,13 +71,15 @@ def main():
     print(_rule("-"))
     print()
 
+    unit_size = _load_unit_size()
+
     # Overall stats
     stats = logger.get_stats()
     brier = logger.get_brier_score()
     print(f"  Total paper signals:  {stats['total_calls']}")
     print(f"  Resolved:             {stats['resolved']}")
     print(f"  Win rate:             {_wr(stats['win_rate'])}")
-    print(f"  Hypothetical P&L:     {_pnl(stats['total_hypothetical_pnl'])}")
+    print(f"  Hypothetical P&L:     {_pnl(stats['total_hypothetical_pnl'], unit_size)}")
     bs = brier.get("brier_score")
     bs_n = brier.get("n", 0)
     bs_label = brier.get("label", "PENDING")
@@ -90,7 +104,7 @@ def main():
     print()
     fp_rows = logger.get_stats_by_flag_path()
     if fp_rows:
-        _print_table(fp_rows, key_label="Flag Path", key_col="flag_path")
+        _print_table(fp_rows, key_label="Flag Path", key_col="flag_path", unit_size=unit_size)
     else:
         print("  No resolved data.")
 
@@ -107,7 +121,7 @@ def main():
         {"flag_path": "BR_NONE (sig_br_none)", **sig["sig_br_none"]},
     ]
     _print_table([r for r in sig_rows if r.get("total", 0) > 0],
-                 key_label="Signal Type", key_col="flag_path")
+                 key_label="Signal Type", key_col="flag_path", unit_size=unit_size)
 
     # Confidence breakdown
     print()
@@ -122,7 +136,7 @@ def main():
         if conf[lvl]["total"] > 0
     ]
     if conf_rows:
-        _print_table(conf_rows, key_label="Confidence", key_col="flag_path")
+        _print_table(conf_rows, key_label="Confidence", key_col="flag_path", unit_size=unit_size)
     else:
         print("  No resolved data.")
 
@@ -139,7 +153,7 @@ def main():
         if th[bucket]["total"] > 0
     ]
     if th_rows:
-        _print_table(th_rows, key_label="Horizon", key_col="flag_path")
+        _print_table(th_rows, key_label="Horizon", key_col="flag_path", unit_size=unit_size)
         # Highlight short vs long horizon aggregate
         short_total = th["INTRADAY"]["total"] + th["WEEKLY"]["total"]
         short_wins  = th["INTRADAY"]["wins"]  + th["WEEKLY"]["wins"]
@@ -168,7 +182,7 @@ def main():
         if align[grp]["total"] > 0
     ]
     if align_rows:
-        _print_table(align_rows, key_label="Alignment Group", key_col="flag_path")
+        _print_table(align_rows, key_label="Alignment Group", key_col="flag_path", unit_size=unit_size)
         ov = align["override"]
         al = align["aligned"]
         if ov["total"] and al["total"] and ov["win_rate"] is not None and al["win_rate"] is not None:
@@ -200,7 +214,7 @@ def main():
         if ne[b]["total"] > 0
     ]
     if ne_rows:
-        _print_table(ne_rows, key_label="Net Edge Bucket", key_col="flag_path")
+        _print_table(ne_rows, key_label="Net Edge Bucket", key_col="flag_path", unit_size=unit_size)
         thin_plus = {b: ne[b] for b in ("thin", "good", "strong")}
         sd = ne["spread_dominant"]
         tp_total = sum(d["total"] for d in thin_plus.values())
@@ -236,7 +250,7 @@ def main():
         if ch[b]["total"] > 0
     ]
     if ch_rows:
-        _print_table(ch_rows, key_label="Close Horizon", key_col="flag_path")
+        _print_table(ch_rows, key_label="Close Horizon", key_col="flag_path", unit_size=unit_size)
         print()
         print("  Key question #6: Do shorter-horizon signals (urgent/short) have")
         print("  higher win rates than long-horizon signals — or vice versa?")
@@ -256,7 +270,7 @@ def main():
     ]
     wh_rows = [r for r in wh_rows if r.get("total", 0) > 0]
     if wh_rows:
-        _print_table(wh_rows, key_label="Whale Group", key_col="flag_path")
+        _print_table(wh_rows, key_label="Whale Group", key_col="flag_path", unit_size=unit_size)
         w_wr  = wh["whale"]["win_rate"]
         nw_wr = wh["no_whale"]["win_rate"]
         if w_wr is not None and nw_wr is not None:
@@ -281,7 +295,7 @@ def main():
     ]
     wl_rows = [r for r in wl_rows if r.get("total", 0) > 0]
     if wl_rows:
-        _print_table(wl_rows, key_label="Smart Money", key_col="flag_path")
+        _print_table(wl_rows, key_label="Smart Money", key_col="flag_path", unit_size=unit_size)
         wl_wr  = wl["watchlist"]["win_rate"]
         nwl_wr = wl["no_watchlist"]["win_rate"]
         if wl_wr is not None and nwl_wr is not None:
@@ -339,7 +353,7 @@ def main():
         if lv[b]["total"] > 0
     ]
     if lv_rows:
-        _print_table(lv_rows, key_label="LV Band", key_col="flag_path")
+        _print_table(lv_rows, key_label="LV Band", key_col="flag_path", unit_size=unit_size)
         a_wr = lv["A"]["win_rate"]
         d_wr = lv["D"]["win_rate"]
         if a_wr is not None and d_wr is not None:
@@ -359,7 +373,7 @@ def main():
     print()
     hl = logger.get_stats_by_heuristic_label()
     if hl:
-        print(f"  {'Heuristic Label':<30}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L ($10)':>10}  {'Avg Edge':>8}")
+        print(f"  {'Heuristic Label':<30}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {f'P&L (${unit_size:.0f})':>10}  {'Avg Edge':>8}")
         print(f"  {'-'*30}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
         for r in hl:
             lbl   = str(r.get("heuristic_label") or "?")[:30]
@@ -368,7 +382,7 @@ def main():
             if not total:
                 continue
             print(f"  {lbl:<30}  {total:>5}  {wins:>4}  {_wr(r.get('win_rate')):>6}"
-                  f"  {_pnl(r.get('total_pnl')):>10}  {_edge(r.get('avg_edge')):>8}")
+                  f"  {_pnl(r.get('total_pnl'), unit_size):>10}  {_edge(r.get('avg_edge')):>8}")
         print()
         print("  Labels with >=3 resolved signals and win_rate >60% are well-calibrated categories.")
         print("  Labels with win_rate <40% suggest base rate may need adjustment for that category.")
