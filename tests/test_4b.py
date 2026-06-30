@@ -117,6 +117,9 @@ class TestEvFloorFilter:
     """
     The floor filter predicate is: abs(ev_after) >= ev_floor.
     Sub-floor candidates are REMOVED (not sorted lower).
+    Threshold: min_ev_pct_of_unit = 0.25 (lowered from 0.50 in goal 4d —
+    0.50 passed only 2/31 historical signals; 0.25 is a provisional middle
+    ground pending n>=20 resolved signals).
     """
 
     def _ev_after(self, direction, mp, est, unit_size=10):
@@ -125,18 +128,19 @@ class TestEvFloorFilter:
         fee = kalshi_fee(mp, unit_size) if (mp and mp > 0) else 0.0
         return (ev - fee) if ev is not None else None
 
-    def _ev_floor(self, unit_size=10, min_pct=0.50):
-        return unit_size * min_pct  # $5.00 at defaults
+    def _ev_floor(self, unit_size=10, min_pct=0.25):
+        # Threshold lowered from 0.50 to 0.25 in goal 4d: $2.50 at defaults
+        return unit_size * min_pct
 
     def test_strong_signal_above_floor(self):
-        """Signal with large edge (60pp) clears the $5 floor even after fees."""
+        """Signal with large edge (60pp) clears the $2.50 floor even after fees."""
         # mp=0.20, est=0.80 → ev_free=$6.00; fee at p=0.20 = $0.12 → ev_after=$5.88
         ev_after = self._ev_after("YES", 0.20, 0.80, unit_size=10)
         floor = self._ev_floor()
         assert ev_after is not None and abs(ev_after) >= floor
 
     def test_tiny_edge_below_floor(self):
-        """1pp edge at $10 unit gives ~$0.10 EV — well below $5 floor."""
+        """1pp edge at $10 unit gives ~$0.10 EV — well below $2.50 floor."""
         ev_after = self._ev_after("YES", 0.49, 0.50, unit_size=10)
         floor = self._ev_floor()
         assert ev_after is None or abs(ev_after) < floor
@@ -170,10 +174,30 @@ class TestEvFloorFilter:
         assert ev_after is None or abs(ev_after) < floor
 
     def test_floor_scales_with_unit_size(self):
-        """At unit_size=20 the floor is $10 (double the default $5)."""
+        """At unit_size=20 the floor is $5 (double the default $2.50)."""
         floor_10 = self._ev_floor(unit_size=10)
         floor_20 = self._ev_floor(unit_size=20)
         assert floor_20 == pytest.approx(floor_10 * 2)
+
+    def test_30pp_edge_clears_new_floor(self):
+        """30pp edge passes the 25% floor — would have failed the old 50% floor.
+        mp=0.30, est=0.60: ev_free=$3.00, fee=$0.15, ev_after=$2.85 >= $2.50."""
+        ev_after = self._ev_after("YES", 0.30, 0.60, unit_size=10)
+        floor = self._ev_floor()  # $2.50
+        assert ev_after is not None and abs(ev_after) >= floor
+
+    def test_30pp_edge_would_fail_old_floor(self):
+        """Same 30pp signal fails the OLD 50% floor ($5.00), proving the loosening matters."""
+        ev_after = self._ev_after("YES", 0.30, 0.60, unit_size=10)
+        old_floor = self._ev_floor(min_pct=0.50)  # $5.00
+        assert ev_after is not None and abs(ev_after) < old_floor
+
+    def test_20pp_edge_still_below_new_floor(self):
+        """20pp edge does NOT clear the new 25% floor — filter is still active.
+        mp=0.30, est=0.50: ev_free=$2.00, fee=$0.15, ev_after=$1.85 < $2.50."""
+        ev_after = self._ev_after("YES", 0.30, 0.50, unit_size=10)
+        floor = self._ev_floor()  # $2.50
+        assert ev_after is None or abs(ev_after) < floor
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

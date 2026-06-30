@@ -771,3 +771,36 @@ All existing computed values (EV, edge, Kelly, LV score, signal strength, urgenc
 
 ### Test count
 - 1479 tests collected, 0 failures
+
+---
+
+## Goal 4d — EV Floor Lowered from 50% to 25% of Unit Size  (2026-06-30)
+
+### Files changed
+- **config.json** — `min_ev_pct_of_unit` changed from `0.50` to `0.25`; `_betting_notes` key added explaining the rationale
+- **tests/test_4b.py** — `TestEvFloorFilter._ev_floor` default updated from `min_pct=0.50` to `min_pct=0.25`; 3 new tests added (`test_30pp_edge_clears_new_floor`, `test_30pp_edge_would_fail_old_floor`, `test_20pp_edge_still_below_new_floor`)
+- **tests/test_4d.py** — new; 10 tests for config value, floor loosening effect, and floor still being active
+
+### PART A finding
+Current `min_ev_pct_of_unit` was confirmed as `0.50` ($5.00 floor at $10 unit). Historical signal DB (31 signals with valid direction + prices): 2/31 (6.5%) cleared the $5.00 floor.
+
+### PART C — before/after historical counts
+| Floor | Threshold | Signals cleared | % |
+|---|---|---|---|
+| Old (50%) | $5.00 after fee | 2 / 31 | 6.5% |
+| New (25%) | $2.50 after fee | 2 / 31 | 6.5% |
+
+**Note:** Both floors yield the same 2 historical signals because the 3rd-best EV-after-fee in the DB is $2.17 — just below the new $2.50 floor. The floor change does expand the theoretical window for new signals (30pp edge at mid-price clears $2.50 but not $5.00), even though current historical data doesn't show it yet.
+
+### PART E dry-run verification
+- 60pp edge signal (`KXBIG`): EV=$5.88 — appears at both floors
+- 30pp edge signal (`KXMED`): EV=$2.85 — appears ONLY at new 25% floor
+- 20pp edge signal (`KXSMALL`): EV=$1.85 — filtered at BOTH floors
+- Old floor output: 1 queue row, "Filtered: 2"
+- New floor output: 2 queue rows, "Filtered: 1"
+
+### Context
+The 50% floor was found to be impractically strict: it would pass roughly 1 in 15 signals ever logged, which risks keeping the betting queue empty most days and slowing accumulation of the resolved-signal data the project currently needs (goal 3a's n>=20 target). **The 25% floor is NOT claimed to be the "correct" value** — it is a provisional less-extreme starting point chosen to keep the queue usable. Once n>=20 resolved signals exist, the floor should be derived from observed edge decay and fee impact rather than picked by feel.
+
+### Test count
+- 1490 tests collected, 0 failures

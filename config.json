@@ -233,7 +233,8 @@
   },
   "betting": {
     "unit_size": 10,
-    "min_ev_pct_of_unit": 0.50
+    "min_ev_pct_of_unit": 0.25,
+    "_betting_notes": "min_ev_pct_of_unit was lowered from 0.50 to 0.25 (goal 4d, 2026-06-30). Historical check showed 0.50 passed only ~6.5% of logged signals (2/31); even 0.25 passes the same 2 signals in current data because the 3rd-best EV-after-fee is $2.17, just below the $2.50 floor. Value remains config-driven to be tunable without a code change. Revisit once n>=20 resolved signals exist (goal 3a) so the floor can be grounded in observed edge decay rather than chosen by feel."
   },
   "report": {
     "email_to": "your@email.com",
