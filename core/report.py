@@ -82,6 +82,100 @@ def _wrap(text: str, indent: int = 2, width: int = W) -> list[str]:
     return textwrap.wrap(text, width - indent, initial_indent=prefix, subsequent_indent=prefix) or [prefix]
 
 
+# ── Layout toolkit (PART B) ───────────────────────────────────────────────────
+
+def _close_and_urgency(s: dict) -> tuple[str, str]:
+    """
+    Parse close_time/expiration_time from a signal dict.
+    Returns (close_fmt, urgency_label) with IDENTICAL thresholds to the old
+    inline logic in _signal_block and _top_picks (<=0d, <=3d, <=7d).
+    """
+    close_raw = s.get("close_time") or s.get("expiration_time", "")
+    if not close_raw:
+        return "", ""
+    try:
+        dt        = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
+        close_fmt = dt.strftime("Closes %b %d, %Y").replace(" 0", " ")
+        days_left = (dt - datetime.now(timezone.utc)).days
+        if days_left <= 0:
+            urgency = "  [CLOSING TODAY/TOMORROW]"
+        elif days_left <= 3:
+            urgency = f"  [CLOSING IN {days_left}d]"
+        elif days_left <= 7:
+            urgency = f"  [closes in {days_left}d]"
+        else:
+            urgency = ""
+        return close_fmt, urgency
+    except Exception:
+        return close_raw[:10], ""
+
+
+def _format_label_stack(
+    warning_labels: list[str],
+    info_labels: list[str],
+    max_width: int = 96,
+) -> list[str]:
+    """
+    Format signal header label tags onto at most 2 lines.
+
+    Warning tier (SECOND PASS, conf downgraded, SHORT HORIZON):
+      attention-getters about signal quality that need to stand out — rendered
+      on their own line with a [!] marker so they are never buried in an
+      info-tag run.
+
+    Info tier (flag_path, LV band, strength star, REPEAT count):
+      supplementary metadata — rendered together on a second line.
+
+    Returns 0–2 non-empty strings; caller appends them after the primary
+    header line (confidence/direction/horizon) and before the ticker line.
+    """
+    out = []
+    if warning_labels:
+        line = "  [!] " + "  ".join(warning_labels)
+        out.append(line[:max_width])
+    if info_labels:
+        line = "      " + "  ".join(info_labels)
+        out.append(line[:max_width])
+    return out
+
+
+def _render_table(
+    headers: list[str],
+    rows: list[list[str]],
+    widths: list[int] | None = None,
+    indent: int = 2,
+) -> list[str]:
+    """
+    Render a fixed-width left-aligned column table.
+
+    If widths is provided each column is exactly that width (content truncated
+    with '...' if too long). If widths is None columns auto-size to max content
+    width capped at 30 chars each. Two spaces separate columns.
+    """
+    n_cols = len(headers)
+    if widths is None:
+        widths = []
+        for i in range(n_cols):
+            col_vals = [headers[i]] + [r[i] if i < len(r) else "" for r in rows]
+            widths.append(min(max(len(v) for v in col_vals), 30))
+
+    prefix = " " * indent
+
+    def _cell(val: str, w: int) -> str:
+        if len(val) > w:
+            return (val[:w - 3] + "...") if w > 3 else val[:w]
+        return val.ljust(w)
+
+    def _row(cells: list[str]) -> str:
+        return (prefix + "  ".join(_cell(cells[i] if i < len(cells) else "", widths[i])
+                                   for i in range(n_cols))).rstrip()
+
+    out = [_row(headers), prefix + "  ".join("-" * w for w in widths)]
+    for row in rows:
+        out.append(_row(row))
+    return out
+
+
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 def _signal_strength(s: dict) -> int:
@@ -289,22 +383,7 @@ def _signal_block(s: dict, index: int = 0, unit_size: float = 10) -> list[str]:
     horizon   = HORIZON_LABEL.get(s.get("time_horizon", "MONTHLY"), s.get("time_horizon", ""))
     ticker    = s.get("ticker", "")
     title     = s.get("title", "")
-    close_raw = s.get("close_time") or s.get("expiration_time", "")
-    close_fmt  = ""
-    urgency    = ""
-    if close_raw:
-        try:
-            dt        = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
-            close_fmt = dt.strftime("Closes %b %d, %Y").replace(" 0", " ")
-            days_left = (dt - datetime.now(timezone.utc)).days
-            if days_left <= 0:
-                urgency = "  [CLOSING TODAY/TOMORROW]"
-            elif days_left <= 3:
-                urgency = f"  [CLOSING IN {days_left}d]"
-            elif days_left <= 7:
-                urgency = f"  [closes in {days_left}d]"
-        except Exception:
-            close_fmt = close_raw[:10]
+    close_fmt, urgency = _close_and_urgency(s)
 
     mkt_p    = _pct(s.get("market_price"))
     est_p    = _pct(s.get("our_estimate"))
@@ -316,24 +395,33 @@ def _signal_block(s: dict, index: int = 0, unit_size: float = 10) -> list[str]:
         if kelly else ""
     )
 
-    # Header line — includes signal strength score (corroborating evidence count)
-    num        = f"[{index}]  " if index else ""
-    pass_label = "  [SECOND PASS — LOW CONVICTION]" if s.get("second_pass") else ""
-    dg_label   = "  [conf downgraded: edge<10pp]" if s.get("confidence_downgraded") else ""
-    fp_label   = f"  [{s.get('flag_path')}]" if s.get("flag_path") else ""
-    sh_label   = "  [SHORT HORIZON — verify within 72h]" if s.get("short_horizon") else ""
+    # Header line (clean: confidence / direction / horizon only)
+    num      = f"[{index}]  " if index else ""
+    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}")
+
+    # Warning-tier labels (signal quality concerns) — own line, visually distinct
+    # Info-tier labels (metadata tags) — second line
     strength   = _signal_strength(s)
-    str_label  = f"  ★×{strength}" if strength >= 2 else ""
-    repeat_cnt  = s.get("repeat_count", 0) or 0
-    rep_label   = f"  [REPEAT x{repeat_cnt}]" if repeat_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
-    lv_score    = compute_leviathan_score(s)
-    if lv_score >= 70:   lv_band = "A"
-    elif lv_score >= 55: lv_band = "B"
-    elif lv_score >= 40: lv_band = "C"
-    else:                lv_band = "D"
-    lv_label    = f"  [LV:{lv_score}/{lv_band}]"
-    lines.append(f"{num}{CONF_LABEL[conf]} CONFIDENCE  /  BUY {direction}  /  {horizon}{pass_label}{dg_label}{fp_label}{sh_label}{str_label}{lv_label}")
-    lines.append(f"{ticker}  ·  {close_fmt}{urgency}{rep_label}" if close_fmt else f"{ticker}{urgency}{rep_label}")
+    repeat_cnt = s.get("repeat_count", 0) or 0
+    lv_score   = compute_leviathan_score(s)
+    lv_band    = "A" if lv_score >= 70 else ("B" if lv_score >= 55 else ("C" if lv_score >= 40 else "D"))
+
+    warn = []
+    if s.get("second_pass"):           warn.append("[SECOND PASS — LOW CONVICTION]")
+    if s.get("confidence_downgraded"): warn.append("[conf downgraded: edge<10pp]")
+    if s.get("short_horizon"):         warn.append("[SHORT HORIZON 72h]")
+
+    info = []
+    if s.get("flag_path"):  info.append(f"[{s.get('flag_path')}]")
+    if strength >= 2:       info.append(f"★×{strength}")
+    info.append(f"[LV:{lv_score}/{lv_band}]")
+    if repeat_cnt >= 2:     info.append(f"[REPEAT x{repeat_cnt}]")
+    elif s.get("is_repeat"): info.append("[REPEAT]")
+
+    lines.extend(_format_label_stack(warn, info))
+
+    rep_label = ""  # already folded into info labels above
+    lines.append(f"{ticker}  ·  {close_fmt}{urgency}" if close_fmt else f"{ticker}{urgency}")
     lines.append("")
 
     # Title
@@ -402,7 +490,13 @@ def _signal_block(s: dict, index: int = 0, unit_size: float = 10) -> list[str]:
         fired.append(f"Smart Money x{len(s['smart_money'])} ({'·'.join(dirs)})")
 
     if fired:
-        lines.append(f"  Signals:      {' · '.join(fired)}")
+        fired_str = " · ".join(fired)
+        prefix = "  Signals:      "
+        # Wrap long fired-signals list at W chars; subsequent lines align to prefix width
+        for ln in textwrap.wrap(fired_str, W - len(prefix),
+                                initial_indent=prefix,
+                                subsequent_indent=" " * len(prefix)) or [prefix]:
+            lines.append(ln)
 
     # Flag conflict warning — DRIFT and HEURISTIC pointing in opposite directions
     drift_pct_val = s.get("price_drift") or 0
@@ -488,13 +582,15 @@ def _signal_block(s: dict, index: int = 0, unit_size: float = 10) -> list[str]:
                     url_part  = f"  {mkt_url}" if mkt_url else ""
                     lines.append(f"      {mkt_title}  [{mkt_out}]  {mkt_pnl}{url_part}")
 
-    # Analysis
+    # Analysis — always show the section header so absence is explicit, not silent
     reasoning = s.get("reasoning", "")
     sources   = s.get("sources_checked") or []
+    lines.append("")
+    lines.append("  Analysis:")
     if reasoning:
-        lines.append("")
-        lines.append("  Analysis:")
         lines.extend(_wrap(reasoning, indent=4))
+    else:
+        lines.append("    (heuristic-only signal — no narrative reasoning generated)")
     if sources:
         lines.append(f"  Sources: {' · '.join(sources[:3])}")
 
@@ -600,9 +696,21 @@ def _smart_money_section(result: dict | None, show_detail: bool = True) -> list[
     if os.path.exists(_yest_path):
         _prev = _parse_sm_snapshot(_yest_path)
         _curr: dict[tuple, float] = {}
+        # Build title lookup from signals and grouped data
+        _title_by_ticker: dict[str, str] = {}
         for _s in signals:
             _key = (_s.get("trader", ""), _s.get("kalshi_ticker", ""))
             _curr[_key] = _curr.get(_key, 0.0) + float(_s.get("position_val", 0))
+            _t = _s.get("kalshi_ticker", "")
+            _ti = _s.get("kalshi_title", "")
+            if _t and _ti:
+                _title_by_ticker[_t] = _ti
+        for _g in grouped:
+            _t  = _g.get("kalshi_ticker", "")
+            _ti = _g.get("kalshi_title", "")
+            if _t and _ti:
+                _title_by_ticker[_t] = _ti
+
         _drift: list[tuple] = []
         for _key in sorted(set(_prev) | set(_curr)):
             _trader, _ticker = _key
@@ -621,10 +729,16 @@ def _smart_money_section(result: dict | None, show_detail: bool = True) -> list[
         out.append("  SMART MONEY DRIFT")
         out.append("  " + "-" * 17)
         if _drift:
-            out.append(f"  {'Wallet':<8}  {'Ticker':<25}  Change")
-            out.append(f"  {'-'*8}  {'-'*25}  {'-'*7}")
-            for _tr, _tk, _cs in _drift:
-                out.append(f"  {_tr[:8]:<8}  {_tk[:25]:<25}  {_cs}")
+            _drift_rows = [
+                [_tr[:8], _tk[:25], _cs, _trunc(_title_by_ticker.get(_tk, ""), 24)]
+                for _tr, _tk, _cs in _drift
+            ]
+            out.extend(_render_table(
+                ["Wallet", "Ticker", "Change", "Title"],
+                _drift_rows,
+                widths=[8, 25, 12, 24],
+                indent=4,
+            ))
         else:
             out.append("  No significant drift today.")
         out.append("")
@@ -632,20 +746,28 @@ def _smart_money_section(result: dict | None, show_detail: bool = True) -> list[
     if not show_detail:
         return out
 
-    # Per-Trader Cross-References — one line per match, no "Poly:"/"Kalshi:" labels
+    # Per-Trader Cross-References — one line per match
+    # Column widths: Trader(18) Out(4) $Pos(10) Price(5) Match(5) Ticker(22) Title(20)
+    # indent(2) + 18+4+10+5+5+22+20 = 84 content + 6×2=12 sep = 98 total
     if signals:
         ranked = sorted(signals, key=lambda x: -(x["match_score"] * x["position_val"]))
         out.append("  Per-Trader Cross-References:")
-        out.append(f"  {'Trader':<18} {'Out':<4} {'$Position':>10} {'Price':>5} {'Match':>5}  Kalshi Ticker")
-        out.append(f"  {'-'*18} {'-'*4} {'-'*10} {'-'*5} {'-'*5}  {'-'*25}")
+        _xref_rows = []
         for s in ranked[:12]:
-            trader  = _trunc(s["trader"], 18, ellipsis=False)
-            outcome = s["poly_outcome"][:4]
-            val     = f"${s['position_val']:,.0f}"
-            price   = f"{s['poly_price']:.2f}"
-            score   = f"{s['match_score']:.0%}"
-            ticker  = _trunc(s["kalshi_ticker"], 28, ellipsis=False)
-            out.append(f"  {trader:<18} {outcome:<4} {val:>10} {price:>5} {score:>5}  {ticker}")
+            _xref_rows.append([
+                _trunc(s["trader"], 18, ellipsis=False),
+                s["poly_outcome"][:4],
+                f"${s['position_val']:,.0f}",
+                f"{s['poly_price']:.2f}",
+                f"{s['match_score']:.0%}",
+                _trunc(s["kalshi_ticker"], 22, ellipsis=False),
+                _trunc(s.get("kalshi_title", ""), 20),
+            ])
+        out.extend(_render_table(
+            ["Trader", "Out", "$Position", "Price", "Match", "Ticker", "Title"],
+            _xref_rows,
+            widths=[18, 4, 10, 5, 5, 22, 20],
+        ))
         out.append("")
 
     # Largest open positions — sports bets filtered out, capped at 8
@@ -702,22 +824,7 @@ def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
         fp_l      = f"  [{fp}]" if fp else ""
 
         ticker    = s.get("ticker", "")
-        close_raw = s.get("close_time") or s.get("expiration_time", "")
-        close_fmt = ""
-        urgency   = ""
-        if close_raw:
-            try:
-                dt        = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
-                close_fmt = dt.strftime("Closes %b %d, %Y").replace(" 0", " ")
-                days_left = (dt - datetime.now(timezone.utc)).days
-                if days_left <= 0:
-                    urgency = "  [CLOSING TODAY/TOMORROW]"
-                elif days_left <= 3:
-                    urgency = f"  [CLOSING IN {days_left}d]"
-                elif days_left <= 7:
-                    urgency = f"  [closes in {days_left}d]"
-            except Exception:
-                close_fmt = close_raw[:10]
+        close_fmt, urgency = _close_and_urgency(s)
 
         mkt_p   = _pct(s.get("market_price"))
         est_p   = _pct(s.get("our_estimate"))
@@ -730,9 +837,13 @@ def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
         rep_cnt = s.get("repeat_count", 0) or 0
         rep_l   = f"  [REPEAT x{rep_cnt}]" if rep_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
 
+        title_s = _trunc(s.get("title", "") or "", 70)
+
         out.append(f"{i}. {CONF_LABEL[conf]} / BUY {direction}  /  {horizon}{fp_l}{str_l}")
         ticker_close = f"{ticker}  ·  {close_fmt}{urgency}{rep_l}" if close_fmt else f"{ticker}{urgency}{rep_l}"
         out.append(f"   {ticker_close}")
+        if title_s:
+            out.append(f"   {title_s}")
         out.append(f"   Market: {mkt_p}  Est: {est_p}  Edge: {edge_v*100:+.1f} pp{ev_l}{kelly_s}")
         if i < len(ranked):
             out.append("")
@@ -775,7 +886,8 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
         placed = {r[0] for r in cur.fetchall()}
 
         cur.execute(
-            "SELECT ticker, direction, market_price, our_estimate, edge, close_time, confidence "
+            "SELECT ticker, direction, market_price, our_estimate, edge, close_time, "
+            "confidence, title "
             "FROM signals "
             "WHERE result = '' AND source != 'real_fill' AND direction != 'PASS' "
             "ORDER BY timestamp DESC"
@@ -792,7 +904,7 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
     already_placed = []
     below_floor_count = 0
     for row in rows:
-        ticker, direction, mp, est, edge, close_time, conf = row
+        ticker, direction, mp, est, edge, close_time, conf, title = row
         if ticker in placed:
             already_placed.append(ticker)
             continue
@@ -829,8 +941,16 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
         kelly    = _kelly_fraction(direction, mp_f, est)
         kelly_s  = f"{kelly[1]*100:.1f}%" if kelly else "—"
         candidates.append({
-            "ticker": ticker, "direction": direction, "mp": mp_f, "edge": edge_f,
-            "days": days_left, "urgency": urgency, "ev": ev_s, "kelly": kelly_s,
+            "ticker":    ticker,
+            "direction": direction,
+            "conf":      conf or "?",
+            "title":     (title or "").strip(),
+            "mp":        mp_f,
+            "edge":      edge_f,
+            "days":      days_left,
+            "urgency":   urgency,
+            "ev":        ev_s,
+            "kelly":     kelly_s,
         })
 
     # Deduplicate by ticker — keep highest-urgency row per ticker
@@ -841,17 +961,32 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
             seen[t] = c
     top = sorted(seen.values(), key=lambda x: -x["urgency"])[:top_n]
 
+    # Column layout under 100 chars:
+    # indent(2) + #(1) Dir(3) Conf(4) Ticker(20) Dys(3) Price(5) Edge(5) EV(7) K%(5) Title(25)
+    # separators: 9×2=18  content: 78  total: 2+18+78 = 98
+    _BQ_HDR = ["#", "Dir", "Conf", "Ticker", "Dys", "Price", "Edge", "EV(adj)", "K%", "Title"]
+    _BQ_WID = [1, 3, 4, 20, 3, 5, 5, 7, 5, 25]
+
     if not top:
         out.append("  No unplaced signals in queue.")
     else:
-        out.append(f"  {'Rank':<4}  {'Ticker':<26}  {'Days':>4}  {'Price':>5}  {'Edge':>5}  {'EV(fee-adj)':>11}  Kelly")
-        out.append(f"  {'----':<4}  {'-'*26}  {'----':>4}  {'-----':>5}  {'-----':>5}  {'-'*11:>11}  -----")
+        bq_rows = []
         for i, c in enumerate(top, 1):
-            days_s = f"{c['days']:.0f}" if c["days"] is not None else "—"
-            out.append(
-                f"  {i:<4}  {c['ticker'][:26]:<26}  {days_s:>4}  "
-                f"{c['mp']*100:.1f}%  {c['edge']*100:.1f}%  {c['ev']:>11}  {c['kelly']}"
-            )
+            days_s  = f"{c['days']:.0f}" if c["days"] is not None else "—"
+            title_s = c["title"] if c["title"] else c["ticker"]  # ticker fallback if title absent
+            bq_rows.append([
+                str(i),
+                c["direction"][:3],
+                c["conf"][:4],
+                c["ticker"],
+                days_s,
+                f"{c['mp']*100:.1f}%",
+                f"{c['edge']*100:.1f}%",
+                c["ev"],
+                c["kelly"],
+                title_s,
+            ])
+        out.extend(_render_table(_BQ_HDR, bq_rows, widths=_BQ_WID))
 
     pct_label = f"{min_ev_pct*100:.0f}%"
     out.append("")
@@ -963,14 +1098,20 @@ def compile_report(
         out.append("")
         for s in repeat_q:
             ticker = s.get("ticker", "")
-            title  = _trunc(s.get("title") or "", 42)
+            title  = _trunc(s.get("title") or "", 60)
             conf   = CONF_LABEL.get(s.get("confidence", "LOW"), "?")
             dir_   = s.get("direction", "?")
             mkt    = _pct(s.get("market_price"))
             est    = _pct(s.get("our_estimate"))
             edge   = f"{float(s.get('edge') or 0)*100:+.1f} pp"
-            out.append(f"  {ticker}  {conf} / BUY {dir_}  ·  Market {mkt}  →  Estimate {est}  ·  Edge {edge}")
+            ev_s   = _ev_per_contract(dir_, s.get("market_price"), s.get("our_estimate"), unit_size=unit_size) or ""
+            ev_part = f"  ·  EV {ev_s}" if ev_s else ""
+            out.append(f"  {ticker}  {conf} / BUY {dir_}  ·  Mkt {mkt}  ->  Est {est}  ·  Edge {edge}{ev_part}")
             out.extend(_wrap(title, indent=4))
+            reasoning = (s.get("reasoning") or "").strip()
+            if reasoning:
+                summary = reasoning.split("\n")[0][:90]
+                out.extend(_wrap(f"Analysis: {summary}", indent=4))
         out.append("")
 
     # ── Short-term watchlist ──────────────────────────────────────────────
@@ -988,23 +1129,30 @@ def compile_report(
     else:
         out.append(f"  {len(short_term)} market(s) in short-term window")
         out.append("")
-        # Column header
-        out.append(f"  {'Title':<28}  {'Horizon':<9}  {'Mid':>5}  {'Vol':>6}  Notes")
-        out.append(f"  {'-'*28}  {'-'*9}  {'-'*5}  {'-'*6}  -----")
+        _stw_rows = []
         for m in short_term[:15]:
-            title    = (m.get("title") or "")[:28]
-            bucket   = HORIZON_LABEL.get(m.get("time_horizon", ""), "")[:9]
-            yes_bid  = float(m.get("yes_bid_dollars") or 0)
-            yes_ask  = float(m.get("yes_ask_dollars") or 0)
-            mid      = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) else None
-            mid_s    = f"{mid*100:.0f}%" if mid else "—"
-            vol_s    = f"{float(m.get('volume_fp') or 0):.0f}"
-            notes = []
+            yes_bid = float(m.get("yes_bid_dollars") or 0)
+            yes_ask = float(m.get("yes_ask_dollars") or 0)
+            mid     = (yes_bid + yes_ask) / 2 if (yes_bid + yes_ask) else None
+            mid_s   = f"{mid*100:.0f}%" if mid else "—"
+            vol_s   = f"{float(m.get('volume_fp') or 0):.0f}"
+            notes_l = []
             if m.get("drift_flag"):
-                notes.append(f"drift {(m.get('price_drift') or 0)*100:+.0f}%")
+                notes_l.append(f"drift {(m.get('price_drift') or 0)*100:+.0f}%")
             if m.get("spread_wide"):
-                notes.append("wide spread")
-            out.append(f"  {title:<28}  {bucket:<9}  {mid_s:>5}  {vol_s:>6}  {', '.join(notes)}")
+                notes_l.append("wide spread")
+            _stw_rows.append([
+                _trunc(m.get("title") or "", 30),
+                HORIZON_LABEL.get(m.get("time_horizon", ""), "")[:9],
+                mid_s,
+                vol_s,
+                ", ".join(notes_l),
+            ])
+        out.extend(_render_table(
+            ["Title", "Horizon", "Mid", "Vol", "Notes"],
+            _stw_rows,
+            widths=[30, 9, 5, 6, 18],
+        ))
     out.append("")
 
     # ── Smart money watchlist ─────────────────────────────────────────────────
@@ -1018,12 +1166,21 @@ def compile_report(
     if not whale_only:
         out.append("  No unusual whale activity this run.")
     else:
-        out.append(f"  {'Ticker':<22}  {'Direction':<10}  Size vs Avg  Title")
-        out.append(f"  {'-'*22}  {'-'*10}  {'-'*11}  -----")
+        _wh_rows = []
         for w in whale_only:
             avg   = w.get("avg_trade_size", 0)
             ratio = f"{w.get('max_trade_size', 0)/avg:.1f}x" if avg else "—"
-            out.append(f"  {w.get('ticker',''):<22}  {w.get('whale_direction','?'):<10}  {ratio:<11}  {(w.get('title',''))[:30]}")
+            _wh_rows.append([
+                _trunc(w.get("ticker", ""), 22),
+                w.get("whale_direction", "?"),
+                ratio,
+                _trunc(w.get("title", ""), 32),
+            ])
+        out.extend(_render_table(
+            ["Ticker", "Direction", "Size vs Avg", "Title"],
+            _wh_rows,
+            widths=[22, 10, 11, 32],
+        ))
     out.append("")
 
     # ── Upcoming resolutions ──────────────────────────────────────────────

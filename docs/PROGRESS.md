@@ -723,3 +723,51 @@ Added `Filtered (high price): N` line to the RUN STATISTICS block. `run_meta["hi
 1. Auto-resolve outcomes when Kalshi markets close (update `result` + `pnl_if_traded` automatically)
 2. Run `_verify_watchlist_trader` against live Polymarket API to establish which of the 20 seeded traders actually pass the track-record gate
 3. Consider a tiered EV floor (e.g., 30% of unit for HIGH confidence, 50% for MED/LOW) once there are enough resolved signals to calibrate empirically
+
+---
+
+## Goal 4c — Report Readability Refactoring  (2026-06-30)
+
+### Files changed
+- **core/report.py** — added `_close_and_urgency`, `_format_label_stack`, `_render_table` helpers; refactored `_signal_block`, `_top_picks`, `_betting_queue`, `_smart_money_section`, SHORT-TERM WATCHLIST block, WHALE ACTIVITY block, REPEAT SIGNALS block
+- **tests/test_report.py** — updated 15 tests whose assertions referenced `lines[0]` or `lines[1]` after label-stack moved out of the header line; updated `_make_bq_db` helper to include `title` column
+- **tests/test_4c.py** — new; 35 tests for PART C/D/E assertions
+
+### PART A findings
+
+**Max line length before fix:** 183 characters (worst-case signal block header with all optional labels concatenated onto one line).
+
+**Duplicated logic locations:**
+- `close_time` parsing / urgency thresholds: both `_signal_block` (lines ~370-420 original) and `_top_picks` (lines ~580-620) had near-verbatim copies of the same datetime parsing + `<=0d / <=3d / <=7d` urgency threshold logic. A threshold change in one would silently diverge from the other.
+- Repeat label: built inline in `_signal_block` header string and also rebuilt inline in `_top_picks` ticker line.
+- `flag_path` bracket label: built inline in `_signal_block` header and not consistently applied elsewhere.
+- Signal strength star: computed once per `_signal_block` call but concatenated directly into the header.
+
+**Bare-ticker sections before fix:**
+- BETTING QUEUE (`_betting_queue`): SQL SELECT did not fetch `title`; table had no title column. `direction` and `confidence` were fetched from DB but discarded before the table was built (see PART C.6 finding below).
+- SMART MONEY DRIFT table (`_smart_money_section`): showed `Wallet` and `Ticker` columns with no title.
+- Per-Trader Cross-References table (`_smart_money_section`): `kalshi_title` was present on each signal dict but never printed.
+- Sections already showing title before fix: NEW SIGNALS (via `_signal_block`), REPEAT SIGNALS (title on wrap line), SHORT-TERM WATCHLIST (inline `title[:28]`), WHALE ACTIVITY (inline `title[:30]`), Kalshi Targets grouped block.
+
+### PART C.6 finding — betting queue dropped direction + confidence
+The `_betting_queue` function fetched `confidence` and `direction` from the database (both in the SELECT and unpacked into local variables), used `direction` internally for EV and Kelly math, then added neither to the `candidates` dict. The rendered table showed ticker, price, edge, EV, and Kelly percentage — but gave the reader no way to determine which side of the bet was recommended (YES or NO) or the model's confidence level. Both are the minimum a reader needs to act on a row. Fixed by adding `Dir` and `Conf` to the `candidates` dict and to the `_render_table` column layout.
+
+### PART D verification
+- Max non-rule line length after fix: **98 chars**
+- Lines exceeding 100 chars (excluding `====` rule lines): **0**
+- Betting queue: `Dir`, `Conf`, and `Title` columns rendered for every row
+- SMART MONEY DRIFT: `Title` column added via `_title_by_ticker` lookup
+- Per-Trader Cross-References: `Title` column added from `kalshi_title` field
+- SHORT-TERM WATCHLIST: converted to `_render_table`; title column present
+- WHALE ACTIVITY: converted to `_render_table`; title column present
+- REPEAT SIGNALS: EV/contract shown; one-line reasoning summary shown when available; `→` replaced with `->` (cp1252 safe)
+
+### Scope confirmation
+No underlying value, threshold, or data calculation was changed. The only data-layer changes were:
+1. Adding an existing `title` column to the betting queue's SELECT statement
+2. Surfacing `direction` and `confidence` values that `_betting_queue` was already fetching and discarding
+
+All existing computed values (EV, edge, Kelly, LV score, signal strength, urgency thresholds) are identical to pre-4c.
+
+### Test count
+- 1479 tests collected, 0 failures
