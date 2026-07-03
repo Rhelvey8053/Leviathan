@@ -1,22 +1,95 @@
-# Leviathan
+<!-- Last narrative update: 2026-07-02 — reorganized for dual technical/portfolio audience; no code or data claims changed -->
 
-Prediction market intelligence system for Kalshi. Scans thousands of open markets daily, cross-references prices across five platforms, tracks top Polymarket traders, detects whale activity, and emails a plain-text signal report.
+# LEVIATHAN // PREDICTION MARKET INTELLIGENCE
 
-**Status:** v1 — read-only, no trade execution. All signals are informational.
+Leviathan is an automated signal detection system for [Kalshi](https://kalshi.com), a regulated US exchange where traders buy and sell contracts on the probability of real-world events — elections, economic reports, sports outcomes, and more. Each day it scans thousands of open contracts, cross-references the same events on five external platforms, tracks the open positions of the highest-PnL traders in the space, and scores candidate markets using a combination of heuristics and LLM-based probability estimation. The output is a structured daily email report and a persistent record of every signal — market price at the time of the call, our probability estimate, and eventual outcome — with the long-term goal of determining whether systematic edge is real, where it comes from, and whether it holds under live conditions.
 
 ---
 
-## What it does
+## System Status
 
-| Layer | What happens |
+- **Phase:** Data accumulation — 11 resolved signals as of last update (next gate: n=20 before calibration analysis is meaningful)
+- **Mode:** Read-only — no trade execution. All signals are paper.
+- **Test suite:** 1490 tests, 0 failures
+
+### Validation approach
+
+Signals are tracked from generation through settlement, each with a logged market price, probability estimate, and eventual outcome. Accuracy is measured using Brier score — a proper scoring rule for probability calibration, not just directional win/loss rate — so the system can distinguish between "correctly directional" and "well-calibrated." Feature development is gated on data conditions rather than calendar dates: calibration-dependent improvements (position sizing, threshold tuning, confidence weighting) are explicitly deferred until n≥20 resolved signals exist, because before that threshold any accuracy metric is too noisy to act on. No claim of profitability is made — the current record doesn't support one, and the system is designed to surface that honestly.
+
+---
+
+## How It Works
+
+Each daily run executes an 8-step pipeline:
+
+| Step | Layer | What happens |
+|---|---|---|
+| 1 | Auth | Connects to Kalshi and resolves any markets that have settled since the last run |
+| 2 | Fetch | Downloads 2,400+ open markets across 400 active events |
+| 3 | Filter | Drops liquid, efficiently-priced, and structurally uninteresting markets; deduplicates by event; tags any market where a tracked smart-money trader holds a position |
+| 4 | Cross-reference | Finds the same question on Polymarket, Manifold, PredictIt, Metaculus, and The Odds API — price gaps between platforms are a primary signal input |
+| 5 | Whale detection | Flags unusually large individual trades and order-book imbalances that may indicate informed positioning |
+| 6 | Score | Scores flagged markets using Claude with live web search, anchored by 11 calibration rules that ground estimates in base rates and cross-market evidence |
+| 7 | Log + Smart money | Persists signals to SQLite; runs the watchlist scan (fetches open positions for 20 tracked traders, cross-references to Kalshi markets by title similarity) |
+| 8 | Report | Compiles and emails the daily plain-text report |
+
+**Watchlist markets** (confirmed smart money positions) bypass the normal flag requirement — they reach Claude scoring even if no drift or heuristic edge fired, with a `WATCHLIST` flag path.
+
+---
+
+## What This Demonstrates
+
+Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across six external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,490-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
+
+The design reflects a deliberate choice to build measurement infrastructure before claiming results. The calibration script (`analysis/calibration.py`) computes Brier scores and win rates broken down by flag path, time horizon, confidence tier, and cross-market alignment. The backlog is explicitly structured around data conditions: several planned features are blocked until the resolved-signal count clears n=20, because prior to that threshold any accuracy metric is too noisy to act on. This is an easy discipline to skip when you're the only one checking.
+
+The smart money system illustrates the same approach. Twenty trader addresses were pre-curated by monthly PnL from Polymarket's public leaderboard, but each is filtered at runtime against hard requirements — ≥10 resolved positions and ≥55% win rate — before any signal weight is applied. As of now, none of them clear the bar. That's the correct output, not a bug: the system is working as designed.
+
+---
+
+## Architecture
+
+The codebase is structured as a modular pipeline — each layer is independently testable and has no circular dependencies.
+
+| File | Purpose |
 |---|---|
-| **Filter** | Scans 2,400+ Kalshi markets, drops efficiently-priced and low-liquidity markets |
-| **Smart money** | Tracks 20 top Polymarket traders by monthly PnL; cross-references their open positions to Kalshi markets by title similarity |
-| **Whale detection** | Flags unusually large trades and order-book imbalances |
-| **Cross-reference** | Prices the same question on Polymarket, Manifold, Metaculus, PredictIt, and The Odds API |
-| **Score** | Sends flagged markets to Claude (via Pro CLI — no API billing) with web search; 11 calibration rules anchor estimates to base rates and cross-market evidence |
-| **Report** | Emails a plain-text daily report; tracks win rate and P&L over time |
-| **Research probe** | Stratified-sample experiment: Claude+websearch estimates probability on 10 markets per run, including markets the main filter rejects, to test for edge outside the funnel |
+| `main.py` | Orchestrator — 8-step pipeline |
+| `kalshi.py` | Kalshi REST API client (RSA-PSS auth) |
+| `scanner.py` | Market filter, edge scoring, drift detection, watchlist tagging |
+| `whales.py` | Large trade detection |
+| `scorer.py` | Claude CLI subprocess — batched market scoring with web search |
+| `polymarket.py` | Polymarket Gamma API price cross-reference |
+| `external_markets.py` | Manifold + PredictIt + Metaculus + OddsAPI aggregator |
+| `metaculus.py` | Metaculus question search and probability fetch |
+| `odds_api.py` | The Odds API bookmaker lines |
+| `accounts.py` | Winning Polymarket wallet discovery and per-market scan |
+| `logger.py` | SQLite persistence — signals, runs, fills, probes |
+| `report.py` | Report compiler and email sender |
+| `subscribers.py` | Newsletter subscriber management |
+| `config.json` | All thresholds, model settings, watchlist |
+| `analysis/smart_money_scan.py` | Watchlist position fetch and Kalshi cross-reference |
+| `analysis/research_probe.py` | Stratified Claude+websearch probability probe |
+| `analysis/snapshot_markets.py` | Full market catalog snapshot (used by analysis scripts) |
+| `analysis/filter_stats.py` | Pipeline diagnostic — drop reasons and flag breakdown |
+| `analysis/backtest.py` | Historical P&L from logged signals |
+| `analysis/calibration.py` | Calibration analysis — win rate by flag_path, horizon, alignment, net_edge, Brier score |
+| `analysis/net_edge_analysis.py` | Net-of-spread edge distribution for flagged markets |
+| `analysis/pass_analysis.py` | Scanner precision — PASS rate by flag_path, horizon, repeat false-positives |
+| `scripts/daily_smart_money.py` | Scheduled daily watchlist scan runner |
+| `scripts/setup_scheduler.ps1` | Registers daily Task Scheduler jobs |
+
+---
+
+## Data Sources
+
+| Source | What it adds |
+|---|---|
+| Kalshi | Primary market — prices, order book, trade history |
+| Polymarket | On-chain price cross-reference + smart money position tracking |
+| Manifold | Community forecaster prices |
+| PredictIt | Regulated US political market prices |
+| Metaculus | Superforecaster consensus (requires free token) |
+| The Odds API | Sharp bookmaker lines for sports markets (requires free key) |
 
 ---
 
@@ -74,47 +147,7 @@ Registers a Task Scheduler job that fires every day at 7:00 AM. A separate job f
 
 ---
 
-## Pipeline — 8 steps
-
-```
-[1] Authenticate Kalshi + resolve any settled markets
-[2] Fetch 2,400+ markets across 400 events
-[3] Filter → deduplicate by event → tag smart money overlap → score/flag
-[4] Cross-reference: Polymarket, Manifold, Metaculus, PredictIt, OddsAPI
-[5] Whale detection, order-book depth, price trend history
-[6] Claude CLI scores flagged markets (one batched subprocess call)
-[7a] Log signals to leviathan.db; send weekly digest on Sundays
-[7b] Smart money watchlist scan (positions → Kalshi cross-reference → cache)
-[8] Compile and email report
-```
-
-**Watchlist markets** (confirmed smart money positions) bypass the normal flag requirement — they reach Claude scoring even if no drift or heuristic edge fired, with a `WATCHLIST` flag path.
-
----
-
-## Smart money system
-
-Two parallel systems track winning traders:
-
-**Watchlist scan** (`analysis/smart_money_scan.py`) — runs at step 7b and daily via Task Scheduler. Fetches open positions for 20 pre-curated top Polymarket traders (by monthly PnL). Cross-references position titles to Kalshi market titles using Jaccard word-overlap + SequenceMatcher scoring with a 0.50 threshold and a minimum 2-keyword overlap gate. Sports bets and game markets are filtered out. Results are written to `data/smart_money/YYYY-MM-DD.md` (markdown) and `data/smart_money/latest_signals.json` (ticker cache). The ticker cache is read at step 3 to boost those markets to the top of the scoring queue.
-
-**Account discovery** (`accounts.py`) — discovers winning wallets from recent Polymarket trade history, enriches them with win rate and active positions, and checks whether any of those wallets traded on the specific Polymarket condition that matches a flagged Kalshi market. Results appear as "Smart Money Activity" in the per-signal section of the report.
-
----
-
-## Research probe
-
-`analysis/research_probe.py` — a standalone experiment that runs separately from the main pipeline.
-
-```bash
-python analysis/research_probe.py
-```
-
-Samples ~50 markets across 5 volume tiers (including markets the main filter rejects), then probes up to `max_probe_markets` (config: `scoring.max_probe_markets`, default 10) with Claude+websearch. Smart money watchlist tickers are always probed first. Results are logged as `source='research_probe'` and resolve automatically when markets settle. `logger.get_stats_probe()` reports the hit rate once outcomes are known.
-
----
-
-## Analysis scripts
+## Analysis Scripts
 
 | Script | What it does | Run |
 |---|---|---|
@@ -132,51 +165,7 @@ Samples ~50 markets across 5 volume tiers (including markets the main filter rej
 
 ---
 
-## File map
-
-| File | Purpose |
-|---|---|
-| `main.py` | Orchestrator — 8-step pipeline |
-| `kalshi.py` | Kalshi REST API client (RSA-PSS auth) |
-| `scanner.py` | Market filter, edge scoring, drift detection, watchlist tagging |
-| `whales.py` | Large trade detection |
-| `scorer.py` | Claude CLI subprocess — batched market scoring with web search |
-| `polymarket.py` | Polymarket Gamma API price cross-reference |
-| `external_markets.py` | Manifold + PredictIt + Metaculus + OddsAPI aggregator |
-| `metaculus.py` | Metaculus question search and probability fetch |
-| `odds_api.py` | The Odds API bookmaker lines |
-| `accounts.py` | Winning Polymarket wallet discovery and per-market scan |
-| `logger.py` | SQLite persistence — signals, runs, fills, probes |
-| `report.py` | Report compiler and email sender |
-| `subscribers.py` | Newsletter subscriber management |
-| `config.json` | All thresholds, model settings, watchlist |
-| `analysis/smart_money_scan.py` | Watchlist position fetch and Kalshi cross-reference |
-| `analysis/research_probe.py` | Stratified Claude+websearch probability probe |
-| `analysis/snapshot_markets.py` | Full market catalog snapshot (used by analysis scripts) |
-| `analysis/filter_stats.py` | Pipeline diagnostic — drop reasons and flag breakdown |
-| `analysis/backtest.py` | Historical P&L from logged signals |
-| `analysis/calibration.py` | Calibration analysis — win rate by flag_path, horizon, alignment, net_edge, Brier score |
-| `analysis/net_edge_analysis.py` | Net-of-spread edge distribution for flagged markets |
-| `analysis/pass_analysis.py` | Scanner precision — PASS rate by flag_path, horizon, repeat false-positives |
-| `scripts/daily_smart_money.py` | Scheduled daily watchlist scan runner |
-| `scripts/setup_scheduler.ps1` | Registers daily Task Scheduler jobs |
-
----
-
-## Data sources
-
-| Source | What it adds |
-|---|---|
-| Kalshi | Primary market — prices, order book, trade history |
-| Polymarket | On-chain price cross-reference + smart money position tracking |
-| Manifold | Community forecaster prices |
-| PredictIt | Regulated US political market prices |
-| Metaculus | Superforecaster consensus (requires free token) |
-| The Odds API | Sharp bookmaker lines for sports markets (requires free key) |
-
----
-
-## Managing subscribers
+## Managing Subscribers
 
 ```bash
 python subscribers.py add someone@example.com
@@ -194,7 +183,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-909 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+1490 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|
