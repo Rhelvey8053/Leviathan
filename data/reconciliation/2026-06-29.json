@@ -1,0 +1,62 @@
+{
+  "run_at": "2026-06-29T02:18:53.989194+00:00",
+  "paper_open": 13,
+  "positions_fetched": 0,
+  "aligned": [],
+  "misaligned": [],
+  "unplaced": [
+    {
+      "ticker": "KXCABLEAVE-26MAY22-26JUL",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXIMPEACHCABINET-26JUL01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXIPOCANVA-DATE-26OCT01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXIPOOURA-26OCT01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXLAKECONF-26MAY12-SEP01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXMEDIARELEASEPRISONBREAK-30JAN01-26JUL01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXMLBDEBUT-FARIAS-26NOV01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXMLBDEBUT-KANDERSON-26NOV01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXTAIWANLVL4-26JUL01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXTVSEASONRELEASETHELASTOFUS-26-JUL",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXTVSEASONRELEASETHELASTOFUS-26-OCT",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXUSAEXPANDTERRITORY-26JUL01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXZELENSKYPUTIN-29-26JUL",
+      "direction": "YES"
+    }
+  ],
+  "unexpected": []
+}
