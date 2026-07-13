@@ -241,5 +241,10 @@
     "email_from": "",
     "smtp_host": "smtp.gmail.com",
     "smtp_port": 587
+  },
+  "llm": {
+    "backend": "cli",
+    "model": "claude-sonnet-4-6",
+    "max_web_searches": 8
   }
 }

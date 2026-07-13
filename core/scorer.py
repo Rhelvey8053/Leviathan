@@ -1,14 +1,20 @@
 """
-Probability estimation via Claude CLI (Claude Code / Pro subscription).
-Uses subprocess to call the local `claude` CLI — no Anthropic API key required.
-Web search is enabled via the built-in WebSearch tool.
+Probability estimation via Claude CLI or Anthropic Messages API.
+
+backend="cli"  (default) — subprocess to local claude CLI, Pro OAuth, no API billing.
+backend="api"  — Anthropic Messages API via core/llm.py; forced tool_choice structured
+                 output with web_search_20250305; real cost_usd in token_info.
+
+Switch via config["llm"]["backend"]. The CLI path is a legacy fallback scheduled for
+deletion after 2 clean weeks of API runs (goal 5a parallel validation).
 """
 
 import json
 import re
-import shutil
 import subprocess
+import tempfile as _tempfile
 
+from .llm import _find_claude, score_via_api as _score_via_api
 from .report import compute_leviathan_score
 
 SYSTEM_PROMPT = (
@@ -604,25 +610,6 @@ def build_system_prompt(calibration: dict | None = None,
     return SYSTEM_PROMPT + "\n".join(lines)
 
 
-def _find_claude() -> str:
-    """Locate the claude CLI binary."""
-    cmd = shutil.which("claude")
-    if cmd:
-        return cmd
-    # Common Windows install paths
-    import os
-    candidates = [
-        r"C:\Users\Administrator\AppData\Local\AnthropicClaude\claude.exe",
-        r"C:\Program Files\Claude\claude.exe",
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-    raise RuntimeError(
-        "claude CLI not found in PATH. "
-        "Run Leviathan from a Claude Code terminal, or ensure `claude` is in PATH."
-    )
-
 
 def build_prompt(markets: list[dict]) -> str:
     lines = [
@@ -1004,73 +991,21 @@ def build_prompt(markets: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def score_markets(flagged_markets: list[dict], config: dict,
-                  calibration: dict | None = None,
-                  flag_cal: list | None = None) -> tuple[list[dict], dict]:
-    """
-    Scores a batch of flagged markets using the local claude CLI.
-    Returns (scored_markets, token_info).
-    token_info is empty — no API billing when using Pro subscription via CLI.
-
-    calibration: from logger.get_stats_by_confidence() — injects confidence win rates.
-    flag_cal: from logger.get_stats_by_flag_path() — injects flag-path win rates.
-    Both are optional; when present with resolved data, anchor Claude's calibration.
-    """
-    if not flagged_markets:
-        return [], {}
-
-    # Pre-Claude LV gate: drop markets whose pre-scoring LV (computed with LOW
-    # confidence = 0 bonus) is so weak that even HIGH confidence (+20) couldn't
-    # lift them to Grade C (LV ≥ 40). Default threshold: pre_lv < 20.
-    # These consume a slot without realistic path to an actionable signal.
-    min_pre_lv = int(config.get("scoring", {}).get("min_pre_claude_lv", 20))
-    if min_pre_lv > 0:
-        flagged_markets = [
-            m for m in flagged_markets
-            if compute_leviathan_score(m) >= min_pre_lv
-        ]
-        if not flagged_markets:
-            return [], {}
-
-    max_markets = config.get("scoring", {}).get("max_markets_per_run", 20)
-    batch       = flagged_markets[:max_markets]
-    user_prompt = build_prompt(batch)
-    sys_prompt  = build_system_prompt(calibration, flag_cal=flag_cal)
-    claude_cmd  = _find_claude()
-
-    # Exclude ANTHROPIC_API_KEY so the CLI uses Pro OAuth instead of the (empty) API key
-    import os as _os
-    import time as _time
+def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
+    """Legacy CLI path -- subprocess to local claude binary with Pro OAuth."""
+    import os as _os, time as _time
+    claude_cmd = _find_claude()
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
-
-    # Write the system prompt to a temp file to avoid Windows' ~32K CLI argument limit.
-    import tempfile as _tempfile
-    _sp_file = _tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False, encoding="utf-8"
-    )
-    _sp_file.write(sys_prompt)
-    _sp_file.close()
-    _sp_path = _sp_file.name
-
-    max_retries = 2
-    result = None
+    _sp_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+    _sp_file.write(sys_prompt); _sp_file.close(); _sp_path = _sp_file.name
+    max_retries = 2; result = None
     try:
         for attempt in range(max_retries + 1):
             result = subprocess.run(
-                [
-                    claude_cmd,
-                    "--print",
-                    "--system-prompt-file", _sp_path,
-                    "--allowedTools", "WebSearch",
-                    "--output-format", "text",
-                ],
-                input=user_prompt,
-                capture_output=True,
-                text=True,
-                timeout=600,
-                encoding="utf-8",
-                errors="replace",
-                env=clean_env,
+                [claude_cmd, "--print", "--system-prompt-file", _sp_path,
+                 "--allowedTools", "WebSearch", "--output-format", "text"],
+                input=user_prompt, capture_output=True, text=True, timeout=600,
+                encoding="utf-8", errors="replace", env=clean_env,
             )
             if result.returncode == 0:
                 break
@@ -1078,30 +1013,49 @@ def score_markets(flagged_markets: list[dict], config: dict,
                 _time.sleep(5)
     finally:
         _os.unlink(_sp_path)
-
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(
-            f"scorer.py: claude CLI returned exit {result.returncode} "
-            f"after {max_retries + 1} attempt(s): {err[:300]}"
+            f"scorer.py: claude CLI returned exit {result.returncode} after {max_retries + 1} attempt(s): {err[:300]}"
         )
-
     all_text = result.stdout.strip()
     if not all_text:
         raise RuntimeError("scorer.py: claude CLI returned empty output")
-
-    # Extract JSON array from response
     fence_match = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", all_text, re.DOTALL)
     if fence_match:
         raw_json = fence_match.group(1).strip()
     else:
-        start, end = all_text.find("["), all_text.rfind("]")
+        start, end = all_text.find("["), all_text.rfind("]"  )
         raw_json = all_text[start:end + 1] if start != -1 and end > start else all_text
-
     try:
-        scored = json.loads(raw_json)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"scorer.py: Failed to parse JSON: {e}\nRaw: {raw_json[:500]}")
+        return json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
 
-    # No API billing — return empty token info
-    return scored, {}
+
+def score_markets(
+    flagged_markets: list[dict],
+    config: dict,
+    calibration: dict | None = None,
+    flag_cal: dict | None = None,
+) -> tuple[list[dict], dict]:
+    """Score flagged markets via CLI or API backend."""
+    if not flagged_markets:
+        return [], {}
+
+    min_pre_lv = int(config.get("scoring", {}).get("min_pre_claude_lv", 20))
+    if min_pre_lv > 0:
+        flagged_markets = [m for m in flagged_markets if compute_leviathan_score(m) >= min_pre_lv]
+        if not flagged_markets:
+            return [], {}
+
+    max_markets = config.get("scoring", {}).get("max_markets_per_run", 20)
+    batch = flagged_markets[:max_markets]
+    user_prompt  = build_prompt(batch)
+    sys_prompt   = build_system_prompt(calibration, flag_cal=flag_cal)
+
+    backend = config.get("llm", {}).get("backend", "cli")
+    if backend == "api":
+        return _score_via_api(sys_prompt, user_prompt, config)
+    return _score_via_cli(sys_prompt, user_prompt), {}
+

@@ -1,0 +1,31 @@
+/goal A full daily run completes with llm.backend=api and ZERO regex parsing of LLM output — scores arrive as schema-validated tool inputs via forced tool_choice, all existing tests pass, and new tests cover schema-mismatch and API-error paths. This goal modifies core/scorer.py, analysis/research_probe.py, config.json, and adds core/llm.py plus tests. It does NOT touch scanner, logger, whales, report, or main.py's merge logic (main.py:611 consumes the same dict shape as today).
+
+PREREQUISITE (manual, before starting): Anthropic Console account exists with $5+ credit, auto-reload OFF, ANTHROPIC_API_KEY present in .env. Verify with a 1-token smoke call before any refactor work.
+
+(1) NEW MODULE core/llm.py — single owner of all Anthropic API interaction:
+- Client init from ANTHROPIC_API_KEY via python-dotenv. Model name read from config ("llm.model", default claude-sonnet-4-6). Add `anthropic` to requirements.txt.
+- Tool schema `record_scores`: input is {"scores": array of objects} where each object has EXACTLY the fields in scorer.py RESPONSE_SCHEMA (line ~534): ticker (string), market_price (number), our_estimate (number), edge (number), direction (enum YES|NO|PASS), confidence (enum HIGH|MED|LOW), reasoning (string), sources_checked (array of strings). All fields required, additionalProperties false.
+- score_via_api(system_prompt, user_prompt, config) -> (list[dict], token_info):
+  a. tools = [web_search tool (type web_search_20250305, max_uses from config, default 8), record_scores]
+  b. Agentic loop: while stop_reason indicates tool use for web_search, continue; when Claude calls record_scores, extract response.content[...].input["scores"] directly — no text parsing. Force the final structured emission with tool_choice on record_scores after search turns complete (or single-pass with tool_choice={"type":"tool","name":"record_scores"} if web search proves unnecessary in testing — decide by observed behavior, document choice in module docstring).
+  c. cache_control breakpoint on the system prompt block (it exceeds 1024 tokens with calibration rules — confirm, else note).
+  d. Retries: 2 retries with backoff on APIError/timeout, same discipline as existing CLI retry loop.
+  e. token_info: populate real usage — input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, and computed cost_usd from per-model pricing constants. main.py:608 already stores cost_usd; it must now be nonzero and accurate.
+- Validation: assert every returned score dict has all 8 fields and enum fields are in-range; raise with the offending ticker on mismatch. Schema enforcement by the API is the first line, this assert is the tripwire.
+
+(2) CONFIG: add "llm" section to config.json — {"backend": "api", "model": "claude-sonnet-4-6", "max_web_searches": 8}. backend accepts "api" | "cli". Also add both keys to config.example.json if/when it exists (see goal 5b).
+
+(3) REFACTOR core/scorer.py score_markets():
+- Keep untouched: pre-Claude LV gate, build_prompt, build_system_prompt, batch slicing.
+- Route on config["llm"]["backend"]: "api" -> core.llm.score_via_api; "cli" -> existing subprocess path, MOVED into a clearly-marked _score_via_cli() function (legacy fallback, scheduled for deletion after 2 clean weeks of API runs).
+- The fence regex and find("[")/rfind("]") slicing may exist ONLY inside _score_via_cli. Zero regex on the api path.
+
+(4) REFACTOR analysis/research_probe.py: delete its duplicated _find_claude() and fence regex; route through core/llm.py with its own single-object tool schema (record_probe) mirroring whatever fields it currently parses. Same backend flag respected.
+
+(5) TESTS (offline, consistent with existing 1490-test suite — no live API calls in tests):
+- Mock the anthropic client. Cases: (a) happy path — tool_use block with valid scores returns list unchanged; (b) schema mismatch — missing field / bad enum raises with ticker named; (c) APIError twice then success — retry path returns scores; (d) APIError three times — raises RuntimeError; (e) backend="cli" still routes to legacy path (regression pin).
+- Full suite green: python -m pytest -q reports 0 failures.
+
+(6) PARALLEL VALIDATION (manual, after code complete): run 3 consecutive daily runs with backend=api while keeping one same-day CLI run for diff. Compare direction/confidence agreement per ticker and record cost_usd per run in the run log. Acceptance on cost: 3-run average implies <$30/month or flag for model downgrade discussion. Do not delete the CLI path in this goal regardless of results.
+
+OUT OF SCOPE: MCP anything, subagents, prompt content changes, threshold changes, README updates (goal 5b).

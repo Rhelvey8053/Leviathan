@@ -1,0 +1,20 @@
+/goal A public GitHub repo exists at a fresh-history remote containing a sanitized copy of Leviathan that passes its full test suite from a clean clone, contains zero secrets / personal planning files / stale audit docs, and the private DB's resolved-signal pnl_if_traded values are verified correct (backfilled if not) so every number that will appear in the August post is trustworthy. The private repo remains the working repo; the public repo is the showcase mirror.
+
+PART A — TRACK RECORD INTEGRITY (do first; blocks everything the post will claim)
+
+(1) VERIFY pnl_if_traded on already-resolved rows. logger.resolve_outcomes (core/logger.py ~line 566) now computes correct binary payoffs, but it only touches unresolved rows — anything resolved before the fix may carry the old edge*±1 values. Write a read-only script (scripts/verify_pnl.py) that: selects all rows WHERE outcome IS NOT NULL, recomputes pnl from stored direction/market_price/entry_price/outcome using the current formula (including real_fill fee handling), and prints a diff table: call_id, ticker, stored_pnl, recomputed_pnl, delta.
+(2) If any delta != 0: apply a one-time UPDATE backfill inside a transaction, after printing the before/after and backing up leviathan.db to leviathan.db.bak_pnlfix. If all deltas are 0, print confirmation and stop — no write occurs.
+(3) Rerun analysis/calibration.py after any backfill and record the corrected headline stats (n resolved, win rate, Brier, total pnl_if_traded) in the run log. These are the only numbers permitted in the August post.
+
+PART B — PUBLIC REPO PUBLISH
+
+(4) Create a sanitized export (fresh history, single initial commit — do NOT flip the existing repo public; its history is unaudited):
+- Copy working tree to a staging directory. EXCLUDE: goals/ (entire directory — contains stale audit prompts describing since-fixed bugs), backlog.json, backlog.py + backlog_checker.py ONLY IF they import nothing used elsewhere (verify; if main.py imports them, keep code and exclude only backlog.json), all *.bak* files including winning_accounts.json.bak_3b, calls.csv*, runs.csv*, *.db*, any .claude/ or planning exports per existing .gitignore.
+- config.json: replace with config.example.json — same keys, credentials/emails/personal values blanked, sane defaults kept. Confirm .env.example already covers required env vars including ANTHROPIC_API_KEY (added in goal 5a).
+- Secrets sweep on the staging tree: grep for key-like strings (BEGIN RSA, api_key, smtp, @gmail, password) and eyeball every remaining .json. Zero hits or explicit justification per hit.
+(5) Verify from clean clone in a fresh venv: pip install -r requirements.txt, python -m pytest -q -> 0 failures with no .env present (offline suite must not require credentials; if any test does, mark/skip it and note in tests/README.md).
+(6) README: keep the existing narrative (already portfolio-ready). Update only: (a) System Status resolved-signal count to the post-verification number from step 3, (b) scorer.py description once goal 5a ships — "Anthropic Messages API, forced tool_choice structured scoring with web search" replaces the CLI subprocess line. Do not add profitability claims; the honest-measurement framing is the differentiator.
+(7) Push to new public GitHub repo (name: leviathan). Confirm rendered README, no workflow/actions files leaking anything, license file added (MIT unless decided otherwise).
+(8) LinkedIn: do NOT re-add the project or post yet. The repo going public is silent. Re-add + post happens only when the trifecta is complete (5a shipped + MCP server live + step-3 verified track record). Record the repo URL in the run log for the outreach message to the architecture contact — a live link in that message is the point of doing this before August.
+
+OUT OF SCOPE: MCP server, any code changes beyond config.example.json and README edits, the LinkedIn post itself.

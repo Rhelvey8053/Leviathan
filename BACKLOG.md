@@ -1,10 +1,9 @@
 # Leviathan Backlog
-Last updated: 2026-06-23 | Metrics: resolved=4, fills=10
+Last updated: 2026-07-13 | Metrics: resolved=11, fills=7
 
-## Ready (2)
+## Ready (1)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 4 | position-reconciliation-job | Automate daily reconciliation of open paper signals against the Kalshi position API. | execution |
 | 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |
 
 ## Locked (9)
@@ -27,7 +26,7 @@ Last updated: 2026-06-23 | Metrics: resolved=4, fills=10
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (11)
+## Done (12)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
@@ -38,6 +37,7 @@ Last updated: 2026-06-23 | Metrics: resolved=4, fills=10
 | 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |
+| 4 | position-reconciliation-job | Automate daily reconciliation of open paper signals against the Kalshi position API. | execution |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
