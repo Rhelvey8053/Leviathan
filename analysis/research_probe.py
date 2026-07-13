@@ -5,7 +5,7 @@ stratified sample of markets, including ones the mechanical funnel rejects.
 PARTS:
   A — stratified_sample(): ~50 markets across volume tiers, including
       filter_markets rejects, with strata breakdown printed.
-  B — probe_market(): one Claude CLI call per market with websearch;
+  B — probe_market(): one Claude call per market (CLI or API backend);
       tracks call count and runtime.
   C — results logged as source='research_probe' via logger.log_probe().
   D — forward scoring: resolve_outcomes() handles probe rows naturally;
@@ -23,7 +23,6 @@ import json
 import os
 import random
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -34,6 +33,7 @@ sys.path.insert(0, ROOT)
 
 from core import logger
 from core import scanner
+from core.llm import _find_claude, probe_via_api as _probe_via_api
 
 SNAPSHOT_DIR = os.path.join(ROOT, "data", "snapshots")
 CONFIG_PATH  = os.path.join(ROOT, "config.json")
@@ -297,20 +297,6 @@ def print_strata(sample: list[dict]) -> None:
 
 # ── Part B: Probe each market ─────────────────────────────────────────────────
 
-def _find_claude() -> str:
-    cmd = shutil.which("claude")
-    if cmd:
-        return cmd
-    candidates = [
-        r"C:\Users\Administrator\AppData\Local\AnthropicClaude\claude.exe",
-        r"C:\Program Files\Claude\claude.exe",
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-    raise RuntimeError("claude CLI not found in PATH.")
-
-
 def _build_probe_prompt(market: dict) -> str:
     from datetime import timedelta
     mid    = market.get("mid_price")
@@ -350,70 +336,60 @@ def _build_probe_prompt(market: dict) -> str:
 
 def probe_market(market: dict, config: dict) -> dict:
     """
-    Calls the Claude CLI with websearch for one market.
+    Probes one market via CLI or API backend (config["llm"]["backend"]).
     Returns a probe result dict with claude_estimate, predicted_direction,
     confidence, rationale, and runtime_ms.
-    Raises RuntimeError on CLI failure.
+    Raises RuntimeError on failure.
     """
-    claude_cmd = _find_claude()
-    prompt     = _build_probe_prompt(market)
-    mid        = market.get("mid_price", 0) or 0
+    prompt  = _build_probe_prompt(market)
+    mid     = market.get("mid_price", 0) or 0
+    backend = config.get("llm", {}).get("backend", "cli")
+    t0      = time.time()
 
-    clean_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    t0 = time.time()
-
-    result = subprocess.run(
-        [
-            claude_cmd,
-            "--print",
-            "--system-prompt", PROBE_SYSTEM,
-            "--allowedTools", "WebSearch",
-            "--output-format", "text",
-        ],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        encoding="utf-8",
-        errors="replace",
-        env=clean_env,
-    )
-
-    runtime_ms = int((time.time() - t0) * 1000)
-
-    if result.returncode != 0:
-        err = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(
-            f"probe_market: claude CLI exit {result.returncode} on {market.get('ticker')}: {err[:200]}"
-        )
-
-    raw = result.stdout.strip()
-    # Extract JSON object from response
-    fence = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", raw, re.DOTALL)
-    if fence:
-        raw_json = fence.group(1).strip()
+    if backend == "api":
+        probe_input, _ = _probe_via_api(PROBE_SYSTEM, prompt, config)
+        runtime_ms = int((time.time() - t0) * 1000)
+        est    = float(probe_input.get("claude_estimate", mid))
+        parsed = probe_input
     else:
-        start = raw.find("{")
-        end   = raw.rfind("}")
-        raw_json = raw[start:end + 1] if start != -1 and end > start else raw
+        claude_cmd = _find_claude()
+        clean_env  = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        result = subprocess.run(
+            [claude_cmd, "--print", "--system-prompt", PROBE_SYSTEM,
+             "--allowedTools", "WebSearch", "--output-format", "text"],
+            input=prompt, capture_output=True, text=True, timeout=180,
+            encoding="utf-8", errors="replace", env=clean_env,
+        )
+        runtime_ms = int((time.time() - t0) * 1000)
+        if result.returncode != 0:
+            err = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(
+                f"probe_market: claude CLI exit {result.returncode} on {market.get('ticker')}: {err[:200]}"
+            )
+        raw   = result.stdout.strip()
+        fence = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", raw, re.DOTALL)
+        if fence:
+            raw_json = fence.group(1).strip()
+        else:
+            start = raw.find("{")
+            end   = raw.rfind("}")
+            raw_json = raw[start:end + 1] if start != -1 and end > start else raw
+        parsed = json.loads(raw_json)
+        est    = float(parsed.get("claude_estimate", mid))
 
-    parsed = json.loads(raw_json)
-
-    est        = float(parsed.get("claude_estimate", mid))
     divergence = round(est - mid, 4)
-
     return {
-        "ticker":               market.get("ticker", ""),
-        "title":                market.get("title", ""),
+        "ticker":                market.get("ticker", ""),
+        "title":                 market.get("title", ""),
         "market_price_at_probe": round(mid, 4),
-        "claude_estimate":      round(est, 4),
-        "divergence":           divergence,
-        "predicted_direction":  parsed.get("predicted_direction", "PASS"),
-        "confidence":           parsed.get("confidence", ""),
-        "rationale":            parsed.get("rationale", ""),
-        "runtime_ms":           runtime_ms,
-        "filter_pass":          market.get("filter_pass", False),
-        "vol_tier":             market.get("vol_tier", ""),
+        "claude_estimate":       round(est, 4),
+        "divergence":            divergence,
+        "predicted_direction":   parsed.get("predicted_direction", "PASS"),
+        "confidence":            parsed.get("confidence", ""),
+        "rationale":             parsed.get("rationale", ""),
+        "runtime_ms":            runtime_ms,
+        "filter_pass":           market.get("filter_pass", False),
+        "vol_tier":              market.get("vol_tier", ""),
     }
 
 
@@ -550,7 +526,7 @@ def run_probe(config: dict | None = None) -> dict:
         )
 
     print(f"\n{'='*90}")
-    print(f"  Total CLI calls:     {total_calls}")
+    print(f"  Total calls:         {total_calls}")
     print(f"  Errors:              {errors}")
     print(f"  Total runtime:       {total_ms / 1000:.1f}s  (avg {total_ms // max(total_calls, 1)}ms/market)")
     print(f"  Probe rows in DB:    {len(results)}")
