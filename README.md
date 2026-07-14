@@ -145,7 +145,11 @@ Fill in `.env`:
 
 ### 3. Configure settings
 
-Edit `config.json`. Key sections:
+```bash
+cp config.example.json config.json
+```
+
+Edit `config.json` (git-ignored — never committed). Key sections:
 
 | Section | What to set |
 |---|---|
