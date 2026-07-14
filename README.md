@@ -10,7 +10,7 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 - **Phase:** Data accumulation — 8 resolved paper signals as of 2026-07-14 (next gate: n=20 before calibration analysis is meaningful)
 - **Mode:** Read-only — no trade execution. All signals are paper.
-- **Test suite:** 1518 tests, 0 failures
+- **Test suite:** 1545 tests, 0 failures
 - **Verified track record (2026-07-14):** win rate 38%, Brier score 0.0578 (EXCELLENT), hypothetical P&L -$1.66 at $10/contract. PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=8 is far below the n=20 gate, so read them as an integrity checkpoint, not a performance claim.
 
 ### Validation approach
@@ -59,8 +59,9 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `analysis/` | Read-only diagnostic and calibration scripts that run against `data/leviathan.db`. Nothing here is part of the daily pipeline. |
 | `backtesting/` | Offline, CSV-based backtest harness (including walk-forward validation) and the empirical base-rate scaffold. Doesn't touch the live DB. |
 | `backlog/` | The backlog engine (`engine.py`) and weekly gate checker (`checker.py`) that maintain `backlog/backlog.json` and regenerate `BACKLOG.md`. |
+| `mcp_server/` | MCP server exposing the signal log, resolved track record, and market-data lookup as tools — reads `data/leviathan.db` directly, live. |
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, Task Scheduler registration. |
-| `tests/` | The full offline test suite (1,518 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
+| `tests/` | The full offline test suite (1,545 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), PowerBI exports, market snapshots, smart-money/whale caches, and the dashboard `.pbix`. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
@@ -196,6 +197,33 @@ Registers a Task Scheduler job that fires every day at 7:00 AM. A separate job f
 
 ---
 
+## MCP Server
+
+`mcp_server/server.py` exposes the signal log as MCP tools so the resolved track record can be interrogated conversationally instead of by opening files or writing one-off queries. v1 is stdio transport, tools only — reads `data/leviathan.db` directly (the same database the pipeline writes), never a copy or snapshot.
+
+| Tool | What it does |
+|---|---|
+| `get_signal_log` | Most recent scored paper signals (PASS excluded), newest first. Optional `limit`, `resolved_only`, `ticker` filters. |
+| `get_resolved_track_record` | The full resolved track record — every settled signal with its probability estimate and actual outcome. Same filter as the README's headline stats. |
+| `lookup_market` | Scored market data for a given `ticker` (partial match) or signal `date` (`YYYY-MM-DD`). |
+
+### Try it in the Inspector
+
+```bash
+pip install uv    # one-time — mcp dev shells out to uv run under the hood
+mcp dev mcp_server/server.py
+```
+
+### Wire it into Claude Code
+
+```bash
+claude mcp add leviathan -- python mcp_server/server.py
+```
+
+Then ask things like *"how did my highest-scored markets resolve?"* in a new Claude Code session in this repo.
+
+---
+
 ## Managing Subscribers
 
 ```bash
@@ -214,7 +242,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-1518 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+1545 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|

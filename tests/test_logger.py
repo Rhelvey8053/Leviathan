@@ -1115,6 +1115,99 @@ def test_get_week_signals_excludes_old_rows(tmp_db):
     assert "KXOLDWEEK" not in tickers
 
 
+# ─── get_signal_log / get_resolved_track_record / get_market_data (MCP) ───────
+
+def test_get_signal_log_returns_rows(tmp_db):
+    _insert("s1", "KXLOG1", "YES", 0.40)
+    rows = logger.get_signal_log(limit=10)
+    assert any(r["ticker"] == "KXLOG1" for r in rows)
+
+
+def test_get_signal_log_excludes_pass(tmp_db):
+    _insert("s2", "KXPASSED", "PASS", 0.40)
+    rows = logger.get_signal_log(limit=10)
+    assert not any(r["ticker"] == "KXPASSED" for r in rows)
+
+
+def test_get_signal_log_respects_limit(tmp_db):
+    for i in range(5):
+        _insert(f"s{i}", f"KXLIM{i}", "YES", 0.40)
+    rows = logger.get_signal_log(limit=2)
+    assert len(rows) == 2
+
+
+def test_get_signal_log_ticker_filter(tmp_db):
+    _insert("s3", "KXFOO", "YES", 0.40)
+    _insert("s4", "KXBAR", "YES", 0.40)
+    rows = logger.get_signal_log(limit=10, ticker="KXFOO")
+    assert len(rows) == 1
+    assert rows[0]["ticker"] == "KXFOO"
+
+
+def test_get_signal_log_resolved_only(tmp_db):
+    _insert("s5", "KXUNRES", "YES", 0.40)
+    _insert("s6", "KXRES", "YES", 0.40, outcome="yes", result="WIN")
+    rows = logger.get_signal_log(limit=10, resolved_only=True)
+    tickers = [r["ticker"] for r in rows]
+    assert "KXRES" in tickers
+    assert "KXUNRES" not in tickers
+
+
+def test_get_resolved_track_record_only_resolved(tmp_db):
+    _insert("s7", "KXOPEN", "YES", 0.40)
+    _insert("s8", "KXDONE", "YES", 0.40, outcome="yes", result="WIN", pnl=0.60)
+    rows = logger.get_resolved_track_record()
+    tickers = [r["ticker"] for r in rows]
+    assert "KXDONE" in tickers
+    assert "KXOPEN" not in tickers
+
+
+def test_get_resolved_track_record_excludes_pass(tmp_db):
+    _insert("s9", "KXPASSDONE", "PASS", 0.40, outcome="yes", result="")
+    rows = logger.get_resolved_track_record()
+    assert not any(r["ticker"] == "KXPASSDONE" for r in rows)
+
+
+def test_get_resolved_track_record_has_score_and_outcome(tmp_db):
+    _insert("s10", "KXSCORED", "YES", 0.40, outcome="yes", result="WIN", pnl=0.60)
+    rows = logger.get_resolved_track_record()
+    row = next(r for r in rows if r["ticker"] == "KXSCORED")
+    assert row["our_estimate"] == 0.40  # _insert hardcodes our_estimate=0.40
+    assert row["outcome"] == "yes"
+    assert row["result"] == "WIN"
+
+
+def test_get_market_data_by_ticker_partial_match(tmp_db):
+    _insert("s11", "KXCABLEAVE-26MAY22", "YES", 0.40)
+    rows = logger.get_market_data(ticker="CABLEAVE")
+    assert any(r["ticker"] == "KXCABLEAVE-26MAY22" for r in rows)
+
+
+def test_get_market_data_by_date(tmp_db):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source)
+            VALUES ('dated1','2026-05-01T12:00:00+00:00','KXDATED','YES',0.30,'paper')
+        """)
+    rows = logger.get_market_data(date="2026-05-01")
+    assert any(r["ticker"] == "KXDATED" for r in rows)
+
+
+def test_get_market_data_date_excludes_other_days(tmp_db):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, source)
+            VALUES ('dated2','2026-05-02T12:00:00+00:00','KXOTHERDAY','YES',0.30,'paper')
+        """)
+    rows = logger.get_market_data(date="2026-05-01")
+    assert not any(r["ticker"] == "KXOTHERDAY" for r in rows)
+
+
+def test_get_market_data_no_filters_returns_empty(tmp_db):
+    _insert("s12", "KXANY", "YES", 0.40)
+    assert logger.get_market_data() == []
+
+
 # ─── get_ticker_day_count ─────────────────────────────────────────────────────
 
 def test_get_ticker_day_count_returns_zero_for_missing(tmp_db):
