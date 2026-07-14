@@ -864,7 +864,7 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
     from pathlib import Path as _P
 
     if db_path is None:
-        db_path = str(_P(__file__).parent.parent / "leviathan.db")
+        db_path = str(_P(__file__).parent.parent / "data" / "leviathan.db")
 
     _bet_cfg       = (config or {}).get("betting", {})
     unit_size      = _bet_cfg.get("unit_size", 10)

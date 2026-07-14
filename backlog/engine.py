@@ -1,5 +1,5 @@
 """
-backlog.py - Leviathan backlog CLI and importable engine.
+backlog/engine.py - Leviathan backlog CLI and importable engine.
 
 Subcommands:
   status  Print summary of backlog items grouped by status.

@@ -23,8 +23,8 @@ import sys
 from pathlib import Path
 
 ROOT    = Path(__file__).parent.parent
-DB_PATH = ROOT / "leviathan.db"
-BAK_PATH = ROOT / "leviathan.db.bak_pnlfix"
+DB_PATH = ROOT / "data" / "leviathan.db"
+BAK_PATH = ROOT / "data" / "leviathan.db.bak_pnlfix"
 
 
 def _recompute_pnl(direction: str, price: float, entry_price, fill_count, fill_fee, outcome: str) -> float:
