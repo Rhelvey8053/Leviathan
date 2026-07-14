@@ -8,9 +8,10 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 ## System Status
 
-- **Phase:** Data accumulation — 11 resolved signals as of last update (next gate: n=20 before calibration analysis is meaningful)
+- **Phase:** Data accumulation — 8 resolved paper signals as of 2026-07-14 (next gate: n=20 before calibration analysis is meaningful)
 - **Mode:** Read-only — no trade execution. All signals are paper.
 - **Test suite:** 1518 tests, 0 failures
+- **Verified track record (2026-07-14):** win rate 38%, Brier score 0.0578 (EXCELLENT), hypothetical P&L -$1.66 at $10/contract. PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=8 is far below the n=20 gate, so read them as an integrity checkpoint, not a performance claim.
 
 ### Validation approach
 
@@ -61,8 +62,6 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, Task Scheduler registration. |
 | `tests/` | The full offline test suite (1,518 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), PowerBI exports, market snapshots, smart-money/whale caches, and the dashboard `.pbix`. |
-| `docs/` | Design notes — audit and progress history. |
-| `goals/` | Dated planning specs for each project phase. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
 ---
@@ -77,7 +76,8 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `core/kalshi.py` | Kalshi REST API client (RSA-PSS auth) |
 | `core/scanner.py` | Market filter, edge scoring, drift detection, watchlist tagging |
 | `core/whales.py` | Large trade detection |
-| `core/scorer.py` | Claude CLI subprocess — batched market scoring with web search |
+| `core/scorer.py` | Batched market scoring — local Claude CLI (default) or Anthropic Messages API via `core/llm.py` |
+| `core/llm.py` | Anthropic Messages API client — forced tool_choice structured output, server-side web search, prompt caching |
 | `core/logger.py` | SQLite persistence — signals, runs, fills, probes |
 | `core/report.py` | Report compiler and email sender |
 | `core/subscribers.py` | Newsletter subscriber management |
@@ -232,7 +232,7 @@ python -m pytest -q
 ## Notes
 
 - **Read-only in v1** — no order placement, amendment, or cancellation. Only GET endpoints are called.
-- **Scoring via Claude Pro** — the CLI subprocess strips `ANTHROPIC_API_KEY` so it uses your Pro OAuth session. No per-token API billing.
+- **Scoring backend is configurable** (`llm.backend` in `config.json`) — `cli` (default) runs the local Claude CLI with `ANTHROPIC_API_KEY` stripped from its environment, using your Pro OAuth session with no per-token billing. `api` calls the Anthropic Messages API directly via `core/llm.py` — forced tool_choice structured output, server-side web search, and prompt caching, at real per-token cost.
 - **`data/leviathan.db`** stores all signals, runs, fills, and probe rows locally. Not committed to git.
 - **Win rate and P&L** are hypothetical — no real money is traded by the system. Real fills from your own Kalshi account can be pulled in via `logger.pull_real_fills()`.
 - **Smart money cache** (`data/smart_money/latest_signals.json`) is committed to git so the watchlist boost persists across machines without re-running the scan.
