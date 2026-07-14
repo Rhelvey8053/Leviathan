@@ -592,6 +592,84 @@ _PAPER   = "source = 'paper' OR source IS NULL"
 _NO_PASS = f"({_PAPER}) AND direction != 'PASS'"
 
 
+# ── Query helpers (MCP server / conversational lookup) ───────────────────────
+# These read the same DB_PATH the pipeline writes — no copies, no snapshots.
+
+def get_signal_log(limit: int = 50, resolved_only: bool = False,
+                    ticker: str | None = None) -> list[dict]:
+    """
+    Most recent paper signals (non-PASS), newest first.
+
+    resolved_only restricts to rows with a settled outcome; ticker filters
+    to an exact ticker match. Used by the MCP signal-log query tool.
+    """
+    where = [_NO_PASS]
+    params: list = []
+    if resolved_only:
+        where.append("outcome != '' AND outcome IS NOT NULL")
+    if ticker:
+        where.append("ticker = ?")
+        params.append(ticker)
+    params.append(limit)
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM signals WHERE {' AND '.join(where)} "
+                f"ORDER BY timestamp DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_resolved_track_record() -> list[dict]:
+    """
+    Every resolved paper signal (non-PASS) with its score and actual outcome.
+
+    Uses the identical filter as get_stats()/get_brier_score() so the count
+    always matches the headline "n resolved" figure reported elsewhere.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM signals WHERE {_NO_PASS} "
+                f"AND outcome != '' AND outcome IS NOT NULL "
+                f"ORDER BY timestamp DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_market_data(ticker: str | None = None, date: str | None = None) -> list[dict]:
+    """
+    Scored market data for a ticker (partial match) or a signal date
+    (YYYY-MM-DD, matched against the timestamp prefix). At least one of
+    ticker/date must be given; passing neither returns no rows.
+    """
+    if not ticker and not date:
+        return []
+    where = [_NO_PASS]
+    params: list = []
+    if ticker:
+        where.append("ticker LIKE ?")
+        params.append(f"%{ticker}%")
+    if date:
+        where.append("timestamp LIKE ?")
+        params.append(f"{date}%")
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM signals WHERE {' AND '.join(where)} "
+                f"ORDER BY timestamp DESC",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 def get_stats() -> dict:
     """Stats for paper (simulated) signals only — never blends with real fills."""
     _NO_PASS = f"({_PAPER}) AND direction != 'PASS'"
