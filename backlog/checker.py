@@ -1,22 +1,22 @@
 """
-backlog_checker.py - Weekly backlog checker for Leviathan.
+backlog/checker.py - Weekly backlog checker for Leviathan.
 
 Reads backlog.json, computes live metrics from leviathan.db, evaluates
 locked item triggers, prompts the user (CLI mode) or formats an email
 block (--email mode), regenerates BACKLOG.md.
 
 Usage:
-  python backlog_checker.py           # CLI prompt mode
-  python backlog_checker.py --email   # email block mode (no writes to backlog.json)
+  python backlog/checker.py           # CLI prompt mode
+  python backlog/checker.py --email   # email block mode (no writes to backlog.json)
 
 Windows Task Scheduler (weekly, Monday 08:00):
   schtasks /create /tn "LeviathanBacklogChecker" /tr
-  "python C:\\Users\\Administrator\\Downloads\\Leviathan\\backlog_checker.py --email"
+  "python C:\\Users\\Administrator\\Downloads\\Leviathan\\backlog\\checker.py --email"
   /sc weekly /d MON /st 08:00
 
 Manual run:
-  python backlog_checker.py          (CLI prompt mode)
-  python backlog_checker.py --email  (email block mode)
+  python backlog/checker.py          (CLI prompt mode)
+  python backlog/checker.py --email  (email block mode)
 """
 
 import argparse
@@ -25,13 +25,14 @@ import sys
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).parent
-DEFAULT_BACKLOG = ROOT / "backlog.json"
-DEFAULT_DB = ROOT / "leviathan.db"
-BACKLOG_MD = ROOT / "BACKLOG.md"
+PKG_DIR   = Path(__file__).resolve().parent
+REPO_ROOT = PKG_DIR.parent
+DEFAULT_BACKLOG = PKG_DIR / "backlog.json"
+DEFAULT_DB = REPO_ROOT / "data" / "leviathan.db"
+BACKLOG_MD = REPO_ROOT / "BACKLOG.md"
 
-sys.path.insert(0, str(ROOT))
-from backlog import load_backlog, save_backlog, determine_status
+sys.path.insert(0, str(REPO_ROOT))
+from backlog.engine import load_backlog, save_backlog, determine_status
 
 METRICS_KEYS = [
     "resolved_count",

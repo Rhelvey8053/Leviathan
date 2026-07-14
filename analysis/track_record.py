@@ -1,12 +1,12 @@
 """
-Track record and P&L summary for Leviathan signals.
+analysis/track_record.py - Track record and P&L summary for Leviathan signals.
 
 Runs resolve_outcomes against Kalshi for any unresolved rows, then prints
 a full breakdown: paper signals, research probes, and real fills.
 
 Usage:
-    python analysis/backtest.py          # resolve + report
-    python analysis/backtest.py --no-resolve   # skip API, report only
+    python analysis/track_record.py          # resolve + report
+    python analysis/track_record.py --no-resolve   # skip API, report only
 """
 
 import os

@@ -1,5 +1,5 @@
 """
-tests/test_backlog.py - Offline tests for backlog.json and backlog.py.
+tests/test_backlog.py - Offline tests for backlog/backlog.json and backlog/engine.py.
 
 All tests operate on a temp copy of backlog.json; the real file is never mutated.
 """
@@ -13,11 +13,11 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parent.parent
-BACKLOG_JSON = ROOT / "backlog.json"
-BACKLOG_PY = ROOT / "backlog.py"
+BACKLOG_JSON = ROOT / "backlog" / "backlog.json"
+BACKLOG_PY = ROOT / "backlog" / "engine.py"
 
 sys.path.insert(0, str(ROOT))
-from backlog import (
+from backlog.engine import (
     determine_status,
     load_backlog,
     parse_trigger,

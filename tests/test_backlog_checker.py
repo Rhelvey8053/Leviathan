@@ -1,5 +1,5 @@
 """
-tests/test_backlog_checker.py - Offline tests for backlog_checker.py.
+tests/test_backlog_checker.py - Offline tests for backlog/checker.py.
 
 All DB tests use a tmp sqlite DB with controlled data.
 backlog.json is loaded read-only; backlog_checker never mutates it in --email mode.
@@ -15,12 +15,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parent.parent
-BACKLOG_JSON = ROOT / "backlog.json"
-BACKLOG_CHECKER_PY = ROOT / "backlog_checker.py"
+BACKLOG_JSON = ROOT / "backlog" / "backlog.json"
+BACKLOG_CHECKER_PY = ROOT / "backlog" / "checker.py"
 
 sys.path.insert(0, str(ROOT))
-from backlog import load_backlog
-from backlog_checker import (
+from backlog.engine import load_backlog
+from backlog.checker import (
     compare_statuses,
     compute_metrics,
     evaluate_triggers,

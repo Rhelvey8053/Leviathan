@@ -1,5 +1,5 @@
 """
-tests/test_base_rates.py — Tests for base_rates.py (Section 7 — empirical-base-rates-poly).
+tests/test_base_rates.py — Tests for backtesting/base_rates.py (Section 7 — empirical-base-rates-poly).
 
 No network calls. Uses in-memory CSV data.
 """
@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from base_rates import BASE_RATES, load_empirical_rates, merge_rates
+from backtesting.base_rates import BASE_RATES, load_empirical_rates, merge_rates
 
 
 # ── BASE_RATES ────────────────────────────────────────────────────────────────

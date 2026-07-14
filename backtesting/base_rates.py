@@ -1,12 +1,12 @@
 """
-Empirical base rates module for Leviathan.
+backtesting/base_rates.py - Empirical base rates module for Leviathan.
 
 Scaffold for replacing heuristic prior rates with empirical rates derived
 from Polymarket historical outcomes. No live data fetch — receives data
 from the backtest harness once it produces results.
 
 Usage:
-  python base_rates.py --empirical empirical_rates.csv
+  python backtesting/base_rates.py --empirical empirical_rates.csv
 """
 
 from __future__ import annotations

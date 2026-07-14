@@ -243,7 +243,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Reconcile paper signals vs Kalshi positions")
     parser.add_argument("--email", action="store_true", help="Compact email-block output only")
-    parser.add_argument("--db",    default=str(ROOT / "leviathan.db"), help="DB path")
+    parser.add_argument("--db",    default=str(ROOT / "data" / "leviathan.db"), help="DB path")
     args = parser.parse_args()
 
     with open(ROOT / "config.json") as f:
