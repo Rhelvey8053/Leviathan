@@ -1,10 +1,9 @@
 # Leviathan Backlog
-Last updated: 2026-07-13 | Metrics: resolved=11, fills=7
+Last updated: 2026-07-14 | Metrics: resolved=11, fills=7
 
-## Ready (1)
+## Ready (0)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |
 
 ## Locked (9)
 | Priority | ID | Gate | Area |
@@ -26,7 +25,7 @@ Last updated: 2026-07-13 | Metrics: resolved=11, fills=7
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (12)
+## Done (13)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
@@ -41,3 +40,4 @@ Last updated: 2026-07-13 | Metrics: resolved=11, fills=7
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
+| 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |

@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-06-23",
+  "updated": "2026-07-14",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -214,7 +214,7 @@
       "title": "Walk-Forward Validation",
       "area": "backtesting",
       "priority": 5,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
