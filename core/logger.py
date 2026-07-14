@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 
 _ROOT     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH   = os.path.join(_ROOT, "leviathan.db")
+DB_PATH   = os.path.join(_ROOT, "data", "leviathan.db")
 CALLS_CSV = os.path.join(_ROOT, "calls.csv")
 RUNS_CSV  = os.path.join(_ROOT, "runs.csv")
 

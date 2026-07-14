@@ -25,8 +25,8 @@ from core import logger
 from core import scanner
 
 SNAPSHOT_DIR = ROOT / "data" / "snapshots"
-DB_PATH      = ROOT / "leviathan.db"
-DB_BAK       = ROOT / "leviathan.db.bak_3a"
+DB_PATH      = ROOT / "data" / "leviathan.db"
+DB_BAK       = ROOT / "data" / "db_backups" / "leviathan.db.bak_3a"
 
 PRICE_BANDS = [
     ("5-15%",  0.05, 0.15),

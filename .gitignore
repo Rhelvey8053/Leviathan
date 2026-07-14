@@ -5,10 +5,11 @@ runs.csv
 *.html
 *_files/
 *.migrated
-winning_accounts.json
+data/winning_accounts.json
 data/watchlist_cache.json
-leviathan.db
-leviathan.db.bak*
+data/leviathan.db
+data/leviathan.db.bak*
+data/db_backups/*
 subscribers.json
 odds_cache.json
 __pycache__/

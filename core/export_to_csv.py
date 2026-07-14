@@ -11,7 +11,7 @@ import os
 import sqlite3
 
 _ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH    = os.path.join(_ROOT, "leviathan.db")
+DB_PATH    = os.path.join(_ROOT, "data", "leviathan.db")
 EXPORT_DIR = os.path.join(_ROOT, "data", "powerbi_export")
 
 # String columns where NULL should become "" so Power BI DAX comparisons

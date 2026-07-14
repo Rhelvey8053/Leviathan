@@ -16,7 +16,7 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from backtest import BacktestRunner
+from backtesting.harness import BacktestRunner
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -182,14 +182,14 @@ def test_report_contains_stats_sections(runner_with_data, tmp_path):
 # ── sample_resolutions.csv ────────────────────────────────────────────────────
 
 def test_sample_resolutions_exists():
-    """The bundled sample_resolutions.csv must be present in repo root."""
-    assert (ROOT / "sample_resolutions.csv").exists()
+    """The bundled sample_resolutions.csv must be present in backtesting/."""
+    assert (ROOT / "backtesting" / "sample_resolutions.csv").exists()
 
 
 def test_sample_resolutions_loadable(tmp_path):
     """BacktestRunner can load sample_resolutions.csv without error."""
     r = BacktestRunner()
-    r.load_resolutions(str(ROOT / "sample_resolutions.csv"))
+    r.load_resolutions(str(ROOT / "backtesting" / "sample_resolutions.csv"))
     assert len(r.resolutions) >= 5
 
 

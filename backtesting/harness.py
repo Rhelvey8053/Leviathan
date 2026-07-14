@@ -1,18 +1,18 @@
 """
-Backtest harness for Leviathan signals.
+backtesting/harness.py - Backtest harness for Leviathan signals.
 
 Replays historical signals against resolved market outcomes to measure
 strategy performance across confidence tiers, signal paths, and time horizons.
 Scaffold only — no network calls. Plug real resolution data in once available.
 
 Usage:
-  python backtest.py --signals data/powerbi_export/signals.csv \\
-                     --resolutions sample_resolutions.csv \\
+  python backtesting/harness.py --signals data/powerbi_export/signals.csv \\
+                     --resolutions backtesting/sample_resolutions.csv \\
                      --output report.txt
 
 Walk-forward validation (rolling out-of-sample check on the scoring model):
-  python backtest.py --signals data/powerbi_export/signals.csv \\
-                     --resolutions sample_resolutions.csv \\
+  python backtesting/harness.py --signals data/powerbi_export/signals.csv \\
+                     --resolutions backtesting/sample_resolutions.csv \\
                      --output report.txt \\
                      --walk-forward [--min-train N] [--window N]
 
