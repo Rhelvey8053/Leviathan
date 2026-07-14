@@ -69,17 +69,22 @@ def _cfg_50():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestConfigFloor:
-    """config.json must have min_ev_pct_of_unit = 0.25."""
+    """config.example.json must have min_ev_pct_of_unit = 0.25.
+
+    Tests the committed template, not config.json — the real file is
+    git-ignored (it can carry personal settings) so it may not exist in a
+    fresh clone or CI checkout.
+    """
 
     def test_config_floor_is_25pct(self):
-        config_path = ROOT / "config.json"
+        config_path = ROOT / "config.example.json"
         with open(config_path) as f:
             config = json.load(f)
         assert config["betting"]["min_ev_pct_of_unit"] == pytest.approx(0.25)
 
     def test_config_betting_notes_present(self):
         """Rationale key exists so a reader can find the reason for 0.25."""
-        config_path = ROOT / "config.json"
+        config_path = ROOT / "config.example.json"
         with open(config_path) as f:
             config = json.load(f)
         notes = config["betting"].get("_betting_notes", "")
