@@ -191,3 +191,172 @@ def test_sample_resolutions_loadable(tmp_path):
     r = BacktestRunner()
     r.load_resolutions(str(ROOT / "sample_resolutions.csv"))
     assert len(r.resolutions) >= 5
+
+
+# ── walk_forward ─────────────────────────────────────────────────────────────
+
+WF_SIGNAL_FIELDS = ["call_id", "ticker", "direction", "confidence", "flag_path",
+                    "time_horizon", "edge", "result"]
+WF_RESOLUTION_FIELDS = ["ticker", "resolved_yes", "close_date"]
+
+# 6 signals, chronologically ordered by close_date, alternating hit/miss:
+# HIT, HIT, miss, HIT, miss, HIT
+WF_SIGNALS = [
+    {"call_id": f"w{i}", "ticker": f"KXW{i}", "direction": "YES", "confidence": "MED",
+     "flag_path": "EDGE", "time_horizon": "WEEKLY", "edge": "0.10", "result": ""}
+    for i in range(1, 7)
+]
+WF_RESOLUTIONS = [
+    {"ticker": "KXW1", "resolved_yes": "true",  "close_date": "2026-01-01"},  # HIT
+    {"ticker": "KXW2", "resolved_yes": "true",  "close_date": "2026-01-02"},  # HIT
+    {"ticker": "KXW3", "resolved_yes": "false", "close_date": "2026-01-03"},  # miss
+    {"ticker": "KXW4", "resolved_yes": "true",  "close_date": "2026-01-04"},  # HIT
+    {"ticker": "KXW5", "resolved_yes": "false", "close_date": "2026-01-05"},  # miss
+    {"ticker": "KXW6", "resolved_yes": "true",  "close_date": "2026-01-06"},  # HIT
+]
+
+
+@pytest.fixture()
+def wf_runner(tmp_path):
+    sig_path = str(tmp_path / "wf_signals.csv")
+    res_path = str(tmp_path / "wf_resolutions.csv")
+    _write_csv(sig_path, WF_SIGNALS, WF_SIGNAL_FIELDS)
+    _write_csv(res_path, WF_RESOLUTIONS, WF_RESOLUTION_FIELDS)
+    r = BacktestRunner()
+    r.load_signals(sig_path)
+    r.load_resolutions(res_path)
+    r.match_signals_to_resolutions()
+    return r
+
+
+def test_match_includes_close_date(wf_runner):
+    m = {r["ticker"]: r for r in wf_runner.matches}
+    assert m["KXW1"]["close_date"] == "2026-01-01"
+
+
+def test_walk_forward_insufficient_data_returns_empty(wf_runner):
+    """min_train >= number of dateable matches → no folds possible."""
+    folds = wf_runner.walk_forward(min_train=6)
+    assert folds == []
+
+
+def test_walk_forward_fold_count(wf_runner):
+    """6 matches, min_train=3 → folds for signals at index 3,4,5 = 3 folds."""
+    folds = wf_runner.walk_forward(min_train=3)
+    assert len(folds) == 3
+
+
+def test_walk_forward_chronological_order(wf_runner):
+    folds = wf_runner.walk_forward(min_train=3)
+    dates = [f["close_date"] for f in folds]
+    assert dates == sorted(dates)
+
+
+def test_walk_forward_expanding_train_grows(wf_runner):
+    """Expanding window (window=None): each fold's train set grows by one."""
+    folds = wf_runner.walk_forward(min_train=3)
+    assert [f["train_n"] for f in folds] == [3, 4, 5]
+
+
+def test_walk_forward_rolling_window_fixed_size(wf_runner):
+    """Rolling window=2: train set size is capped at 2 regardless of position."""
+    folds = wf_runner.walk_forward(min_train=3, window=2)
+    assert all(f["train_n"] == 2 for f in folds)
+
+
+def test_walk_forward_test_hit_matches_resolution(wf_runner):
+    """Fold testing KXW4 (index 3, 0-based) should record test_hit=True."""
+    folds = wf_runner.walk_forward(min_train=3)
+    assert folds[0]["test_ticker"] == "KXW4"
+    assert folds[0]["test_hit"] is True
+
+
+def test_walk_forward_cumulative_oos_hit_rate(wf_runner):
+    """Test points in order are KXW4(HIT), KXW5(miss), KXW6(HIT) → 2/3 cumulative."""
+    folds = wf_runner.walk_forward(min_train=3)
+    assert folds[-1]["cumulative_oos_n"] == 3
+    assert folds[-1]["cumulative_oos_hits"] == 2
+    assert abs(folds[-1]["cumulative_oos_hit_rate"] - (2 / 3)) < 0.001
+
+
+def test_walk_forward_excludes_matches_without_close_date(tmp_path):
+    sigs = WF_SIGNALS + [{"call_id": "w7", "ticker": "KXW7", "direction": "YES",
+                          "confidence": "MED", "flag_path": "EDGE",
+                          "time_horizon": "WEEKLY", "edge": "0.10", "result": ""}]
+    res = WF_RESOLUTIONS + [{"ticker": "KXW7", "resolved_yes": "true", "close_date": ""}]
+    sig_path = str(tmp_path / "sig.csv")
+    res_path = str(tmp_path / "res.csv")
+    _write_csv(sig_path, sigs, WF_SIGNAL_FIELDS)
+    _write_csv(res_path, res, WF_RESOLUTION_FIELDS)
+    r = BacktestRunner()
+    r.load_signals(sig_path)
+    r.load_resolutions(res_path)
+    r.match_signals_to_resolutions()
+    folds = r.walk_forward(min_train=3)
+    tickers_tested = {f["test_ticker"] for f in folds}
+    assert "KXW7" not in tickers_tested
+
+
+# ── walk_forward_summary ──────────────────────────────────────────────────────
+
+def test_walk_forward_summary_insufficient_data():
+    r = BacktestRunner()
+    summary = r.walk_forward_summary([])
+    assert summary["verdict"] == "INSUFFICIENT_DATA"
+    assert summary["oos_hit_rate"] is None
+
+
+def test_walk_forward_summary_too_few_folds(wf_runner):
+    """3 folds < 5 → can't draw a stability conclusion yet."""
+    folds = wf_runner.walk_forward(min_train=3)
+    summary = wf_runner.walk_forward_summary(folds)
+    assert summary["verdict"] == "TOO_FEW_FOLDS_TO_JUDGE"
+    assert summary["oos_n"] == 3
+
+
+def test_walk_forward_summary_in_sample_rate(wf_runner):
+    """In-sample rate over all 6 dateable matches: 4 hits / 6 = 0.667."""
+    folds = wf_runner.walk_forward(min_train=3)
+    summary = wf_runner.walk_forward_summary(folds)
+    assert abs(summary["in_sample_hit_rate"] - (4 / 6)) < 0.001
+
+
+def test_walk_forward_summary_stable_verdict():
+    """Enough folds (>=5), OOS rate close to in-sample rate → STABLE."""
+    r = BacktestRunner()
+    # 7 hits / 8 = 0.875 in-sample; OOS 0.8 is within the +/-0.15 band.
+    r.matches = [{"hit": i != 8, "close_date": f"2026-01-{i:02d}"} for i in range(1, 9)]
+    folds = [
+        {"cumulative_oos_n": 5, "cumulative_oos_hit_rate": 0.8},
+    ]
+    summary = r.walk_forward_summary(folds)
+    assert summary["verdict"] == "STABLE"
+
+
+def test_walk_forward_summary_degrades_verdict():
+    r = BacktestRunner()
+    r.matches = [{"hit": True, "close_date": f"2026-01-{i:02d}"} for i in range(1, 9)]
+    folds = [
+        {"cumulative_oos_n": 5, "cumulative_oos_hit_rate": 0.6},  # in-sample is 1.0 → delta -0.4
+    ]
+    summary = r.walk_forward_summary(folds)
+    assert summary["verdict"] == "DEGRADES_OUT_OF_SAMPLE"
+
+
+# ── report() with walk-forward section ────────────────────────────────────────
+
+def test_report_walk_forward_section(wf_runner, tmp_path):
+    out = str(tmp_path / "report.txt")
+    wf_runner.report(out, walk_forward=True, min_train=3)
+    with open(out, encoding="utf-8") as f:
+        content = f.read()
+    assert "WALK-FORWARD VALIDATION" in content
+    assert "Verdict:" in content
+
+
+def test_report_walk_forward_omitted_by_default(runner_with_data, tmp_path):
+    out = str(tmp_path / "report.txt")
+    runner_with_data.report(out)
+    with open(out, encoding="utf-8") as f:
+        content = f.read()
+    assert "WALK-FORWARD VALIDATION" not in content
