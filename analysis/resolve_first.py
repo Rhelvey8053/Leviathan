@@ -59,7 +59,7 @@ def load_snapshot(config: dict) -> list[dict]:
         return data if isinstance(data, list) else data.get("markets", [])
 
     print("[resolve_first] No snapshot found — fetching live markets...")
-    import kalshi as _kalshi
+    from core import kalshi as _kalshi
     markets = _kalshi.fetch_markets(config)
     if markets:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -286,7 +286,7 @@ def main(config: dict | None = None) -> None:
     filtered = scanner.filter_markets(markets_raw, config)
     print(f"[resolve_first] After filter_markets: {len(filtered)} markets")
 
-    scored = scanner.score_markets(filtered, config)
+    scored, _hp_filtered = scanner.score_markets(filtered, config)
     print(f"[resolve_first] After score_markets: {len(scored)} markets")
 
     now = datetime.now(timezone.utc)
