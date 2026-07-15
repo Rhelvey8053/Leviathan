@@ -203,8 +203,10 @@ def _force_tool(
     prior_content: list,
     tool: dict,
     tool_name: str,
+    temperature: float | None = None,
 ) -> Any:
     """Force a specific tool call after Claude reached end_turn without calling it."""
+    extra_kwargs: dict = {} if temperature is None else {"temperature": temperature}
     forced = client.messages.create(
         model=model,
         system=system,
@@ -221,6 +223,7 @@ def _force_tool(
         extra_headers={
             "anthropic-beta": "prompt-caching-2024-07-31",
         },
+        **extra_kwargs,
     )
     return forced
 
@@ -231,6 +234,7 @@ def score_via_api(
     system_prompt: str,
     user_prompt: str,
     config: dict,
+    temperature: float | None = None,
 ) -> tuple[list[dict], dict]:
     """
     Score markets via Anthropic Messages API with forced tool_choice structured output.
@@ -242,6 +246,10 @@ def score_via_api(
     Web search (web_search_20250305) is executed server-side by Anthropic.
     System prompt cache control applied (confirmed ~8k tokens, well above 1024 minimum).
     Retries 2 times with 5s / 10s backoff on APIError or APITimeoutError.
+
+    temperature is omitted from the API call (Anthropic default) unless
+    explicitly passed — production callers are unaffected. The eval harness
+    (analysis/eval_rescore.py) pins temperature=0 for reproducible re-scoring.
     """
     llm_cfg      = config.get("llm", {})
     model        = llm_cfg.get("model", "claude-sonnet-4-6")
@@ -255,6 +263,7 @@ def score_via_api(
     messages = [{"role": "user", "content": user_prompt}]
     client   = _make_client()
     last_exc: Exception | None = None
+    extra_kwargs: dict = {} if temperature is None else {"temperature": temperature}
 
     for attempt in range(3):
         try:
@@ -268,6 +277,7 @@ def score_via_api(
                 extra_headers={
                     "anthropic-beta": "web-search-2025-03-05,prompt-caching-2024-07-31",
                 },
+                **extra_kwargs,
             )
 
             block = _find_tool_use(response, "record_scores")
@@ -280,6 +290,7 @@ def score_via_api(
             forced = _force_tool(
                 client, model, system, messages,
                 response.content, RECORD_SCORES_TOOL, "record_scores",
+                temperature=temperature,
             )
             block = _find_tool_use(forced, "record_scores")
             if block is None:
