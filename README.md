@@ -10,7 +10,7 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 - **Phase:** Data accumulation — 8 resolved paper signals as of 2026-07-14 (next gate: n=20 before calibration analysis is meaningful)
 - **Mode:** Read-only — no trade execution. All signals are paper.
-- **Test suite:** 1545 tests, 0 failures
+- **Test suite:** 1579 tests, 0 failures
 - **Verified track record (2026-07-14):** win rate 38%, Brier score 0.0578 (EXCELLENT), hypothetical P&L -$1.66 at $10/contract. PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=8 is far below the n=20 gate, so read them as an integrity checkpoint, not a performance claim.
 
 ### Validation approach
@@ -61,7 +61,7 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `backlog/` | The backlog engine (`engine.py`) and weekly gate checker (`checker.py`) that maintain `backlog/backlog.json` and regenerate `BACKLOG.md`. |
 | `mcp_server/` | MCP server exposing the signal log, resolved track record, and market-data lookup as tools — reads `data/leviathan.db` directly, live. |
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, Task Scheduler registration. |
-| `tests/` | The full offline test suite (1,545 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
+| `tests/` | The full offline test suite (1,579 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), PowerBI exports, market snapshots, smart-money/whale caches, and the dashboard `.pbix`. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
@@ -98,6 +98,10 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `analysis/calibration.py` | Calibration analysis — win rate by flag_path, horizon, alignment, net_edge, Brier score |
 | `analysis/net_edge_analysis.py` | Net-of-spread edge distribution for flagged markets |
 | `analysis/pass_analysis.py` | Scanner precision — PASS rate by flag_path, horizon, repeat false-positives |
+| `analysis/eval.py` | Eval harness entry point — three-way Brier comparison (scorer/market/constant), calibration by decile |
+| `analysis/eval_grader.py` | Deterministic grader — Brier score, hit rate, calibration by decile. No model in the loop. |
+| `analysis/eval_dataset.py` | Freezes the resolved track record (via the MCP server's tool) as a versioned eval dataset |
+| `analysis/eval_rescore.py` | Separate re-score harness proving the scoring pipeline is reproducible — not part of the default eval run |
 | `backtesting/harness.py` | CSV-based backtest harness, including rolling walk-forward validation |
 | `backtesting/base_rates.py` | Empirical base-rate scaffold (fed by the backtest harness) |
 | `backlog/engine.py` | Backlog CLI — status summary, validated item add |
@@ -193,6 +197,8 @@ Registers a Task Scheduler job that fires every day at 7:00 AM. A separate job f
 | `analysis/net_edge_analysis.py` | Net-of-spread edge distribution — shows what % of flagged markets are actually tradeable | `python analysis/net_edge_analysis.py` |
 | `analysis/pass_analysis.py` | Scanner precision — PASS rate by flag path, time horizon, and repeat false-positive tickers | `python analysis/pass_analysis.py` |
 | `analysis/snapshot_markets.py` | Fetches and saves full Kalshi market catalog snapshot | `python analysis/snapshot_markets.py` |
+| `analysis/eval.py` | Eval harness — three-way Brier comparison (scorer/market/constant), calibration by decile, free/instant | `python analysis/eval.py` |
+| `analysis/eval_rescore.py` | Separate re-score reproducibility check — costs real API/CLI usage, not part of the default eval run | `python analysis/eval_rescore.py --check` |
 | `scripts/daily_smart_money.py` | Runs watchlist scan, saves report, commits and pushes | Scheduled via Task Scheduler |
 
 ---
@@ -224,6 +230,40 @@ Then ask things like *"how did my highest-scored markets resolve?"* in a new Cla
 
 ---
 
+## Eval Harness
+
+`analysis/eval.py` grades the scorer's original at-signal-time estimates against resolved ground truth — a deterministic, no-model-in-the-loop instrument for "is the edge real," not an impression.
+
+### Brier reconciliation
+
+The 0.0578 Brier score above looked suspiciously low at first glance: one row alone (a Cabinet-departure market, estimate 0.65, resolved NO) contributes 0.65² = 0.4225 in isolation. Reconciled by hand across all 8 resolved rows: **it's correct.** `core/logger.py get_brier_score()` computes `(our_estimate − actual outcome)²` averaged over the same 8-row resolved set used everywhere else in this README (verified algebraically and numerically identical to computing directly against the `outcome` YES/NO field). All 8 of these markets happened to resolve NO; seven of the eight estimates were already appropriately low, so their squared errors are near zero — diluting the one large miss down to a 0.058 average. `analysis/eval_grader.py`'s calibration-by-decile output makes this visible directly: the single market in the 0.6–0.7 estimate bucket has a 0% actual rate, i.e. the worst-calibrated bucket is the highest-conviction one.
+
+### Three-way comparison (n=8, 2026-07-14)
+
+`python analysis/eval.py` grades three things on the same frozen dataset — the scorer, the market price at signal time, and a constant 0.5 — because a Brier score alone means nothing without a benchmark:
+
+| Baseline | Brier | Hit rate |
+|---|---|---|
+| Scorer | 0.0578 | 88% |
+| Market price | 0.0022 | 100% |
+| Constant 0.5 | 0.2500 | 0% |
+
+**The market price beats the scorer on this sample.** All 8 markets were already priced low (0.5–10.5%) and correctly resolved NO — the market was already efficient here, and the scorer's one high-conviction contrarian call (0.65 vs a 10.5% market price) was wrong. At n=8 this is not evidence the scorer is worthless — it's a flag to watch as n grows toward the 20-signal calibration gate, not a conclusion.
+
+### Dataset and re-score harness
+
+- `analysis/eval_dataset.py` freezes the resolved track record through the MCP server's `get_resolved_track_record` tool (no second query path) into a versioned `analysis/eval_data/resolved_<date>.json`.
+- `analysis/eval_rescore.py` is a **separate, explicitly-invoked** harness that re-runs the current scoring prompt against the frozen markets to prove the scoring *pipeline* is reproducible — useful for comparing prompt version A vs. B on markets that haven't resolved yet. It is not part of the default `eval.py` run and is not free: `backend="api"` costs real Anthropic API usage; `backend="cli"` (the config default) runs a real Claude CLI subprocess. Re-scoring *already-resolved* markets is contaminated by live web search surfacing the actual outcome — re-scored estimates are never used as forecasts anywhere in this repo; `eval.py`'s comparison above uses the original at-signal-time estimates only.
+
+```bash
+python analysis/eval.py                    # three-way comparison, default, free, instant
+python analysis/eval_rescore.py --check    # separate: proves re-score reproducibility (costs real API/CLI usage)
+```
+
+**Live determinism check (2026-07-14, `backend="cli"`, the current config default):** re-scored the 8 frozen markets twice — **not identical**, as caveated above, since the CLI backend has no temperature control. Estimates shifted by a few points on most markets (e.g. 0.06 → 0.05), but one market swung sharply: the Cabinet-departure signal (original at-signal-time estimate 0.65, resolved NO) came back at 0.92 and 0.97 on re-score — *more* confidently wrong than the original call, not less. This is exactly the contamination risk documented above (re-scoring an already-resolved, publicly-known market) compounded by `backend="cli"`'s lack of reproducibility guarantees; it is not evidence about the scorer's quality and isn't used as one. Proving true reproducibility requires `backend="api"` with `temperature=0` (supported in code — `core/llm.py score_via_api(..., temperature=...)` — but untested live here due to an invalid `ANTHROPIC_API_KEY` in this environment).
+
+---
+
 ## Managing Subscribers
 
 ```bash
@@ -242,7 +282,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-1545 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+1579 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|

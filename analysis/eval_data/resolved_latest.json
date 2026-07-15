@@ -1,0 +1,63 @@
+{
+  "version": "2026-07-14",
+  "n": 8,
+  "source": "mcp_server.server:get_resolved_track_record",
+  "rows": [
+    {
+      "market_id": "KXCABLEAVE-26MAY22-26JUL",
+      "our_estimate": 0.65,
+      "market_price": 0.10500000000000001,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    },
+    {
+      "market_id": "KXCABLEAVE-26MAY22-26JUN",
+      "our_estimate": 0.15,
+      "market_price": 0.045,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    },
+    {
+      "market_id": "KXALBUMRELEASEDATEBEY-NEW-JUN01-26",
+      "our_estimate": 0.1,
+      "market_price": 0.025,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    },
+    {
+      "market_id": "KXTVSEASONRELEASETHELASTOFUS-26-JUL",
+      "our_estimate": 0.002,
+      "market_price": 0.005,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    },
+    {
+      "market_id": "KXZELENSKYPUTIN-29-26JUL",
+      "our_estimate": 0.07,
+      "market_price": 0.043,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    },
+    {
+      "market_id": "KXIMPEACHCABINET-26JUL01",
+      "our_estimate": 0.04,
+      "market_price": 0.016,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    },
+    {
+      "market_id": "KXUSAEXPANDTERRITORY-26JUL01",
+      "our_estimate": 0.025,
+      "market_price": 0.036,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    },
+    {
+      "market_id": "KXTAIWANLVL4-26JUL01",
+      "our_estimate": 0.015,
+      "market_price": 0.027,
+      "actual_outcome": "NO",
+      "actual_outcome_binary": 0
+    }
+  ]
+}
