@@ -108,6 +108,8 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `backlog/checker.py` | Weekly gate checker — evaluates locked-item triggers against live DB metrics |
 | `scripts/daily_smart_money.py` | Scheduled daily watchlist scan runner |
 | `scripts/setup_scheduler.ps1` | Registers daily Task Scheduler jobs |
+| `scripts/daily_resolve_first.py` | Scheduled daily near-dated-market selector — accelerates n toward the n=20 gate |
+| `scripts/setup_resolve_first_scheduler.ps1` | Registers the daily resolve-first Task Scheduler job |
 
 ---
 
@@ -178,7 +180,7 @@ Run once as Administrator:
 .\scripts\schedule_setup.ps1
 ```
 
-Registers a Task Scheduler job that fires every day at 7:00 AM. A separate job for the smart money watchlist scan can be registered from `scripts/setup_scheduler.ps1`.
+Registers a Task Scheduler job that fires every day at 7:00 AM. Two more scheduled jobs run separately: the smart money watchlist scan (`scripts/setup_scheduler.ps1`, 8:07 AM) and the resolve-first near-dated selector (`scripts/setup_resolve_first_scheduler.ps1`, 8:30 AM — after both prior jobs have refreshed the market snapshot).
 
 ---
 
@@ -200,6 +202,7 @@ Registers a Task Scheduler job that fires every day at 7:00 AM. A separate job f
 | `analysis/eval.py` | Eval harness — three-way Brier comparison (scorer/market/constant), calibration by decile, free/instant | `python analysis/eval.py` |
 | `analysis/eval_rescore.py` | Separate re-score reproducibility check — costs real API/CLI usage, not part of the default eval run | `python analysis/eval_rescore.py --check` |
 | `scripts/daily_smart_money.py` | Runs watchlist scan, saves report, commits and pushes | Scheduled via Task Scheduler |
+| `scripts/daily_resolve_first.py` | Selects near-dated (≤14d), two-sided-book markets spread across price bands and logs them so they resolve fast | Scheduled via Task Scheduler |
 
 ---
 

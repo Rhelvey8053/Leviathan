@@ -360,5 +360,57 @@ class TestSelectNearDatedNoBidAsk(unittest.TestCase):
         self.assertEqual(len(selected), 0)
 
 
+class TestMainIntegration(unittest.TestCase):
+    """
+    Regression test for main()'s scanner.score_markets() call — that
+    function returns (sorted_markets, high_price_filtered_count), a tuple,
+    not a bare list. main() previously did `scored = scanner.score_markets(...)`
+    without unpacking, which crashed with AttributeError the first time
+    main() was ever actually run (resolve_first.py had never been executed
+    end-to-end before it was wired into the daily scheduler).
+    """
+
+    def setUp(self):
+        _clear_signals()
+
+    def test_main_runs_end_to_end_without_crashing(self):
+        import analysis.resolve_first as rf
+
+        candidate = _market("KXMAININTEGRATION", mid=0.30, days=5)
+
+        with patch.object(rf, "backup_db"), \
+             patch.object(rf, "load_snapshot", return_value=[{"ticker": "raw"}]), \
+             patch("core.scanner.filter_markets", return_value=[candidate]), \
+             patch("core.scanner.score_markets", return_value=([candidate], 0)):
+            rf.main({"scoring": {"resolve_first_max_days": 14, "resolve_first_dedup_days": 7}})
+
+        rows = _logger_mod.get_signal_log(limit=10, ticker="KXMAININTEGRATION")
+        self.assertEqual(len(rows), 1)
+
+
+class TestLoadSnapshotFallback(unittest.TestCase):
+    """
+    load_snapshot() falls back to a live Kalshi fetch when no snapshot file
+    exists. Regression test for a stale `import kalshi` (pre-core/ package
+    reorg) that would have raised ModuleNotFoundError the first time this
+    branch actually ran.
+    """
+
+    def test_fallback_imports_core_kalshi_and_saves_snapshot(self):
+        import analysis.resolve_first as rf
+
+        fake_markets = [{"ticker": "KXFALLBACK", "title": "T"}]
+        with tempfile.TemporaryDirectory() as tmp_snap_dir, \
+             patch.object(rf, "SNAPSHOT_DIR", Path(tmp_snap_dir)), \
+             patch("core.kalshi.fetch_markets", return_value=fake_markets) as mock_fetch:
+            result = rf.load_snapshot({"markets": {}})
+
+            self.assertEqual(result, fake_markets)
+            mock_fetch.assert_called_once()
+            # A snapshot file must be written so subsequent runs don't hit the network again.
+            saved = list(Path(tmp_snap_dir).glob("markets_*.json"))
+            self.assertEqual(len(saved), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
