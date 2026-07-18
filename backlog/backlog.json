@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-07-14",
+  "updated": "2026-07-18",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -420,6 +420,19 @@
       "depends_on": [],
       "action": "Show top 5 unplaced signals sorted by urgency in daily report",
       "notes": ""
+    },
+    {
+      "id": "gate-unlock-notifier",
+      "title": "Gate Unlock Notifier",
+      "area": "reporting",
+      "priority": 3,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path.",
+      "notes": "Deterministic notifier only -- forms no opinions, changes no thresholds. resolved_count_per_wallet_max stays not-measurable until per-wallet-track-record ships."
     }
   ]
 }

@@ -2,6 +2,79 @@
 
 ---
 
+## 2026-07-18 — Gate Unlock Notifier
+
+**Goal:** a bounded, deterministic notifier — not an agent. It forms no opinions,
+changes no threshold, and takes no action beyond sending one batched email when
+a BACKLOG.md gate transitions locked/unknown -> unlocked. Reuses
+`core.report.send_report` as-is; computes no new metric (a gate whose metric
+isn't already computed by an existing `core/logger.py` function is classified
+"not yet measurable," full stop).
+
+Added `scripts/gate_notifier.py` (parser + known-metric registry + fire-once
+state machine + email composition, all in one file — matches the existing
+`scripts/position_reconciliation.py` precedent of testing logic directly out
+of a `scripts/` module rather than splitting a separate library module) and
+`scripts/setup_gate_notifier_scheduler.ps1`. State persists in the git-ignored
+`data/gate_state.json`.
+
+**Gate parsing:** a fixed grammar (`METRIC OP NUMBER`, regex-based — no
+`eval()`/`exec()` on anything pulled from the markdown) with a known-metric
+registry. A Locked-table row whose Gate cell doesn't match the grammar fails
+the run loudly (`GateParseError`, non-zero exit), rather than being silently
+dropped.
+
+**Dependency gates (Blocked table, PART A.5):** deferred from v1. Several
+Blocked rows depend on multiple comma-separated IDs (e.g.
+`sample-size-gates, brier-tracking`), which needs AND-logic across each ID's
+Done-table membership — real complexity beyond this notifier's core
+single-metric-gate pattern. v1 reports Blocked rows as "dependency-tracked
+(not evaluated in v1)" rather than half-building evaluation for them.
+
+### Gate snapshot at build time (2026-07-18, live DB)
+
+| Gate ID | Status | Metric | Value | Threshold |
+|---|---|---|---:|---|
+| brier-tracking | locked | resolved_count | 8 | >= 25 |
+| confluence-detection | locked | resolved_count | 8 | >= 25 |
+| per-heuristic-scorecard | locked | resolved_count_per_category_max | 7 | >= 15 |
+| per-wallet-track-record | **not yet measurable** | resolved_count_per_wallet_max | — | >= 10 |
+| calibration-curve | locked | resolved_count | 8 | >= 50 |
+| edge-decay-analysis | locked | resolved_count | 8 | >= 30 |
+| heuristic-sunsetting | locked | resolved_count_per_category_max | 7 | >= 15 |
+| skill-vs-luck-weighting | **not yet measurable** | resolved_count_per_wallet_max | — | >= 10 |
+| slippage-tracking | locked | fills_count | 7 | >= 20 |
+
+**No threshold, sample size, or gate was changed by building this.** Every row
+above is the existing BACKLOG.md gate, evaluated as configured.
+`resolved_count_per_wallet_max` is intentionally not-measurable — no
+`core/logger.py` function computes per-wallet resolved counts today
+(`per-wallet-track-record`, the item that would ship one, is itself locked) —
+and it will stay that way, correctly, until that ships.
+
+Moved `gate-unlock-notifier` to Done in BACKLOG.md (it didn't previously
+exist as a Ready item; added and completed in the same pass).
+
+24 new tests (grammar parsing, malformed-row loud failure, metric mapping,
+UNKNOWN-never-fires, fire-once across two runs, unknown->unlocked transition
+via a simulated registry update, send-failure state-rollback safety,
+dry-run repeatability). Full suite: 1614 passed, 13 subtests passed.
+
+### Top 3 next steps
+
+1. Once `per-wallet-track-record` ships a per-wallet resolved-count function,
+   add its key to `KNOWN_METRICS` in `scripts/gate_notifier.py` — the next run
+   after that will pick up `resolved_count_per_wallet_max` automatically
+   (unknown -> unlocked is a valid notifying transition, proven by test).
+   Confirm this path when that item ships.
+2. Decide whether dependency gates (Blocked table) are worth wiring given they
+   were deferred in v1 — needs AND-logic across comma-separated Done-table IDs.
+3. Keep gate-parsing tolerant of BACKLOG.md format edits, or move gates to a
+   small structured gates source that BACKLOG.md renders from, if the markdown
+   parse proves brittle over time.
+
+---
+
 ## 2026-07-18 — Smart-Money Discovery Funnel Diagnostic
 
 **Goal:** instrumentation only — figure out *why* the winning-trader discovery gate

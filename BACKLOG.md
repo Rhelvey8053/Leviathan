@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-07-14 | Metrics: resolved=11, fills=7
+Last updated: 2026-07-18 | Metrics: resolved=11, fills=7
 
 ## Ready (0)
 | Priority | ID | Action | Area |
@@ -25,7 +25,7 @@ Last updated: 2026-07-14 | Metrics: resolved=11, fills=7
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (13)
+## Done (14)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
@@ -33,6 +33,7 @@ Last updated: 2026-07-14 | Metrics: resolved=11, fills=7
 | 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
+| 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |
