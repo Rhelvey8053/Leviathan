@@ -1540,6 +1540,54 @@ def test_smart_money_largest_positions_capped_at_8():
     assert count <= 8, f"Expected at most 8 rows, got {count}"
 
 
+# ─── show-detail-fix: show_detail decoupled from scanner qualifying count ────
+
+def test_compile_report_shows_smart_money_detail_with_zero_qualifying_signals():
+    """
+    Regression: previously show_detail=len(qualifying) > 0, so a scanner dry
+    spell (no signals passed to compile_report at all -> qualifying=0) hid
+    smart-money trader detail even when the smart-money scan itself found
+    real cross-references. Detail must now appear based on kalshi_signals.
+    """
+    smart_money_signals = [{
+        "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
+        "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
+        "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
+    }]
+    smart_money_result = _sm_result(kalshi_signals=smart_money_signals)
+
+    body = report.compile_report(
+        [], [],  # zero scanner signals this run -> qualifying would be 0
+        _EMPTY_STATS, _run_meta(), _CFG,
+        smart_money_result=smart_money_result,
+    )
+    assert "Per-Trader Cross-References" in body
+
+
+def test_compile_report_hides_smart_money_detail_with_no_kalshi_signals():
+    """
+    The converse: even with scanner signals present this run, trader detail
+    must stay hidden when the smart-money scan itself has no kalshi_signals
+    — show_detail is about smart-money data, not the scanner.
+    """
+    s = _sig(ticker="KXQUALIFYING-01", confidence="HIGH")
+    smart_money_result = _sm_result(kalshi_signals=[])
+
+    body = report.compile_report(
+        [s], [],
+        _EMPTY_STATS, _run_meta(), _CFG,
+        new_signals=[s], repeat_signals=[],
+        smart_money_result=smart_money_result,
+    )
+    assert "Per-Trader Cross-References" not in body
+
+
+def test_compile_report_smart_money_result_none_does_not_crash():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  smart_money_result=None)
+    assert "No smart money data available this run." in body
+
+
 # ─── Goal 3e: logger resolution helpers ──────────────────────────────────────
 
 import sqlite3

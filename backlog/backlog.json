@@ -445,7 +445,7 @@
       "depends_on": [],
       "action": "Decouple show_detail in compile_report from the scanner qualifying count; gate it on whether smart-money data itself has signals, so trader detail stops silently vanishing during signal dry spells.",
       "notes": "core/report.py:1159 currently passes show_detail=len(qualifying) > 0 to _smart_money_section -- ties smart-money detail visibility to an unrelated scanner metric.",
-      "status": "ready"
+      "status": "done"
     },
     {
       "id": "discovery-funnel-diagnostic",

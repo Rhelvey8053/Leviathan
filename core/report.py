@@ -1156,7 +1156,12 @@ def compile_report(
     out.append("")
 
     # ── Smart money watchlist ─────────────────────────────────────────────────
-    out.extend(_smart_money_section(smart_money_result, show_detail=len(qualifying) > 0))
+    # show_detail must reflect whether the smart-money scan itself found
+    # anything (kalshi_signals) — NOT the scanner's unrelated qualifying
+    # count, which used to hide trader detail during scanner dry spells
+    # even when smart money had real cross-references to show.
+    _sm_has_signals = bool((smart_money_result or {}).get("kalshi_signals"))
+    out.extend(_smart_money_section(smart_money_result, show_detail=_sm_has_signals))
 
     # ── Whale activity ────────────────────────────────────────────────────
     out.append(_rule("="))
