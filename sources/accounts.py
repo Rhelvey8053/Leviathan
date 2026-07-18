@@ -145,13 +145,26 @@ def _is_coinflip(title: str) -> bool:
     return any(p in t for p in _COINFLIP_PATTERNS)
 
 
-def _is_winner(stats: dict, config: dict) -> bool:
-    """
-    Returns True only if the wallet has a verified forecasting track record.
+#: Gate evaluation order for _classify_wallet, ending in the terminal "PASS"
+#: state. Used both to attribute a wallet's death stage and, by index
+#: comparison, to determine whether a wallet reached/survived any given gate.
+GATE_ORDER = ["resolved_count", "win_rate", "position_count", "pct_pnl", "cash_pnl", "PASS"]
 
-    All qualifying thresholds are applied to RESOLVED positions only.
-    avg_pct_pnl and total_cash_pnl across open positions are ignored — they
-    measure unrealised gains (survivorship bias), not verified skill.
+
+def _classify_wallet(stats: dict, config: dict) -> str:
+    """
+    Returns the name of the first gate a wallet fails, in GATE_ORDER, or
+    "PASS" if it clears every gate. _is_winner is defined in terms of this
+    (== "PASS"); the diagnostic funnel (diagnose_discovery) uses the same
+    classification so the two can never silently disagree.
+
+    DIAGNOSTIC-ONLY DECOMPOSITION: the original gate 2 was a single combined
+    `position_count AND pct_pnl AND cash_pnl` boolean. It is decomposed here
+    into three ordered checks (position_count -> pct_pnl -> cash_pnl) so a
+    failing wallet can be attributed to exactly one of the three. An AND is
+    order-independent for the final boolean, so this decomposition does NOT
+    change PASS/FAIL — only the attributed "reason" depends on the order,
+    which is defined explicitly here.
 
     Config keys read:
       accounts.min_resolved_count  — floor on resolved positions (default 10)
@@ -162,24 +175,43 @@ def _is_winner(stats: dict, config: dict) -> bool:
                                       $25 is trivially achievable on luck alone)
     """
     cfg = config.get("accounts", {})
-    min_resolved = cfg.get("min_resolved_count", 10)
-    min_win_rate = cfg.get("min_win_rate", 55.0)
+    min_resolved  = cfg.get("min_resolved_count", 10)
+    min_win_rate  = cfg.get("min_win_rate", 55.0)
+    min_positions = cfg.get("min_positions", 5)
+    min_pct_pnl   = cfg.get("min_pct_pnl", 10.0)
+    min_cash_pnl  = cfg.get("min_cash_pnl", 100.0)
 
     # Gate 1: must have a verified track record on resolved, non-coinflip markets
     if stats["resolved_count"] < min_resolved:
-        return False
+        return "resolved_count"
     if stats["win_rate"] is None or stats["win_rate"] < min_win_rate:
-        return False
+        return "win_rate"
 
-    # Gate 2: resolved metrics only (not open-position unrealised P&L)
+    # Gate 2 (decomposed): resolved metrics only (not open-position unrealised P&L)
     resolved_avg_pct = stats.get("resolved_avg_pct_pnl")
     resolved_cash    = stats.get("resolved_cash_pnl", 0.0) or 0.0
 
-    return (
-        stats["position_count"] >= cfg.get("min_positions", 5)
-        and (resolved_avg_pct is not None and resolved_avg_pct >= cfg.get("min_pct_pnl", 10.0))
-        and resolved_cash >= cfg.get("min_cash_pnl", 100.0)
-    )
+    if stats["position_count"] < min_positions:
+        return "position_count"
+    if resolved_avg_pct is None or resolved_avg_pct < min_pct_pnl:
+        return "pct_pnl"
+    if resolved_cash < min_cash_pnl:
+        return "cash_pnl"
+
+    return "PASS"
+
+
+def _is_winner(stats: dict, config: dict) -> bool:
+    """
+    Returns True only if the wallet has a verified forecasting track record.
+
+    All qualifying thresholds are applied to RESOLVED positions only.
+    avg_pct_pnl and total_cash_pnl across open positions are ignored — they
+    measure unrealised gains (survivorship bias), not verified skill.
+
+    See _classify_wallet for the gate definitions and config keys read.
+    """
+    return _classify_wallet(stats, config) == "PASS"
 
 
 # ── Discovery ─────────────────────────────────────────────────────────────────
@@ -233,6 +265,169 @@ def discover_winners(config: dict) -> list[dict]:
         reverse=True,
     )
     return winners[:max_wallets]
+
+
+# ── Discovery diagnostics ─────────────────────────────────────────────────────
+# Instrumentation only. Does NOT change any threshold, sample size, or gate,
+# and does NOT touch winning_accounts.json — it exists to answer whether the
+# discovery gate finds zero winners because the sample is mis-specified
+# (wallets die at min_resolved_count before skill is ever evaluated) or
+# because sustained forecasting skill is genuinely rare in this pool.
+
+#: Maps each of the four numeric gates PART C tracks to its stats dict key.
+#: position_count is deliberately excluded — see the goal spec.
+_NUMERIC_GATE_METRIC_KEY = {
+    "resolved_count": "resolved_count",
+    "win_rate":       "win_rate",
+    "pct_pnl":        "resolved_avg_pct_pnl",
+    "cash_pnl":       "resolved_cash_pnl",
+}
+
+
+def _percentile(sorted_values: list[float], p: float) -> float:
+    """Linear-interpolation percentile over an already-sorted list."""
+    k = (len(sorted_values) - 1) * p
+    f = int(k)
+    c = min(f + 1, len(sorted_values) - 1)
+    if f == c:
+        return sorted_values[f]
+    return sorted_values[f] + (sorted_values[c] - sorted_values[f]) * (k - f)
+
+
+def _distribution(values: list) -> dict:
+    """
+    min/median/p90/max over the non-None values in `values`. None entries
+    (e.g. win_rate for a wallet with 0 resolved positions) are excluded and
+    counted separately rather than crashing the calculation.
+    """
+    excluded = sum(1 for v in values if v is None)
+    clean = sorted(v for v in values if v is not None)
+    if not clean:
+        return {"n": 0, "excluded": excluded, "min": None, "median": None, "p90": None, "max": None}
+    return {
+        "n":       len(clean),
+        "excluded": excluded,
+        "min":     clean[0],
+        "median":  _percentile(clean, 0.5),
+        "p90":     _percentile(clean, 0.9),
+        "max":     clean[-1],
+    }
+
+
+def diagnose_discovery(config: dict) -> dict:
+    """
+    Runs the discover_winners funnel once (single fetch pass — each wallet's
+    positions are fetched exactly once), counting survivors at every stage
+    and capturing the distribution of each of the four numeric gates' metric
+    among wallets that reached that gate.
+
+    Promotes no wallet, writes nothing to winning_accounts.json, and changes
+    no threshold. Read-only instrumentation over the exact production gate
+    (_classify_wallet), so its PASS count always agrees with _is_winner.
+    """
+    cfg = config.get("accounts", {})
+    sample_size = cfg.get("discovery_sample_size", 300)
+
+    trades = fetch_recent_trades(sample_size)
+    n_trades = len(trades)
+
+    wallets = list({t["proxyWallet"] for t in trades if t.get("proxyWallet")})
+    n_wallets = len(wallets)
+
+    n_positions_returned = 0
+    classifications: list[tuple[str, dict, str]] = []  # (address, stats, classification)
+
+    for address in wallets:
+        positions = fetch_user_positions(address)  # single fetch pass — never re-fetched
+        if positions:
+            n_positions_returned += 1
+        stats = _score_wallet(positions)
+        if stats is None:
+            continue
+        classification = _classify_wallet(stats, config)
+        classifications.append((address, stats, classification))
+
+    n_scored = len(classifications)
+    n_resolved_ge_1 = sum(1 for _, s, _ in classifications if s["resolved_count"] >= 1)
+
+    gate_index = {g: i for i, g in enumerate(GATE_ORDER)}
+
+    def _survived(gate: str) -> int:
+        """Count of wallets whose classification is strictly past this gate."""
+        return sum(1 for _, _, c in classifications if gate_index[c] > gate_index[gate])
+
+    gate_survivors = {g: _survived(g) for g in GATE_ORDER[:-1]}  # exclude "PASS" itself
+
+    funnel = [
+        ("0. trades fetched",                                              n_trades),
+        ("1. unique wallets",                                              n_wallets),
+        ("2. positions returned",                                         n_positions_returned),
+        ("3. scored",                                                     n_scored),
+        ("4. resolved_count >= 1",                                        n_resolved_ge_1),
+        (f"5. gate resolved_count>=min ({cfg.get('min_resolved_count', 10)})",  gate_survivors["resolved_count"]),
+        (f"6. gate win_rate>=min ({cfg.get('min_win_rate', 55.0)})",            gate_survivors["win_rate"]),
+        (f"7. gate position_count>=min ({cfg.get('min_positions', 5)})",       gate_survivors["position_count"]),
+        (f"8. gate pct_pnl>=min ({cfg.get('min_pct_pnl', 10.0)})",             gate_survivors["pct_pnl"]),
+        (f"9. gate cash_pnl>=min ({cfg.get('min_cash_pnl', 100.0)}) == WINNERS", gate_survivors["cash_pnl"]),
+    ]
+
+    def _reached(gate: str) -> list[tuple[dict, str]]:
+        """Wallets evaluated at this gate — survived everything strictly before it."""
+        return [(s, c) for _, s, c in classifications if gate_index[c] >= gate_index[gate]]
+
+    distributions = {}
+    for gate, metric_key in _NUMERIC_GATE_METRIC_KEY.items():
+        population = _reached(gate)
+        values = [s.get(metric_key) for s, _ in population]
+        dist = _distribution(values)
+        n_reached = len(population)
+        n_passed = sum(1 for _, c in population if gate_index[c] > gate_index[gate])
+        dist["n_reached"] = n_reached
+        dist["pct_passing"] = round(n_passed / n_reached * 100, 1) if n_reached else None
+        distributions[gate] = dist
+
+    return {
+        "n_trades_requested": sample_size,
+        "n_trades_fetched":   n_trades,
+        "funnel":             funnel,
+        "distributions":      distributions,
+        "n_winners":          gate_survivors["cash_pnl"],
+    }
+
+
+def format_diagnostic_report(result: dict) -> str:
+    """Formats diagnose_discovery()'s result as a printable funnel + distribution report."""
+    lines = []
+    lines.append("=" * 92)
+    lines.append("SMART MONEY DISCOVERY FUNNEL DIAGNOSTIC")
+    lines.append("=" * 92)
+    lines.append("")
+    lines.append(f"Sample requested: {result['n_trades_requested']}  |  "
+                  f"Sample actually fetched: {result['n_trades_fetched']}")
+    lines.append("")
+    lines.append(f"  {'Stage':<50} {'Survivors':>10} {'% of prior':>11}")
+    lines.append(f"  {'-'*50} {'-'*10} {'-'*11}")
+    prior = None
+    for label, count in result["funnel"]:
+        pct = f"{count / prior * 100:.1f}%" if prior else "--"
+        lines.append(f"  {label:<50} {count:>10} {pct:>11}")
+        prior = count
+    lines.append("")
+    lines.append(f"WINNERS: {result['n_winners']}")
+    lines.append("")
+    lines.append("GATING METRIC DISTRIBUTIONS (among wallets that reached each gate)")
+    lines.append(f"  {'Gate':<16} {'n reached':>9} {'excl(None)':>10} "
+                  f"{'min':>9} {'median':>9} {'p90':>9} {'max':>9} {'% passing':>10}")
+    for gate, d in result["distributions"].items():
+        def _f(v):
+            return f"{v:.2f}" if isinstance(v, (int, float)) else "--"
+        pct_s = f"{d['pct_passing']:.1f}%" if d["pct_passing"] is not None else "--"
+        lines.append(f"  {gate:<16} {d['n_reached']:>9} {d['excluded']:>10} "
+                      f"{_f(d['min']):>9} {_f(d['median']):>9} {_f(d['p90']):>9} "
+                      f"{_f(d['max']):>9} {pct_s:>10}")
+    lines.append("")
+    lines.append("=" * 92)
+    return "\n".join(lines)
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────

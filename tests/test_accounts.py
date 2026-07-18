@@ -12,7 +12,13 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from sources.accounts import _score_wallet, _is_winner, _is_coinflip
+from unittest.mock import patch
+
+from sources.accounts import (
+    _score_wallet, _is_winner, _is_coinflip, _classify_wallet,
+    _distribution, diagnose_discovery, format_diagnostic_report,
+    GATE_ORDER,
+)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -244,6 +250,174 @@ class TestCoinflipPatterns(unittest.TestCase):
                       "Will BTC reach $5M in 2027?",
                       "Will SpaceX raise $10M?"]:
             self.assertFalse(_is_coinflip(title), f"Dollar-amount false positive: {title}")
+
+
+# ── Discovery diagnostic (funnel/gate instrumentation) ────────────────────────
+
+def _stats(**over) -> dict:
+    """All-gates-passing baseline stats dict, with overrides."""
+    base = dict(resolved_count=20, win_rate=80.0, position_count=20,
+                resolved_avg_pct_pnl=50.0, resolved_cash_pnl=500.0)
+    base.update(over)
+    return base
+
+
+class TestClassifyWalletAttributesCorrectStage(unittest.TestCase):
+    """_classify_wallet attributes a wallet to exactly the gate it fails."""
+
+    def test_dies_at_resolved_count(self):
+        stats = _stats(resolved_count=9)
+        self.assertEqual(_classify_wallet(stats, _cfg()), "resolved_count")
+
+    def test_dies_at_win_rate(self):
+        stats = _stats(win_rate=54.9)
+        self.assertEqual(_classify_wallet(stats, _cfg()), "win_rate")
+
+    def test_dies_at_position_count(self):
+        stats = _stats(position_count=4)
+        self.assertEqual(_classify_wallet(stats, _cfg()), "position_count")
+
+    def test_dies_at_pct_pnl(self):
+        stats = _stats(resolved_avg_pct_pnl=9.9)
+        self.assertEqual(_classify_wallet(stats, _cfg()), "pct_pnl")
+
+    def test_dies_at_cash_pnl(self):
+        stats = _stats(resolved_cash_pnl=99.9)
+        self.assertEqual(_classify_wallet(stats, _cfg()), "cash_pnl")
+
+    def test_no_other_stage_flagged(self):
+        """A wallet dying at pct_pnl must not also register as dying elsewhere."""
+        stats = _stats(resolved_avg_pct_pnl=9.9)
+        result = _classify_wallet(stats, _cfg())
+        for other in ("resolved_count", "win_rate", "position_count", "cash_pnl"):
+            self.assertNotEqual(result, other)
+
+
+class TestDiagnosticAgreesWithIsWinner(unittest.TestCase):
+    """A wallet that passes every gate must be a WINNER in both, always."""
+
+    def test_full_pass_is_winner_and_classified_pass(self):
+        stats = _stats()
+        self.assertEqual(_classify_wallet(stats, _cfg()), "PASS")
+        self.assertTrue(_is_winner(stats, _cfg()))
+
+    def test_classify_and_is_winner_never_disagree(self):
+        """Across every boundary case, (classify == PASS) must equal is_winner()."""
+        cases = [
+            _stats(),
+            _stats(resolved_count=10), _stats(resolved_count=9),
+            _stats(win_rate=55.0), _stats(win_rate=54.9),
+            _stats(position_count=5), _stats(position_count=4),
+            _stats(resolved_avg_pct_pnl=10.0), _stats(resolved_avg_pct_pnl=9.9),
+            _stats(resolved_cash_pnl=100.0), _stats(resolved_cash_pnl=99.9),
+            dict(resolved_count=0, win_rate=None, position_count=3,
+                 resolved_avg_pct_pnl=None, resolved_cash_pnl=0.0),
+        ]
+        for stats in cases:
+            classified_pass = _classify_wallet(stats, _cfg()) == "PASS"
+            self.assertEqual(classified_pass, _is_winner(stats, _cfg()),
+                             f"Disagreement on {stats}")
+
+
+class TestIsWinnerRegressionBoundaryBattery(unittest.TestCase):
+    """
+    REGRESSION: _is_winner's boolean output for 13 synthetic stats dicts
+    spanning every gate boundary, captured from CURRENT (pre-diagnostic)
+    behavior. A silent change to gate order or logic must fail this test.
+    """
+
+    CASES = [
+        ("baseline_all_pass",                   _stats(),                                    True),
+        ("resolved_count_at_min",               _stats(resolved_count=10),                   True),
+        ("resolved_count_below_min",            _stats(resolved_count=9),                     False),
+        ("win_rate_at_min",                     _stats(win_rate=55.0),                        True),
+        ("win_rate_below_min",                  _stats(win_rate=54.9),                        False),
+        ("position_count_at_min",               _stats(position_count=5),                     True),
+        ("position_count_below_min",            _stats(position_count=4),                     False),
+        ("pct_pnl_at_min",                       _stats(resolved_avg_pct_pnl=10.0),           True),
+        ("pct_pnl_below_min",                    _stats(resolved_avg_pct_pnl=9.9),             False),
+        ("cash_pnl_at_min",                      _stats(resolved_cash_pnl=100.0),              True),
+        ("cash_pnl_below_min",                   _stats(resolved_cash_pnl=99.9),               False),
+        ("zero_resolved_none_winrate",           dict(resolved_count=0, win_rate=None, position_count=3,
+                                                       resolved_avg_pct_pnl=None, resolved_cash_pnl=0.0), False),
+        ("high_resolved_none_winrate_defensive", dict(resolved_count=15, win_rate=None, position_count=20,
+                                                       resolved_avg_pct_pnl=50.0, resolved_cash_pnl=500.0), False),
+    ]
+
+    def test_battery_matches_captured_expectations(self):
+        self.assertGreaterEqual(len(self.CASES), 12)
+        for name, stats, expected in self.CASES:
+            with self.subTest(name=name):
+                self.assertEqual(_is_winner(stats, _cfg()), expected,
+                                 f"{name}: expected {expected}")
+
+
+class TestDistributionHandlesNone(unittest.TestCase):
+    """_distribution excludes None (e.g. win_rate=None) without crashing."""
+
+    def test_none_excluded_and_counted(self):
+        dist = _distribution([50.0, None, 60.0, None, 70.0])
+        self.assertEqual(dist["excluded"], 2)
+        self.assertEqual(dist["n"], 3)
+        self.assertEqual(dist["min"], 50.0)
+        self.assertEqual(dist["max"], 70.0)
+
+    def test_all_none_does_not_crash(self):
+        dist = _distribution([None, None])
+        self.assertEqual(dist["n"], 0)
+        self.assertEqual(dist["excluded"], 2)
+        self.assertIsNone(dist["median"])
+
+    def test_empty_list_does_not_crash(self):
+        dist = _distribution([])
+        self.assertEqual(dist["n"], 0)
+        self.assertEqual(dist["excluded"], 0)
+
+
+class TestDiagnoseDiscoveryEndToEnd(unittest.TestCase):
+    """
+    Full diagnose_discovery() run against a mocked/stubbed fetch layer —
+    never the live API. Verifies the funnel table string contains every
+    stage label and the winner count matches manual computation.
+    """
+
+    def _fake_trades(self, *_args, **_kwargs):
+        return [
+            {"proxyWallet": "0xWIN"},   # will pass every gate
+            {"proxyWallet": "0xLOW"},   # will die at resolved_count
+            {"proxyWallet": "0xNONE"},  # fetch_user_positions returns []
+        ]
+
+    def _fake_positions(self, address, *_args, **_kwargs):
+        if address == "0xWIN":
+            return [_pos(f"Policy {i}", 80.0, 60.0, resolved=True) for i in range(12)]
+        if address == "0xLOW":
+            return [_pos(f"Policy {i}", 80.0, 60.0, resolved=True) for i in range(3)]
+        return []  # 0xNONE — no positions returned by the API
+
+    def test_end_to_end_with_stubbed_fetch(self):
+        config = _cfg()
+        config["accounts"]["discovery_sample_size"] = 300
+
+        with patch("sources.accounts.fetch_recent_trades", side_effect=self._fake_trades), \
+             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions):
+            result = diagnose_discovery(config)
+
+        self.assertEqual(result["n_trades_fetched"], 3)
+        self.assertEqual(result["n_winners"], 1)
+
+        report = format_diagnostic_report(result)
+        for label, _count in result["funnel"]:
+            self.assertIn(label, report)
+        self.assertIn("WINNERS: 1", report)
+
+    def test_single_fetch_pass_per_wallet(self):
+        """fetch_user_positions must be called exactly once per unique wallet."""
+        config = _cfg()
+        with patch("sources.accounts.fetch_recent_trades", side_effect=self._fake_trades), \
+             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions) as mock_pos:
+            diagnose_discovery(config)
+        self.assertEqual(mock_pos.call_count, 3)
 
 
 if __name__ == "__main__":

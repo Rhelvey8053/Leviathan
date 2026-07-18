@@ -1,9 +1,10 @@
 # Leviathan Backlog
-Last updated: 2026-07-14 | Metrics: resolved=11, fills=7
+Last updated: 2026-07-18 | Metrics: resolved=11, fills=7
 
-## Ready (0)
+## Ready (1)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 1 | show-detail-fix | Decouple show_detail in compile_report from the scanner qualifying count; gate it on whether smart-money data itself has signals, so trader detail stops silently vanishing during signal dry spells. | reporting |
 
 ## Locked (9)
 | Priority | ID | Gate | Area |
@@ -25,14 +26,16 @@ Last updated: 2026-07-14 | Metrics: resolved=11, fills=7
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (13)
+## Done (15)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
 | 1 | trade-reconciliation | Reconcile paper signals against actual Kalshi fills to confirm each signal has a corresponding real trade. | execution |
+| 2 | discovery-funnel-diagnostic | Per-stage drop-off counter + gating-metric distributions for discover_winners; diagnoses why the winner gate finds zero (sample sourcing vs. skill genuinely rare). No threshold/gate changes. Unblocks the locked per-wallet items. | smart-money |
 | 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
+| 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |

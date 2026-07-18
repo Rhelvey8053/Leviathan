@@ -8,6 +8,7 @@ runs.csv
 *.migrated
 data/winning_accounts.json
 data/watchlist_cache.json
+data/gate_state.json
 data/leviathan.db
 data/leviathan.db.bak*
 data/db_backups/*
