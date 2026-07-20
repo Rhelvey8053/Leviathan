@@ -10,7 +10,7 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 - **Phase:** Data accumulation — 8 resolved paper signals as of 2026-07-14 (next gate: n=20 before calibration analysis is meaningful)
 - **Mode:** Read-only — no trade execution. All signals are paper.
-- **Test suite:** 1579 tests, 0 failures
+- **Test suite:** 1617 tests, 0 failures
 - **Verified track record (2026-07-14):** win rate 38%, Brier score 0.0578 (EXCELLENT), hypothetical P&L -$1.66 at $10/contract. PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=8 is far below the n=20 gate, so read them as an integrity checkpoint, not a performance claim.
 
 ### Validation approach
@@ -61,8 +61,9 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `backlog/` | The backlog engine (`engine.py`) and weekly gate checker (`checker.py`) that maintain `backlog/backlog.json` and regenerate `BACKLOG.md`. |
 | `mcp_server/` | MCP server exposing the signal log, resolved track record, and market-data lookup as tools — reads `data/leviathan.db` directly, live. |
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, Task Scheduler registration. |
-| `tests/` | The full offline test suite (1,579 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
+| `tests/` | The full offline test suite (1,617 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), PowerBI exports, market snapshots, smart-money/whale caches, and the dashboard `.pbix`. |
+| `docs/` | Progress log (`PROGRESS.md`) and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
 ---
@@ -285,7 +286,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-1579 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+1617 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
 
 | Test file | What it covers |
 |---|---|
