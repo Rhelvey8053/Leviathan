@@ -625,6 +625,7 @@ def main():
         signal = {
             **cs,
             "title":           m.get("title", cs.get("title", "")),
+            "event_ticker":    m.get("event_ticker", ""),
             "whale_detected":  whale.get("whale_detected", False),
             "whale_direction": whale.get("whale_direction"),
             "whale_reversal":  m.get("whale_reversal", False),
@@ -727,6 +728,7 @@ def main():
                 signal = {
                     **cs,
                     "title":           m.get("title", cs.get("title", "")),
+                    "event_ticker":    m.get("event_ticker", ""),
                     "whale_detected":  whale.get("whale_detected", False),
                     "whale_direction": whale.get("whale_direction"),
                     "whale_reversal":  m.get("whale_reversal", False),

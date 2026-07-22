@@ -354,3 +354,36 @@ def fetch_market_history(config: dict, ticker: str, period_seconds: int = 86400)
         return []  # market exists but has no history yet (new/niche market types)
     resp.raise_for_status()
     return resp.json().get("history", [])
+
+
+def kalshi_market_url(event_ticker: str | None) -> str | None:
+    """
+    Returns a kalshi.com market-page URL for a given event_ticker, or None
+    if no confirmed-working URL pattern exists.
+
+    STATUS: NO CONFIRMED PATTERN — always returns None right now.
+
+    kalshi.com's market pages are a client-rendered Next.js app behind a
+    catch-all route (X-Matched-Path: /markets/[...slug]). Empirically
+    verified (2026-07-22) across 3 real event tickers plus a fabricated
+    one: https://kalshi.com/markets/{event_ticker} returns HTTP 200 with
+    no redirect for EVERY input tried, including the fake ticker —
+    identical status code, identical response headers, and near-identical
+    (~148KB) HTML body with no server-rendered market title or content for
+    either the real or fake case. The distinguishing "not found" state is
+    rendered client-side by JS after the page loads, which a plain HTTP
+    request cannot see. This means HTTP status/redirect-based resolve-
+    testing (the required proof method — see docs/PROGRESS.md) cannot
+    distinguish a real market page from a fabricated one, so no pattern is
+    considered confirmed. Mirrors sources/accounts.py's POLY_URL pattern
+    in spirit (a single URL-builder for one platform) but intentionally
+    withholds construction until a verifiable pattern exists — see
+    docs/PROGRESS.md for the full investigation and next-step options
+    (most likely: capture a slug at scan time, as accounts.py already does
+    for Polymarket via eventSlug, if Kalshi's API ever exposes one).
+
+    Never emits a guessed URL and never reintroduces the confirmed-404
+    kalshi.com/markets/{market_ticker} form. Callers must treat a None
+    return as "render the bare ticker, no href" — never href="".
+    """
+    return None

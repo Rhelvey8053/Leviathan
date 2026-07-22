@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-07-18",
+  "updated": "2026-07-22",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -458,6 +458,19 @@
       "depends_on": [],
       "action": "Per-stage drop-off counter + gating-metric distributions for discover_winners; diagnoses why the winner gate finds zero (sample sourcing vs. skill genuinely rare). No threshold/gate changes. Unblocks the locked per-wallet items.",
       "notes": "Shipped as sources.accounts.diagnose_discovery() / format_diagnostic_report() + scripts/diagnose_discovery.py. Real run found mass attrition is sample-sourcing-driven (median resolved_count=0 across scored wallets) compounded by a long-shot-betting subpopulation among the few that clear the resolved_count gate -- see docs/PROGRESS.md.",
+      "status": "done"
+    },
+    {
+      "id": "kalshi-event-ticker-capture",
+      "title": "Kalshi Event Ticker Capture",
+      "area": "data-quality",
+      "priority": 2,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern.",
+      "notes": "No URL pattern confirmed -- kalshi.com is a client-rendered SPA where a fabricated ticker returns an identical 200/no-redirect/near-identical-HTML response to a real one, so kalshi_market_url() always returns None until a verifiable pattern exists. event_ticker itself is persisted and round-trips correctly. See docs/PROGRESS.md 2026-07-22 for the full investigation.",
       "status": "done"
     }
   ]

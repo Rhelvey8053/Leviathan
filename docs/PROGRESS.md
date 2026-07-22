@@ -2,6 +2,112 @@
 
 ---
 
+## 2026-07-22 — Kalshi Event-Ticker Capture + Market-Link Investigation
+
+**Goal:** the signals table stored no link to the underlying Kalshi market —
+only a bare `ticker`. `event_ticker` is a native field on Kalshi's own raw
+market JSON (confirmed via live fetch — present on every market object
+returned by `/markets`), already read by the scanner's dedup functions
+(`core/scanner.py:126`, `:173`) but never persisted. This was a "surface a
+field that's already fetched but discarded" data fix — no scoring, edge,
+threshold, or filter changed — plus one genuinely new step: empirically
+confirming the real kalshi.com market-page URL pattern, since the naive
+`kalshi.com/markets/{market_ticker}` form is confirmed to 404.
+
+**PART A trace (stated before writing code):** the signal dict not built in
+`core/scanner.py` as the goal's scope line assumed — traced to **`main.py`**,
+in two places: first-pass construction at `main.py:625-654` and second-pass
+(low-confidence widen) at `main.py:723-753`, both `signal = {**cs, ...}`
+inside a loop over `flagged_markets` (the market dict, `m`, still has
+`event_ticker` in scope there — it's additive through the whole pipeline).
+Neither block copied `m.get("event_ticker")` into `signal`; that's the drop
+point. A third site, `analysis/resolve_first.py:170` (`log_selected`), builds
+its own signal dict from the same kind of market object with the identical
+gap. All three now thread `event_ticker` through.
+
+### Confirmed finding: NO URL pattern reliably resolves to a real market page
+
+Per PART C.5's explicit instruction, this is a STOP: `core.kalshi.kalshi_market_url()`
+always returns `None` — no link is shipped.
+
+Investigation (2026-07-22, live Kalshi + kalshi.com):
+1. Neither the Kalshi market object nor the event object exposes a slug or
+   canonical-URL field (event object fields: `available_on_brokers`,
+   `category`, `collateral_return_type`, `event_ticker`, `last_updated_ts`,
+   `mutually_exclusive`, `series_ticker`, `settlement_sources`, `strike_date`,
+   `strike_period`, `sub_title`, `title` — no URL/slug anywhere).
+2. `https://kalshi.com/markets/{event_ticker}` returns **HTTP 200, no
+   redirect to the homepage** for real markets — passing the narrow, literal
+   proof bar. But: constructing the identical URL for a **fabricated**
+   ticker (`ZZZZNOTAREALTICKER99999`) returns the **same** 200, no redirect,
+   near-identical (146-byte spread out of ~148KB) HTML body, and identical
+   response headers (`X-Matched-Path: /markets/[...slug]` — a Next.js
+   catch-all route matching literally any path). kalshi.com's market pages
+   are a client-rendered SPA; the actual market data (and any "not found"
+   state) loads via client-side JS after the initial HTML paint, which a
+   plain HTTP request cannot see. Status code and redirect target give
+   **zero signal** distinguishing a real market from a made-up one.
+3. Live output (`pytest tests/test_kalshi_url.py --network -v -s`):
+   ```
+   REAL  KXBAA-28JANDELIV               status=200 final=https://kalshi.com/markets/kxbaa-28jandeliv redirected_home=False body_len=147876
+   REAL  KXISRNORMCOUNT-27DEC31         status=200 final=https://kalshi.com/markets/kxisrnormcount-27dec31 redirected_home=False body_len=147888
+   FAKE  ZZZZNOTAREALTICKER99999        status=200 final=https://kalshi.com/markets/zzzznotarealticker99999 redirected_home=False body_len=148022
+   Body length spread real-vs-fake: 146 bytes (near-identical HTML regardless of ticker validity)
+   ```
+4. A Next-router RSC-header request (attempting to hit the same JSON data
+   endpoint the site's own client uses for hydration) was also tried as a
+   non-browser way to check page identity — returned an empty body for both
+   real and fake tickers, inconclusive. No headless browser was available in
+   this environment to render and inspect actual client-side content.
+
+**No threshold, sample size, scoring, or gate was changed.** `event_ticker`
+was already fetched at scan time (native Kalshi API field) and is merely
+persisted now. All rows written before this change (156 existing rows as of
+the goal's writing) fall back to the bare ticker with no href until
+re-scanned — `event_ticker` defaults to `''` via the existing idempotent
+`_add_col` migration pattern, and `kalshi_market_url` returns falsy for any
+empty/None/unresolvable input, so no dead link or `href=""` is ever emitted.
+
+`core/logger.py`'s separate `log_pass` INSERT (PASS-direction rows) was
+intentionally left untouched — it wasn't named in the goal's scope
+(only `log_signal` was), so PASS rows get the column's default `''` rather
+than a captured value; a future goal can extend this if a use case needs it.
+
+**Live pipeline verification:** a real `python main.py` run (2026-07-22) found
+0 new signals this run (1 repeat, correctly not re-logged — the existing
+7-day dedup skips `log_signal` entirely for repeats), so it didn't produce a
+fresh non-PASS row to inspect directly. Verified the actual wiring instead by
+replicating the exact `main.py:625-627` signal-construction line against a
+real market fetched live from Kalshi (`KXMVESPORTSMULTIGAMEEXTENDED-...`) and
+confirming its `event_ticker` persists through `logger.log_signal` unchanged
+— end-to-end with real data, independent of whether today's scan happened to
+produce a new signal.
+
+10 new tests (schema/migration, `log_signal` round-trip, `kalshi_market_url`
+behavior including a regression guard against ever reintroducing the
+confirmed-404 form, and one live `@pytest.mark.network` integration test —
+skipped by default so `pytest -q` stays fully offline, run explicitly with
+`--network`). Full suite: 1626 passed + 1 skipped by default (1627 passed
+with `--network`).
+
+### Top 3 next steps
+
+1. The email-render goal can now consume `event_ticker` (it's on every new
+   signal row) — but there is currently nothing to link to; that goal should
+   either render the bare ticker only, or wait on next step 3.
+2. Backfill `event_ticker` for historical rows only if a concrete use case
+   needs it — not required for new signals, which capture it going forward.
+3. If a market link is still wanted, the honest next step is what
+   `sources/accounts.py:112` already does for Polymarket: capture a slug (or
+   whatever field Kalshi's site itself uses to resolve pages client-side) at
+   scan time, directly from a source that's actually authoritative about
+   page identity — not derive one from the ticker and hope. This would
+   likely require inspecting kalshi.com's own client-side API calls (browser
+   devtools / a headless browser), which wasn't available in this
+   environment.
+
+---
+
 ## 2026-07-18 — Gate Unlock Notifier
 
 **Goal:** a bounded, deterministic notifier — not an agent. It forms no opinions,

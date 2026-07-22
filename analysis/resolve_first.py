@@ -170,6 +170,7 @@ def log_selected(markets: list[dict], run_id: str) -> int:
         signal = {
             "ticker":              m.get("ticker", ""),
             "title":               m.get("title", ""),
+            "event_ticker":        m.get("event_ticker", ""),
             "market_price":        mid,
             "our_estimate":        m.get("base_rate"),
             "edge":                m.get("raw_edge"),
