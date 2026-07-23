@@ -1,11 +1,14 @@
+import html as _html
 import os
 import smtplib
 import textwrap
 from datetime import datetime, date, timezone, timedelta
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 from analysis.smart_money_scan import _is_sports_title
 from core.fees import kalshi_fee
+from core.kalshi import kalshi_market_url
 
 load_dotenv()
 
@@ -800,8 +803,66 @@ def _smart_money_section(result: dict | None, show_detail: bool = True) -> list[
     return out
 
 
-def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
-    """Compact executive summary of the top-N signals sorted by quality score."""
+# ── HTML rendering helpers ────────────────────────────────────────────────────
+
+def _esc(v) -> str:
+    """HTML-escapes any value for safe embedding (titles/tickers come from
+    Kalshi market data and may contain &, <, >, quotes)."""
+    return _html.escape(str(v if v is not None else ""), quote=True)
+
+
+def _html_close_date(s: dict) -> str:
+    """
+    Formats a signal's close date for the HTML pick card, e.g. "closes Jan 1
+    2027". Parses the SAME fields (close_time/expiration_time) with the same
+    fromisoformat logic as _close_and_urgency — only the final string style
+    differs (matching leviathan_report_email_v2.html's cosmetic format),
+    never the underlying date value.
+    """
+    close_raw = s.get("close_time") or s.get("expiration_time", "")
+    if not close_raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(close_raw.replace("Z", "+00:00"))
+        return dt.strftime("closes %b %-d %Y") if os.name != "nt" else dt.strftime("closes %b %d %Y").replace(" 0", " ")
+    except Exception:
+        return ""
+
+
+def _kalshi_link_or_bare(ticker: str, event_ticker: str, label: str | None = None) -> str:
+    """
+    Returns an '<a href="...">display</a>' Kalshi link if event_ticker
+    resolves via kalshi_market_url, otherwise the bare display text with
+    NO href. Never emits href="" and never builds a URL itself —
+    kalshi_market_url is goal_1's single confirmed-pattern source of truth
+    (it currently always returns None, so every row renders as bare ticker
+    text until a pattern is confirmed).
+
+    `label`, if given, is treated as ALREADY-SAFE markup (e.g. a fixed
+    string with an intentional "&nbsp;" entity) and is NOT re-escaped —
+    callers must pre-escape any dynamic text (like a ticker) themselves
+    before embedding it in `label`. When `label` is omitted, the bare
+    `ticker` is escaped here since it's raw, unescaped data.
+    """
+    display = label if label is not None else _esc(ticker)
+    url = kalshi_market_url(event_ticker)
+    if not url:
+        return display
+    return f'<a href="{_esc(url)}" class="klink" style="color:#84b6fb;text-decoration:none;">{display}</a>'
+
+
+def _rank_top_picks(signals: list[dict], n: int = 3) -> list[dict]:
+    """
+    Computes the top-N signals by quality score and every per-pick value
+    the report needs to display them — ranking, confidence/direction/
+    horizon/flag/strength, ticker/close/urgency/repeat labels, and the
+    market/est/edge/EV/Kelly stat row.
+
+    This is the SINGLE source of these values: both the text renderer
+    (_top_picks) and the HTML renderer (render_html) call this function
+    and format its output differently — they can never compute different
+    numbers for the same run because there is only one computation.
+    """
     if not signals:
         return []
     ranked = sorted(signals, key=lambda s: (
@@ -810,55 +871,111 @@ def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
         -(abs(float(s.get("edge") or 0))),
     ))[:n]
 
-    out = []
-    out.append(_rule("="))
-    out.append(f"TOP PICKS  (best {min(n, len(ranked))} signals by conviction + edge)")
-    out.append(_rule("-"))
+    picks = []
     for i, s in enumerate(ranked, 1):
         conf      = s.get("confidence", "LOW")
         direction = s.get("direction", "")
         horizon   = HORIZON_LABEL.get(s.get("time_horizon", "MONTHLY"), s.get("time_horizon", ""))
         fp        = s.get("flag_path", "")
         strength  = _signal_strength(s)
-        str_l     = f"  ★×{strength}" if strength >= 2 else ""
-        fp_l      = f"  [{fp}]" if fp else ""
 
         ticker    = s.get("ticker", "")
         close_fmt, urgency = _close_and_urgency(s)
 
-        mkt_p   = _pct(s.get("market_price"))
-        est_p   = _pct(s.get("our_estimate"))
+        market_price = s.get("market_price")
+        our_estimate = s.get("our_estimate")
         edge_v  = float(s.get("edge") or 0)
-        kelly   = _kelly_fraction(direction, s.get("market_price"), s.get("our_estimate"))
-        kelly_s = f"  Kelly(1/4): {kelly[1]*100:.1f}%" if kelly else ""
-        ev_s    = _ev_per_contract(direction, s.get("market_price"), s.get("our_estimate"))
-        ev_l    = f"  EV: {ev_s}" if ev_s else ""
+        kelly   = _kelly_fraction(direction, market_price, our_estimate)
+        ev_s    = _ev_per_contract(direction, market_price, our_estimate)
 
         rep_cnt = s.get("repeat_count", 0) or 0
-        rep_l   = f"  [REPEAT x{rep_cnt}]" if rep_cnt >= 2 else ("  [REPEAT]" if s.get("is_repeat") else "")
+        is_repeat = bool(s.get("is_repeat"))
 
-        title_s = _trunc(s.get("title", "") or "", 70)
+        picks.append({
+            "rank":          i,
+            "confidence":    conf,
+            "direction":     direction,
+            "horizon":       horizon,
+            "flag_path":     fp,
+            "strength":      strength,
+            "ticker":        ticker,
+            "event_ticker":  s.get("event_ticker", ""),
+            "close_fmt":     close_fmt,
+            "close_time_raw": s.get("close_time") or s.get("expiration_time", ""),
+            "urgency":       urgency,
+            "market_price":  market_price,
+            "our_estimate":  our_estimate,
+            "market_pct":    _pct(market_price),
+            "est_pct":       _pct(our_estimate),
+            "edge":          edge_v,
+            "kelly":         kelly,
+            "ev":            ev_s,
+            "repeat_count":  rep_cnt,
+            "is_repeat":     is_repeat,
+            "title":         s.get("title", "") or "",
+        })
+    return picks
 
-        out.append(f"{i}. {CONF_LABEL[conf]} / BUY {direction}  /  {horizon}{fp_l}{str_l}")
-        ticker_close = f"{ticker}  ·  {close_fmt}{urgency}{rep_l}" if close_fmt else f"{ticker}{urgency}{rep_l}"
+
+def _top_picks(signals: list[dict], n: int = 3) -> list[str]:
+    """Compact executive summary of the top-N signals sorted by quality score."""
+    picks = _rank_top_picks(signals, n=n)
+    if not picks:
+        return []
+
+    out = []
+    out.append(_rule("="))
+    out.append(f"TOP PICKS  (best {min(n, len(picks))} signals by conviction + edge)")
+    out.append(_rule("-"))
+    for p in picks:
+        str_l = f"  ★×{p['strength']}" if p["strength"] >= 2 else ""
+        fp_l  = f"  [{p['flag_path']}]" if p["flag_path"] else ""
+
+        kelly_s = f"  Kelly(1/4): {p['kelly'][1]*100:.1f}%" if p["kelly"] else ""
+        ev_l    = f"  EV: {p['ev']}" if p["ev"] else ""
+
+        rep_l = (f"  [REPEAT x{p['repeat_count']}]" if p["repeat_count"] >= 2
+                 else ("  [REPEAT]" if p["is_repeat"] else ""))
+
+        title_s = _trunc(p["title"], 70)
+
+        out.append(f"{p['rank']}. {CONF_LABEL[p['confidence']]} / BUY {p['direction']}  /  "
+                    f"{p['horizon']}{fp_l}{str_l}")
+        ticker_close = (f"{p['ticker']}  ·  {p['close_fmt']}{p['urgency']}{rep_l}"
+                        if p["close_fmt"] else f"{p['ticker']}{p['urgency']}{rep_l}")
         out.append(f"   {ticker_close}")
         if title_s:
             out.append(f"   {title_s}")
-        out.append(f"   Market: {mkt_p}  Est: {est_p}  Edge: {edge_v*100:+.1f} pp{ev_l}{kelly_s}")
-        if i < len(ranked):
+        out.append(f"   Market: {p['market_pct']}  Est: {p['est_pct']}  "
+                    f"Edge: {p['edge']*100:+.1f} pp{ev_l}{kelly_s}")
+        if p["rank"] < len(picks):
             out.append("")
     out.append(_rule("="))
     out.append("")
     return out
 
 
-def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | None = None) -> list[str]:
+def _betting_queue_data(db_path: str | None = None, top_n: int = 5, config: dict | None = None) -> dict:
     """
-    Returns lines for the BETTING QUEUE block:
-    pending signals sorted by urgency = (edge*0.6) + (1/days_to_close * 0.4),
-    excluding tickers already in real_fill and market_price >= 0.85.
-    Candidates below the EV floor (unit_size * min_ev_pct_of_unit after fees)
-    are removed entirely and counted in a footer line.
+    Queries and computes the BETTING QUEUE contents: pending signals sorted
+    by urgency = (edge*0.6) + (1/days_to_close * 0.4), excluding tickers
+    already in real_fill and market_price >= 0.85. Candidates below the EV
+    floor (unit_size * min_ev_pct_of_unit after fees) are removed entirely
+    and counted separately.
+
+    This is the SINGLE source of the betting queue's DB query and filtering
+    logic: both the text renderer (_betting_queue) and the HTML renderer
+    (render_html) call this function — there is exactly one query, so the
+    two bodies can never show different queue contents or numbers for the
+    same run.
+
+    Returns {"error": str} on query failure (callers render an
+    "unavailable" message), otherwise:
+      {"rows": [...], "below_floor_count": int, "already_placed": [tickers],
+       "unit_size": float, "min_ev_pct": float, "ev_floor": float}
+    Each row: ticker, event_ticker, direction, conf, title, mp, edge, days,
+    urgency, ev_after (float or None), ev_s (formatted), kelly (raw tuple
+    or None), kelly_s (formatted).
     """
     import sqlite3 as _sq
     from pathlib import Path as _P
@@ -866,16 +983,10 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
     if db_path is None:
         db_path = str(_P(__file__).parent.parent / "data" / "leviathan.db")
 
-    _bet_cfg       = (config or {}).get("betting", {})
-    unit_size      = _bet_cfg.get("unit_size", 10)
-    min_ev_pct     = _bet_cfg.get("min_ev_pct_of_unit", 0.50)
-    ev_floor       = unit_size * min_ev_pct  # e.g. $5.00 at defaults
-
-    out = []
-    out.append(_rule("="))
-    out.append("BETTING QUEUE  (top 5 unplaced signals by urgency x edge, after-fee EV floor applied)")
-    out.append(_rule("="))
-    out.append("")
+    _bet_cfg   = (config or {}).get("betting", {})
+    unit_size  = _bet_cfg.get("unit_size", 10)
+    min_ev_pct = _bet_cfg.get("min_ev_pct_of_unit", 0.50)
+    ev_floor   = unit_size * min_ev_pct  # e.g. $5.00 at defaults
 
     try:
         conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -887,7 +998,7 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
 
         cur.execute(
             "SELECT ticker, direction, market_price, our_estimate, edge, close_time, "
-            "confidence, title "
+            "confidence, title, event_ticker "
             "FROM signals "
             "WHERE result = '' AND source != 'real_fill' AND direction != 'PASS' "
             "ORDER BY timestamp DESC"
@@ -895,16 +1006,14 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
         rows = cur.fetchall()
         conn.close()
     except Exception as e:
-        out.append(f"  (Queue unavailable: {e})")
-        out.append("")
-        return out
+        return {"error": str(e)}
 
     now = datetime.now(timezone.utc)
     candidates = []
     already_placed = []
     below_floor_count = 0
     for row in rows:
-        ticker, direction, mp, est, edge, close_time, conf, title = row
+        ticker, direction, mp, est, edge, close_time, conf, title, event_ticker = row
         if ticker in placed:
             already_placed.append(ticker)
             continue
@@ -941,16 +1050,19 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
         kelly    = _kelly_fraction(direction, mp_f, est)
         kelly_s  = f"{kelly[1]*100:.1f}%" if kelly else "—"
         candidates.append({
-            "ticker":    ticker,
-            "direction": direction,
-            "conf":      conf or "?",
-            "title":     (title or "").strip(),
-            "mp":        mp_f,
-            "edge":      edge_f,
-            "days":      days_left,
-            "urgency":   urgency,
-            "ev":        ev_s,
-            "kelly":     kelly_s,
+            "ticker":       ticker,
+            "event_ticker": event_ticker or "",
+            "direction":    direction,
+            "conf":         conf or "?",
+            "title":        (title or "").strip(),
+            "mp":           mp_f,
+            "edge":         edge_f,
+            "days":         days_left,
+            "urgency":      urgency,
+            "ev_after":     ev_after,
+            "ev_s":         ev_s,
+            "kelly":        kelly,
+            "kelly_s":      kelly_s,
         })
 
     # Deduplicate by ticker — keep highest-urgency row per ticker
@@ -960,6 +1072,37 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
         if t not in seen or c["urgency"] > seen[t]["urgency"]:
             seen[t] = c
     top = sorted(seen.values(), key=lambda x: -x["urgency"])[:top_n]
+
+    return {
+        "rows":               top,
+        "below_floor_count":  below_floor_count,
+        "already_placed":     already_placed,
+        "unit_size":          unit_size,
+        "min_ev_pct":         min_ev_pct,
+        "ev_floor":           ev_floor,
+    }
+
+
+def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | None = None) -> list[str]:
+    """
+    Returns lines for the BETTING QUEUE block. See _betting_queue_data for
+    the query/filtering logic — this function only formats its output.
+    """
+    out = []
+    out.append(_rule("="))
+    out.append("BETTING QUEUE  (top 5 unplaced signals by urgency x edge, after-fee EV floor applied)")
+    out.append(_rule("="))
+    out.append("")
+
+    data = _betting_queue_data(db_path=db_path, top_n=top_n, config=config)
+    if "error" in data:
+        out.append(f"  (Queue unavailable: {data['error']})")
+        out.append("")
+        return out
+
+    top        = data["rows"]
+    unit_size  = data["unit_size"]
+    min_ev_pct = data["min_ev_pct"]
 
     # Column layout under 100 chars:
     # indent(2) + #(1) Dir(3) Conf(4) Ticker(20) Dys(3) Price(5) Edge(5) EV(7) K%(5) Title(25)
@@ -982,18 +1125,18 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
                 days_s,
                 f"{c['mp']*100:.1f}%",
                 f"{c['edge']*100:.1f}%",
-                c["ev"],
-                c["kelly"],
+                c["ev_s"],
+                c["kelly_s"],
                 title_s,
             ])
         out.extend(_render_table(_BQ_HDR, bq_rows, widths=_BQ_WID))
 
     pct_label = f"{min_ev_pct*100:.0f}%"
     out.append("")
-    out.append(f"  Filtered (EV < {pct_label} of ${unit_size} unit): {below_floor_count}")
+    out.append(f"  Filtered (EV < {pct_label} of ${unit_size} unit): {data['below_floor_count']}")
 
-    if already_placed:
-        unique_placed = sorted(set(already_placed))
+    if data["already_placed"]:
+        unique_placed = sorted(set(data["already_placed"]))
         placed_s = ", ".join(unique_placed[:8])
         if len(unique_placed) > 8:
             placed_s += f", +{len(unique_placed)-8} more"
@@ -1006,18 +1149,59 @@ def _betting_queue(db_path: str | None = None, top_n: int = 5, config: dict | No
 
 # ── Daily report ──────────────────────────────────────────────────────────────
 
+def _header_data(signals, whale_only, run_meta, config,
+                  new_signals=None, repeat_signals=None,
+                  smart_money_result=None) -> dict:
+    """
+    Computes the header/summary-strip values shared by the text renderer
+    (compile_report) and the HTML renderer (render_html): New/Repeat/Whale
+    counts, markets scanned, smart-money cross-ref count, and the next
+    resolution date. Single source — both bodies read this, never
+    recompute it independently, so they cannot diverge.
+    """
+    threshold_rank = CONFIDENCE_ORDER.get(
+        config.get("scoring", {}).get("confidence_threshold", "MED"), 1
+    )
+    min_lv = int(config.get("scoring", {}).get("min_report_lv", 0))
+
+    new_q    = _qualifying(new_signals or [], threshold_rank, min_lv)
+    repeat_q = _qualifying(repeat_signals or [], threshold_rank, min_lv)
+
+    sm_xref = len(smart_money_result.get("kalshi_signals", [])) if smart_money_result else 0
+
+    from .logger import get_next_resolution_date as _get_nrd
+    next_resolution_date = _get_nrd()
+    next_resolution_days = None
+    if next_resolution_date:
+        try:
+            res_dt = date.fromisoformat(next_resolution_date)
+            next_resolution_days = (res_dt - date.today()).days
+        except Exception:
+            next_resolution_days = 0
+
+    return {
+        "new_count":             len(new_q),
+        "repeat_count":          len(repeat_q),
+        "whale_count":           len(whale_only),
+        "markets_scanned":       run_meta.get("markets_scanned", 0),
+        "smart_money_xref_count": sm_xref,
+        "next_resolution_date":  next_resolution_date,
+        "next_resolution_days":  next_resolution_days,
+    }
+
+
 def compile_report(
     signals, whale_only, stats, run_meta, config,
     all_filtered=None, new_signals=None, repeat_signals=None,
     smart_money_result=None, probe_stats=None, flag_path_stats=None,
-    lv_stats=None, db_path=None,
+    lv_stats=None, db_path=None, now_utc=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
     )
     min_lv     = int(config.get("scoring", {}).get("min_report_lv", 0))
     unit_size  = config.get("betting", {}).get("unit_size", 10)
-    now_utc    = datetime.now(timezone.utc)
+    now_utc    = now_utc or datetime.now(timezone.utc)
     date_str   = now_utc.strftime("%B %d, %Y")
     time_str   = now_utc.strftime("%H:%M UTC")
     env        = config.get("environment", "prod").upper()
@@ -1027,7 +1211,11 @@ def compile_report(
     n_mkt      = run_meta.get("markets_scanned", 0)
     runtime_s  = run_meta.get("runtime_ms", 0) / 1000
 
-    from .logger import get_next_resolution_date as _get_nrd, get_upcoming_resolutions as _get_upcoming
+    from .logger import get_upcoming_resolutions as _get_upcoming
+
+    hdr = _header_data(signals, whale_only, run_meta, config,
+                        new_signals=new_signals, repeat_signals=repeat_signals,
+                        smart_money_result=smart_money_result)
 
     out = []
 
@@ -1037,20 +1225,13 @@ def compile_report(
     out.append(f"{date_str}  ·  {time_str}  ·  {env}")
     out.append(_rule("="))
     out.append("")
-    sm_xref = len(smart_money_result.get("kalshi_signals", [])) if smart_money_result else 0
-    out.append(f"  New Signals:    {len(new_q)}")
-    out.append(f"  Repeat Signals: {len(repeat_q)}")
-    out.append(f"  Whale Flags:    {len(whale_only)}")
-    out.append(f"  Markets Scanned:{n_mkt}")
-    out.append(f"  Smart Money:    {sm_xref} Kalshi x-refs from top Polymarket traders")
-    _next_res = _get_nrd()
-    if _next_res:
-        try:
-            _res_dt   = date.fromisoformat(_next_res)
-            _res_days = (_res_dt - date.today()).days
-        except Exception:
-            _res_days = 0
-        out.append(f"  Next resolution: {_next_res}  ({_res_days} days)")
+    out.append(f"  New Signals:    {hdr['new_count']}")
+    out.append(f"  Repeat Signals: {hdr['repeat_count']}")
+    out.append(f"  Whale Flags:    {hdr['whale_count']}")
+    out.append(f"  Markets Scanned:{hdr['markets_scanned']}")
+    out.append(f"  Smart Money:    {hdr['smart_money_xref_count']} Kalshi x-refs from top Polymarket traders")
+    if hdr["next_resolution_date"]:
+        out.append(f"  Next resolution: {hdr['next_resolution_date']}  ({hdr['next_resolution_days']} days)")
     out.append("")
 
     # ── Top picks executive summary ───────────────────────────────────────
@@ -1306,6 +1487,311 @@ def compile_report(
     return "\n".join(out)
 
 
+# ── HTML email (leviathan_report_email_v2.html — see docs/PROGRESS.md) ───────
+
+_HTML_STAT_TILE = (
+    '<td style="padding-top:14px;">'
+    '<div class="plex" style="font-family:\'IBM Plex Mono\',ui-monospace,Consolas,Menlo,monospace;'
+    'font-size:9px;letter-spacing:1px;text-transform:uppercase;color:#8695ac;">{label}</div>'
+    '<div class="plex" style="font-family:\'IBM Plex Mono\',ui-monospace,Consolas,Menlo,monospace;'
+    'font-size:15px;font-weight:600;color:{color};padding-top:3px;">{value}</div></td>'
+)
+
+
+def _pick_card_html(pick: dict) -> str:
+    """Renders one TOP PICKS card matching leviathan_report_email_v2.html."""
+    dir_color = "#3ddc9f" if pick["direction"] == "YES" else "#f9bd74"
+    dir_bg    = "#0f2a1f" if pick["direction"] == "YES" else "#33260f"
+    stars     = f"{'★' * min(pick['strength'], 3)}" if pick["strength"] >= 2 else ""
+    star_html = (f'<td class="plex" style="font-family:\'IBM Plex Mono\',ui-monospace,Consolas,Menlo,monospace;'
+                 f'font-size:12px;color:#f5c451;letter-spacing:1px;">{stars}</td>') if stars else ""
+    fp_html = ""
+    if pick["flag_path"]:
+        fp_html = (
+            '<td style="padding-right:7px;"><span class="plex" style="font-family:\'IBM Plex Mono\','
+            'ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#aab6ca;'
+            f'background-color:#1a2334;padding:4px 9px;border-radius:5px;">{_esc(pick["flag_path"])}</span></td>'
+        )
+
+    kalshi_link = _kalshi_link_or_bare(pick["ticker"], pick["event_ticker"], label="Trade on Kalshi&nbsp;↗")
+    ticker_link = _kalshi_link_or_bare(pick["ticker"], pick["event_ticker"])
+
+    rep_s = (f" · REPEAT ×{pick['repeat_count']}" if pick["repeat_count"] >= 2
+             else (" · REPEAT" if pick["is_repeat"] else ""))
+    meta_bits = " · ".join(x for x in [pick["horizon"], pick.get("_close_html", "")] if x)
+
+    kelly_html = ""
+    if pick["kelly"]:
+        kelly_html = _HTML_STAT_TILE.format(label="Kelly¼", color="#f2f5fa",
+                                             value=f"{pick['kelly'][1]*100:.1f}%")
+    ev_html = ""
+    if pick["ev"]:
+        ev_html = _HTML_STAT_TILE.format(label="EV/ct", color="#3ddc9f", value=_esc(pick["ev"]))
+
+    return f'''
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
+        <tr>
+          <td width="3" bgcolor="#f7ad57" style="background-color:#f7ad57;font-size:0;line-height:0;border-radius:10px 0 0 10px;">&nbsp;</td>
+          <td style="padding:18px 22px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+                  <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;font-weight:600;color:#8695ac;padding-right:10px;">{pick['rank']:02d}</td>
+                  <td style="padding-right:7px;"><span class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;font-weight:700;color:{dir_color};background-color:{dir_bg};padding:4px 9px;border-radius:5px;">BUY&nbsp;{_esc(pick['direction'])}</span></td>
+                  <td style="padding-right:7px;"><span class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;font-weight:600;color:#93bdf7;background-color:#152a48;padding:4px 9px;border-radius:5px;">{_esc(pick['confidence'])}</span></td>
+                  {fp_html}
+                  {star_html}
+                </tr></table>
+              </td>
+              <td align="right" valign="top" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;">{kalshi_link}</td>
+            </tr></table>
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15.5px;font-weight:500;color:#f2f5fa;line-height:1.45;padding:14px 0 4px;">{_esc(pick['title'])}</div>
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;padding-bottom:15px;">{ticker_link} <span style="color:#7c8aa1;">&nbsp;·&nbsp; {_esc(meta_bits)}{_esc(rep_s)}</span></div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #1e2838;"><tr>
+              {_HTML_STAT_TILE.format(label="Market", color="#f2f5fa", value=_esc(pick["market_pct"]))}
+              {_HTML_STAT_TILE.format(label="Est", color="#f2f5fa", value=_esc(pick["est_pct"]))}
+              {_HTML_STAT_TILE.format(label="Edge", color="#3ddc9f", value=_esc(f"{pick['edge']*100:+.1f}"))}
+              {ev_html}
+              {kelly_html}
+            </tr></table>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+    <tr><td height="13" style="font-size:0;line-height:0;">&nbsp;</td></tr>'''
+
+
+def _betting_row_html(row: dict) -> str:
+    """Renders one BETTING QUEUE table row matching leviathan_report_email_v2.html."""
+    dir_color = "#3ddc9f" if row["direction"] == "YES" else "#f9bd74"
+    ev_s = row["ev_s"] if row["ev_s"] != "—" else "—"
+    link = _kalshi_link_or_bare(row["ticker"], row["event_ticker"], label=f"{_esc(row['ticker'])}&nbsp;↗")
+    title_s = _esc(row["title"]) if row["title"] else ""
+    return f'''
+        <tr>
+          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:{dir_color};font-weight:600;padding:13px 8px 13px 16px;border-bottom:1px solid #1e2838;vertical-align:top;">{_esc(row['direction'])}</td>
+          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:#f2f5fa;padding:13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;">{_esc(row['conf'])}</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:#3ddc9f;padding:13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;white-space:nowrap;">{row['edge']*100:.1f}%</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:#3ddc9f;padding:13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;white-space:nowrap;">{_esc(ev_s)}</td>
+          <td style="padding:13px 16px 13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;">
+            {link}
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:12px;color:#b3bdd0;line-height:1.4;padding-top:3px;">{title_s}</div>
+          </td>
+        </tr>'''
+
+
+def render_html(
+    signals, whale_only, stats, run_meta, config,
+    all_filtered=None, new_signals=None, repeat_signals=None,
+    smart_money_result=None, probe_stats=None, flag_path_stats=None,
+    lv_stats=None, db_path=None, now_utc=None,
+) -> str:
+    """
+    Renders the daily report as email-safe HTML matching
+    leviathan_report_email_v2.html (dark theme, table-based, inline CSS,
+    600px container). Presentation-layer only — every value here comes
+    from the SAME shared computations compile_report uses (_header_data,
+    _rank_top_picks, _betting_queue_data): the two bodies of one email can
+    never show different numbers for the same run. No Track Record section
+    (intentionally dropped — lives in Power BI).
+    """
+    threshold_rank = CONFIDENCE_ORDER.get(
+        config.get("scoring", {}).get("confidence_threshold", "MED"), 1
+    )
+    min_lv   = int(config.get("scoring", {}).get("min_report_lv", 0))
+    now_utc  = now_utc or datetime.now(timezone.utc)
+    date_str = now_utc.strftime("%B %d, %Y")
+    time_str = now_utc.strftime("%H:%M UTC")
+    env      = config.get("environment", "prod").upper()
+    n_mkt    = run_meta.get("markets_scanned", 0)
+    runtime_s = run_meta.get("runtime_ms", 0) / 1000
+    model    = run_meta.get("model_used", "—").replace("claude-", "")
+
+    hdr = _header_data(signals, whale_only, run_meta, config,
+                       new_signals=new_signals, repeat_signals=repeat_signals,
+                       smart_money_result=smart_money_result)
+
+    all_q = _qualifying(signals, threshold_rank, min_lv)
+    picks = _rank_top_picks(all_q, n=3)
+    for p in picks:
+        p["_close_html"] = _html_close_date({"close_time": p["close_time_raw"]})
+
+    bq_data = _betting_queue_data(db_path=db_path, config=config)
+    bq_rows = bq_data.get("rows", []) if "error" not in bq_data else []
+    bq_below_floor = bq_data.get("below_floor_count", 0) if "error" not in bq_data else 0
+    unit_size  = bq_data.get("unit_size", config.get("betting", {}).get("unit_size", 10))
+    min_ev_pct = bq_data.get("min_ev_pct", config.get("betting", {}).get("min_ev_pct_of_unit", 0.50))
+
+    preheader_signals = hdr["new_count"] + hdr["repeat_count"]
+    next_res_short = ""  # "Aug 1" — preheader form (matches v2, no day-count)
+    next_res_s = ""       # "Aug 1 · 13d" — summary-tile form
+    if hdr["next_resolution_date"]:
+        try:
+            _d = date.fromisoformat(hdr["next_resolution_date"])
+            next_res_short = f"{_d.strftime('%b')} {_d.day}"
+            next_res_s = f"{next_res_short} · {hdr['next_resolution_days']}d"
+        except Exception:
+            next_res_short = next_res_s = hdr["next_resolution_date"]
+
+    picks_html = "".join(_pick_card_html(p) for p in picks) if picks else (
+        '<tr><td style="padding:24px 0;color:#8695ac;" class="plex">'
+        'No qualifying picks this run.</td></tr>'
+    )
+    bq_rows_html = "".join(_betting_row_html(r) for r in bq_rows) if bq_rows else (
+        '<tr><td colspan="5" style="padding:16px;color:#8695ac;" class="plex">'
+        'No unplaced signals in queue.</td></tr>'
+    )
+
+    preheader = (f"{preheader_signals} signals · {hdr['whale_count']} whale flags · "
+                 f"next resolution {next_res_short or '—'} · {len(picks)} picks live on Kalshi")
+
+    html_doc = f'''<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="dark light">
+<meta name="supported-color-schemes" content="dark light">
+<title>Leviathan — Intelligence Report</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+  body,table,td{{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}}
+  a{{color:#84b6fb;}}
+  .plex{{font-family:'IBM Plex Mono','SFMono-Regular',ui-monospace,Consolas,Menlo,monospace !important;}}
+  .klink{{color:#84b6fb !important;text-decoration:none;}}
+  .klink:hover{{text-decoration:underline;}}
+  @media only screen and (max-width:620px){{
+    .container{{width:100% !important;}}
+    .stack{{display:block !important;width:100% !important;box-sizing:border-box !important;}}
+    .px{{padding-left:20px !important;padding-right:20px !important;}}
+  }}
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#070a12;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#070a12;font-size:1px;line-height:1px;">{_esc(preheader)}</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#070a12" style="background-color:#070a12;">
+<tr><td align="center" style="padding:34px 12px 56px;">
+
+  <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+
+    <!-- HEADER -->
+    <tr><td bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td class="px" style="padding:24px 28px 8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td align="left" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#f2f5fa;">LEVIATHAN<span style="color:#4a90f2;">//</span></td>
+            <td align="right" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;font-weight:500;letter-spacing:3px;color:#aab6ca;text-transform:uppercase;">Intelligence&nbsp;Report</td>
+          </tr></table>
+        </td></tr>
+        <tr><td class="px" style="padding:16px 28px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td width="50" height="2" bgcolor="#4a90f2" style="background-color:#4a90f2;font-size:0;line-height:0;">&nbsp;</td>
+            <td height="2" bgcolor="#273246" style="background-color:#273246;font-size:0;line-height:0;">&nbsp;</td>
+          </tr></table>
+        </td></tr>
+        <tr><td class="px plex" style="padding:15px 28px 24px;font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11.5px;color:#aeb9cd;line-height:1.7;">
+          <span style="color:#3ddc9f;">●</span> <span style="color:#f2f5fa;">{_esc(env)}</span>&nbsp;&nbsp;·&nbsp;&nbsp;<span style="color:#f2f5fa;">{_esc(date_str)}</span>&nbsp;&nbsp;·&nbsp;&nbsp;{_esc(time_str)}&nbsp;&nbsp;·&nbsp;&nbsp;scanned <span style="color:#f2f5fa;">{n_mkt:,}</span>&nbsp;&nbsp;·&nbsp;&nbsp;runtime <span style="color:#f2f5fa;">{runtime_s:.0f}s</span>
+        </td></tr>
+      </table>
+    </td></tr>
+
+    <tr><td height="18" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+
+    <!-- SUMMARY -->
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#273246" style="background-color:#273246;border:1px solid #273246;border-radius:12px;">
+        <tr>
+          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-radius:12px 0 0 0;">
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">New</div>
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{hdr['new_count']}</div>
+          </td>
+          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;">
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Repeat</div>
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{hdr['repeat_count']}</div>
+          </td>
+          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;border-radius:0 12px 0 0;">
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Whale Flags</div>
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{hdr['whale_count']}</div>
+          </td>
+        </tr>
+        <tr>
+          <td class="stack" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-top:1px solid #273246;border-radius:0 0 0 12px;">
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Smart-Money X-refs</div>
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:15px;font-weight:500;color:#c6cfde;padding-top:5px;">{hdr['smart_money_xref_count']} active</div>
+          </td>
+          <td class="stack" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-top:1px solid #273246;border-left:1px solid #273246;">
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Next Resolution</div>
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:15px;font-weight:500;color:#c6cfde;padding-top:5px;">{_esc(next_res_s or "—")}</div>
+          </td>
+          <td class="stack" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-top:1px solid #273246;border-left:1px solid #273246;border-radius:0 0 12px 0;">
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Model</div>
+            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:15px;font-weight:500;color:#c6cfde;padding-top:5px;">{_esc(model)}</div>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+
+    <tr><td height="34" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+
+    <!-- TOP PICKS -->
+    <tr><td class="px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Top Picks</td>
+        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
+        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#8695ac;white-space:nowrap;padding-left:14px;">best {len(picks)} · conviction × edge</td>
+      </tr></table>
+    </td></tr>
+    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    {picks_html}
+
+    <tr><td height="34" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+
+    <!-- BETTING QUEUE -->
+    <tr><td class="px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Betting Queue</td>
+        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
+        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#8695ac;white-space:nowrap;padding-left:14px;">urgency × edge · after-fee floor</td>
+      </tr></table>
+    </td></tr>
+    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
+        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
+          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Dir</td>
+          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Conf</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Edge</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">EV</td>
+          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">Market</td>
+        </tr>
+        {bq_rows_html}
+      </table>
+    </td></tr>
+    <tr><td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#8695ac;padding:10px 2px 0;">— {bq_below_floor} candidates filtered (EV &lt; {min_ev_pct*100:.0f}% of ${unit_size:.0f} unit)</td></tr>
+
+    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+
+    <!-- FOOTER -->
+    <tr><td class="px" style="border-top:1px solid #273246;padding-top:18px;">
+      <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10.5px;color:#8695ac;line-height:1.9;">
+        signals generated <span style="color:#c6cfde;">{run_meta.get('signals_generated', 0)}</span> &nbsp;·&nbsp; filtered (high price) <span style="color:#c6cfde;">{run_meta.get('high_price_filtered', 0)}</span> &nbsp;·&nbsp; model <span style="color:#c6cfde;">{_esc(model)}</span> &nbsp;·&nbsp; cost <span style="color:#c6cfde;">${run_meta.get('cost_usd') or 0:.2f} · Pro</span>
+      </div>
+      <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#66738a;padding-top:11px;letter-spacing:1px;">LEVIATHAN // PREDICTION-MARKET INTELLIGENCE</div>
+    </td></tr>
+
+  </table>
+</td></tr>
+</table>
+</body>
+</html>
+'''
+    return html_doc
+
+
 # ── Weekly digest ─────────────────────────────────────────────────────────────
 
 def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
@@ -1449,7 +1935,16 @@ def _unsubscribe_footer(token: str) -> str:
 
 
 def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
-                subject_override: str = "") -> None:
+                subject_override: str = "", html_body: str | None = None) -> None:
+    """
+    Sends the report by email. With html_body omitted (the default), sends
+    a single text/plain message exactly as before — every existing caller
+    (weekly digest, etc.) is unaffected. With html_body provided, sends
+    multipart/alternative: html_body as the text/html part (primary) and
+    body as the text/plain part (fallback — never dropped, so text-only
+    clients and the clip-view degrade cleanly). Subject and recipient
+    logic are unchanged either way.
+    """
     from . import subscribers as _subs
 
     report_cfg   = config.get("report", {})
@@ -1498,7 +1993,13 @@ def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
                 "Leviathan  ·  Prediction Market Intelligence  ·  For informational purposes only"
             )
             full_body   = body + footer
-            msg         = MIMEText(full_body, "plain", "utf-8")
+
+            if html_body is not None:
+                msg = MIMEMultipart("alternative")
+                msg.attach(MIMEText(full_body, "plain", "utf-8"))
+                msg.attach(MIMEText(html_body, "html", "utf-8"))
+            else:
+                msg = MIMEText(full_body, "plain", "utf-8")
             msg["Subject"] = subject
             msg["From"]    = email_from
             msg["To"]      = email_to
@@ -1510,3 +2011,109 @@ def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
 
     n_subs = len(recipients) - (1 if owner else 0)
     print(f"  [report] Sent to {sent} recipient(s) ({n_subs} subscriber(s))")
+
+
+# ── --dry-run CLI (PART D) ────────────────────────────────────────────────────
+
+def _synthetic_dry_run_signals() -> list[dict]:
+    """Fallback signal data for --dry-run when the real DB has nothing recent."""
+    return [
+        {"ticker": "KXSPCELAUNCH-COMM-27JAN01", "event_ticker": "KXSPCELAUNCH-COMM-27JAN01",
+         "title": "When will Virgin Galactic launch its next commercial Delta-class SpaceShip flight?",
+         "direction": "NO", "confidence": "MED", "flag_path": "HEURISTIC",
+         "market_price": 0.595, "our_estimate": 0.40, "edge": 0.195,
+         "time_horizon": "LONG", "close_time": "2027-01-01T15:00:00Z",
+         "is_repeat": True, "repeat_count": 2},
+        {"ticker": "KXALBUMRELEASEDATEBEY-NEW-JAN01-27", "event_ticker": "KXALBUMRELEASEDATEBEY-NEW-JAN01-27",
+         "title": "Will Beyoncé release a new album before Jan 1, 2027?",
+         "direction": "NO", "confidence": "MED", "flag_path": "DRIFT",
+         "market_price": 0.59, "our_estimate": 0.40, "edge": 0.19,
+         "time_horizon": "LONG", "close_time": "2027-01-01T15:00:00Z",
+         "is_repeat": True, "repeat_count": 2},
+        {"ticker": "KXMANAGEROUTDATE-28TUCHEL-26AUG01", "event_ticker": "KXMANAGEROUTDATE-28TUCHEL-26AUG01",
+         "title": "Will Thomas Tuchel be out before Aug 1, 2026?",
+         "direction": "NO", "confidence": "MED", "flag_path": "DRIFT",
+         "market_price": 0.195, "our_estimate": 0.07, "edge": 0.125,
+         "time_horizon": "MONTHLY", "close_time": "2026-08-01T00:00:00Z",
+         "is_repeat": True, "repeat_count": 1},
+    ]
+
+
+def _dry_run(output_path: str) -> None:
+    """
+    Renders both bodies for the SAME synthetic-or-real run (shared now_utc,
+    so date/time cannot diverge either), writes the HTML to output_path,
+    prints both to stdout, prints a shared-values check, and does NOT call
+    send_report / SMTP.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).parent.parent
+    cfg_path = root / "config.json"
+    if not cfg_path.exists():
+        cfg_path = root / "config.example.json"
+    with open(cfg_path, encoding="utf-8") as f:
+        config = _json.load(f)
+
+    signals = _synthetic_dry_run_signals()
+    run_meta = {
+        "markets_scanned":     2583,
+        "runtime_ms":          939000,
+        "model_used":          config.get("scoring", {}).get("scorer_model", "claude-sonnet-4-6"),
+        "signals_generated":   len(signals),
+        "high_price_filtered": 0,
+        "cost_usd":            0.0,
+        "tokens_used":         0,
+        "whale_flags":         0,
+    }
+    now_utc = datetime.now(timezone.utc)  # shared explicitly — see PART A
+
+    text_body = compile_report(signals, [], {}, run_meta, config,
+                               new_signals=[], repeat_signals=signals,
+                               db_path=None, now_utc=now_utc)
+    html_body = render_html(signals, [], {}, run_meta, config,
+                            new_signals=[], repeat_signals=signals,
+                            db_path=None, now_utc=now_utc)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_body)
+
+    hdr = _header_data(signals, [], run_meta, config,
+                       new_signals=[], repeat_signals=signals)
+    picks = _rank_top_picks(_qualifying(signals, 1, 0), n=3)
+
+    print("=== TEXT BODY ===")
+    print(text_body)
+    print()
+    print(f"=== HTML BODY written to {output_path} ({len(html_body)} chars, "
+          f"{len(html_body.encode('utf-8'))} bytes) ===")
+    print()
+    print("=== SHARED VALUES CHECK (both bodies rendered from these, in one call each) ===")
+    print(f"  New: {hdr['new_count']}  Repeat: {hdr['repeat_count']}  "
+          f"Whale: {hdr['whale_count']}  Markets scanned: {hdr['markets_scanned']}")
+    print(f"  Top picks: {len(picks)}")
+    for p in picks:
+        in_text = f"Edge: {p['edge']*100:+.1f} pp" in text_body
+        in_html = f"{p['edge']*100:+.1f}" in html_body
+        print(f"    {p['ticker']:<40} edge={p['edge']*100:+.1f}pp  "
+              f"in_text={in_text}  in_html={in_html}")
+    print()
+    print("No SMTP call made (--dry-run).")
+
+
+if __name__ == "__main__":
+    import argparse as _argparse
+
+    parser = _argparse.ArgumentParser(description="Leviathan report renderer")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Render both bodies, write HTML to a file, print both, "
+                             "and exit without sending (no SMTP, no GMAIL_APP_PASSWORD)")
+    parser.add_argument("--output", default="dry_run_report.html",
+                        help="Path to write the rendered HTML (default: dry_run_report.html)")
+    args = parser.parse_args()
+
+    if args.dry_run:
+        _dry_run(args.output)
+    else:
+        parser.print_help()

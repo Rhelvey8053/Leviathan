@@ -472,6 +472,19 @@
       "action": "Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern.",
       "notes": "No URL pattern confirmed -- kalshi.com is a client-rendered SPA where a fabricated ticker returns an identical 200/no-redirect/near-identical-HTML response to a real one, so kalshi_market_url() always returns None until a verifiable pattern exists. event_ticker itself is persisted and round-trips correctly. See docs/PROGRESS.md 2026-07-22 for the full investigation.",
       "status": "done"
+    },
+    {
+      "id": "email-html-render",
+      "title": "Email HTML Render",
+      "area": "reporting",
+      "priority": 2,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can never diverge.",
+      "notes": "No number changed -- render_html and compile_report both call shared _rank_top_picks/_betting_queue_data/_header_data. Kalshi links inert until kalshi_market_url resolves a real pattern (see kalshi-event-ticker-capture). See docs/PROGRESS.md 2026-07-23 for full report + human testing checklist.",
+      "status": "done"
     }
   ]
 }

@@ -2,6 +2,153 @@
 
 ---
 
+## 2026-07-23 — Email-Safe HTML Report (multipart/alternative)
+
+**Goal:** the daily report email was plain monospace text with weak hierarchy and
+mid-word truncation (a real rendered line hit 111 chars). Render it as an
+email-safe HTML body matching a pre-built, signed-off design
+(`leviathan_report_email_v2.html` — dark theme, table-based, inline CSS, 600px
+container, Kalshi links, Track Record intentionally excluded since it lives in
+Power BI) and send `multipart/alternative` (HTML primary, existing text as
+fallback). **Presentation-layer only** — no computed value, threshold, or
+scoring changed anywhere; the text and HTML bodies of one email render from
+the exact same computed numbers, by construction, not by convention.
+
+### PART A — data/render separation (the load-bearing part, above styling)
+
+Chose **share the already-computed values**, not a full report-model refactor
+(structured section objects). Reasoning: `compile_report` builds most of its
+output as inline strings interleaved with computation, and a full refactor
+would have touched every section (Signal Block, Short-Term Watchlist, Smart
+Money, Run Statistics, Track Record) — sections the HTML email doesn't even
+render. Extracting a full model for sections that stay text-only forever
+would be scope creep; sharing computation only where BOTH renderers actually
+need the same numbers is the targeted fix.
+
+Extracted three shared, pure computation functions — `compile_report` was
+refactored to call them too (not just `render_html`), so this is provably
+shared, not merely duplicated with good intentions:
+- `_rank_top_picks(signals, n=3)` — ranking + every per-pick stat (Market/Est/
+  Edge/EV/Kelly, confidence, flag, strength, close date, repeat label).
+- `_betting_queue_data(db_path, top_n, config)` — the ONE SQL query, EV-floor
+  filter, and urgency sort. Both renderers call this single query; there is
+  no second query path that could silently diverge.
+- `_header_data(signals, whale_only, run_meta, config, ...)` — New/Repeat/
+  Whale counts and next-resolution date (with its date-parsing try/except
+  written once, not copy-pasted).
+- `now_utc` is now an optional param on both `compile_report` and
+  `render_html` (default: fresh `datetime.now()`, preserving existing
+  behavior/tests exactly) so a caller can pass one shared timestamp and
+  guarantee the header date/time can't differ between the two bodies by even
+  a few seconds. `main.py`'s real send site does this.
+
+Verified zero divergence risk end-to-end in tests (`tests/test_report_html.py`):
+edge value, header counts, and betting-queue contents from a real SQLite DB
+are asserted present and IDENTICAL in both bodies for the same input.
+
+### PART B/C — HTML renderer + Kalshi links
+
+`render_html(...)` mirrors `compile_report`'s full signature. Sections, in
+v2's order: header status readout, summary strip (New/Repeat/Whale/Smart-
+Money/Next-Resolution/Model), up to 3 TOP PICKS cards, BETTING QUEUE table
+(up to 5 rows) with a filtered-count footer line, and a run-stats footer. No
+Track Record. All dynamic text (titles, tickers) is HTML-escaped
+(`html.escape`) — verified against a real title containing an apostrophe
+(Trump's Cabinet) rendering correctly as `&#x27;`.
+
+Kalshi links reuse goal_1's `core.kalshi.kalshi_market_url` as the single
+source of truth — the report layer never constructs a URL itself. Since that
+helper currently always returns `None` (no confirmed URL pattern — see the
+2026-07-22 entry above), every pick and queue row in the live HTML renders as
+plain ticker text with no `<a>` tag right now; the link markup exists and is
+tested (with a mocked resolver) so it activates automatically the day
+`kalshi_market_url` gets a real pattern, with zero code changes here.
+
+**Known cosmetic divergence, deliberately not fixed:** EV/Kelly dollar
+formatting inherited from the shared value renders as `$+7.33` (dollar
+before sign) rather than v2's `+$7.33` (sign before dollar). This is the
+exact same shared number, not a different one — reformatting it only for
+HTML would mean a second formatting path that could drift from the text
+renderer's, which is precisely the risk PART A exists to eliminate. Flagged
+here rather than silently "fixed" with a parallel formatter.
+
+Size check: a real 3-pick render is ~19–28KB depending on content — well
+under Gmail's ~102KB clip threshold with no trimming needed.
+
+### PART D — multipart send
+
+`send_report(..., html_body=None)`: omitted (existing default), sends exactly
+as before — every existing caller (weekly digest) is provably unaffected.
+Provided, sends `multipart/alternative` (text/plain fallback + text/html
+primary). Subject and recipient logic untouched either way.
+
+`python -m core.report --dry-run [--output path.html]` renders both bodies
+from one shared `now_utc`, writes the HTML to a file, prints both bodies plus
+a "SHARED VALUES CHECK" section, and makes no SMTP call — this is how a human
+(or a test) verifies output without `GMAIL_APP_PASSWORD`.
+
+**Wired into `main.py`'s real daily-report send** (not listed in the goal's
+literal scope line, which named only `core/report.py` — corrected here the
+same way goal_1's scope line was corrected after tracing the actual signal-
+construction site: without this the feature would be fully built and tested
+but never actually fire in the real daily email). `render_html` is wrapped in
+its own try/except separate from `compile_report`'s — an HTML rendering bug
+degrades to a text-only send rather than blocking the whole daily report.
+
+15 new tests (`tests/test_report_html.py`): shared-value assertions, Kalshi
+href present/absent, multipart structure with both parts present and the
+text part non-empty, Track Record absence guard (and a companion test
+proving it's still present in text), dry-run file write + no-SMTP guard. All
+existing `tests/test_report.py` / `test_4c.py` / `test_4d.py` tests pass
+unchanged (their DB schema helpers were extended with an `event_ticker`
+column to match the real schema — no test logic changed). Full suite: 1641
+passed, 1 skipped (the network-gated Kalshi URL test from goal_1).
+
+### HUMAN TESTING CHECKLIST (code cannot verify this)
+
+Send the real report to yourself (`python main.py`, or point `--dry-run`'s
+output at a real send) and confirm in each client:
+
+1. **Gmail web** — dark background is not force-inverted by Gmail's own dark-
+   mode color adjustment; rounded corners and borders on cards/tiles survive;
+   IBM Plex Mono loads (or degrades cleanly to the monospace fallback stack).
+2. **Apple Mail / iOS Mail** — same dark-background and corner-radius checks;
+   confirm the hidden preheader text is the one that shows in the inbox
+   preview line, not stray leftover markup.
+3. **Accenture Outlook** — Outlook's rendering engine (Word-based on desktop)
+   is the strictest target; confirm the table layout doesn't collapse, the
+   MSO conditional comment doesn't leak visible text, and colors aren't
+   flattened to default black/white.
+4. **Plain-text fallback** — open the email in a text-only view (or check the
+   raw MIME source) and confirm the text/plain part is the familiar existing
+   report, complete and readable on its own.
+5. **Kalshi links** — once `kalshi_market_url` ever returns a real pattern,
+   click through and confirm it resolves to the actual market page, not a
+   404 or the homepage (the same check that failed for the naive ticker-only
+   form in the 2026-07-22 investigation).
+
+### No number changed
+
+Every figure in the HTML — New/Repeat/Whale counts, Market/Est/Edge/EV/Kelly,
+betting-queue rows, run stats — is read from the exact same shared
+computation the text renderer already used before this goal. No scoring,
+threshold, filter, or config value changed.
+
+### Top 3 next steps
+
+1. Confirm the dark theme survives the three real clients above (checklist
+   items 1–3); fall back to a light theme if any of them force-invert or
+   flatten colors badly enough to hurt readability.
+2. Reconcile the "resolved" scoping label between the email (paper-only,
+   currently n=8) and Power BI (all sources, n=11) so the two public-facing
+   surfaces don't quietly contradict each other.
+3. Do the full report-model refactor (structured section objects → text
+   renderer + HTML renderer) if text/HTML duplication starts to drift as more
+   sections get added to either surface — not needed yet; the three shared
+   functions cover every value both renderers currently show.
+
+---
+
 ## 2026-07-22 — Kalshi Event-Ticker Capture + Market-Link Investigation
 
 **Goal:** the signals table stored no link to the underlying Kalshi market —
