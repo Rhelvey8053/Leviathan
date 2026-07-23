@@ -625,6 +625,7 @@ def main():
         signal = {
             **cs,
             "title":           m.get("title", cs.get("title", "")),
+            "event_ticker":    m.get("event_ticker", ""),
             "whale_detected":  whale.get("whale_detected", False),
             "whale_direction": whale.get("whale_direction"),
             "whale_reversal":  m.get("whale_reversal", False),
@@ -727,6 +728,7 @@ def main():
                 signal = {
                     **cs,
                     "title":           m.get("title", cs.get("title", "")),
+                    "event_ticker":    m.get("event_ticker", ""),
                     "whale_detected":  whale.get("whale_detected", False),
                     "whale_direction": whale.get("whale_direction"),
                     "whale_reversal":  m.get("whale_reversal", False),
@@ -825,6 +827,10 @@ def main():
         probe_stats      = logger.get_stats_probe()
         flag_path_stats  = logger.get_stats_by_flag_path()
         lv_stats         = logger.get_stats_by_leviathan_score()
+        # Shared now_utc: compile_report and render_html must render the same
+        # run's date/time (and every other computed value) identically — see
+        # goal_2_email_html_render PART A.
+        report_now_utc = datetime.now(timezone.utc)
         body  = report.compile_report(final_signals, whale_only, stats, run_meta, config,
                                       all_filtered=filtered,
                                       new_signals=new_signals,
@@ -833,8 +839,23 @@ def main():
                                       probe_stats=probe_stats,
                                       flag_path_stats=flag_path_stats,
                                       lv_stats=lv_stats,
-                                      db_path=logger.DB_PATH)
-        report.send_report(body, final_signals, run_meta["whale_flags"], config)
+                                      db_path=logger.DB_PATH,
+                                      now_utc=report_now_utc)
+        html_body = None
+        try:
+            html_body = report.render_html(final_signals, whale_only, stats, run_meta, config,
+                                           all_filtered=filtered,
+                                           new_signals=new_signals,
+                                           repeat_signals=repeat_signals,
+                                           smart_money_result=smart_money_result,
+                                           probe_stats=probe_stats,
+                                           flag_path_stats=flag_path_stats,
+                                           lv_stats=lv_stats,
+                                           db_path=logger.DB_PATH,
+                                           now_utc=report_now_utc)
+        except Exception as e:
+            print(f"      [warn] HTML render failed, sending text-only: {e}")
+        report.send_report(body, final_signals, run_meta["whale_flags"], config, html_body=html_body)
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()

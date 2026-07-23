@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-07-18 | Metrics: resolved=11, fills=7
+Last updated: 2026-07-22 | Metrics: resolved=11, fills=7
 
 ## Ready (0)
 | Priority | ID | Action | Area |
@@ -25,13 +25,15 @@ Last updated: 2026-07-18 | Metrics: resolved=11, fills=7
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (16)
+## Done (18)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
 | 1 | show-detail-fix | Decouple show_detail in compile_report from the scanner qualifying count; gate it on whether smart-money data itself has signals, so trader detail stops silently vanishing during signal dry spells. | reporting |
 | 1 | trade-reconciliation | Reconcile paper signals against actual Kalshi fills to confirm each signal has a corresponding real trade. | execution |
 | 2 | discovery-funnel-diagnostic | Per-stage drop-off counter + gating-metric distributions for discover_winners; diagnoses why the winner gate finds zero (sample sourcing vs. skill genuinely rare). No threshold/gate changes. Unblocks the locked per-wallet items. | smart-money |
+| 2 | email-html-render | Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can never diverge. | reporting |
+| 2 | kalshi-event-ticker-capture | Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern. | data-quality |
 | 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
