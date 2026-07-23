@@ -1,16 +1,23 @@
 """
 tests/test_kalshi_url.py — Tests for core.kalshi.kalshi_market_url.
 
-Offline unit tests assert the helper's current (no-confirmed-pattern)
-behavior: it always returns None/falsy, for any input, so callers never
-render a guessed or unverified link. See core/kalshi.py's docstring and
-docs/PROGRESS.md for the full investigation.
+CONFIRMED PATTERN (2026-07-23, superseding the 2026-07-22 "no pattern
+confirmed" finding): kalshi_market_url(series_ticker, event_ticker) builds
+https://kalshi.com/markets/{series_ticker}/{event_ticker} (lowercased).
+See core/kalshi.py's docstring and docs/PROGRESS.md for the full
+evidence trail (Kalshi's own AGENTS.md, sitemap-markets.xml, and a
+genuine server-side 308 redirect chain from /events/{ticker} that
+resolves real tickers into this exact shape but does NOT resolve fake
+ones the same way).
 
-The single @pytest.mark.network test performs the actual live resolve-
-check this goal required: it hits kalshi.com for >= 2 real current
-markets AND a fabricated ticker, and shows they are NOT distinguishable
-by HTTP status/redirect alone — the concrete finding backing why
-kalshi_market_url returns None rather than a constructed URL.
+Offline unit tests assert the pure construction/fallback logic. The
+@pytest.mark.network test performs the live check that actually backs
+the confirmation: it hits kalshi.com's /events/{ticker} redirect for
+real tickers AND a fabricated one, and shows the redirect resolves the
+real ticker into a genuine series/ticker structure while leaving the
+fake one unresolved — the server-side signal that distinguishes them
+(the earlier /markets/{ticker} catch-all route could NOT distinguish
+real from fake by design; this is a different, load-bearing mechanism).
 """
 
 import json
@@ -27,51 +34,66 @@ from core.kalshi import kalshi_market_url
 
 # ─── offline: helper behavior ─────────────────────────────────────────────────
 
-def test_kalshi_market_url_returns_none_for_known_event_ticker():
-    """No confirmed URL pattern exists — even a real event_ticker yields None."""
-    assert kalshi_market_url("KXCABLEAVE-26MAY22-26AUG") is None
+def test_kalshi_market_url_constructs_confirmed_pattern():
+    """series_ticker + event_ticker -> https://kalshi.com/markets/{series}/{event}, lowercased."""
+    url = kalshi_market_url("KXCABLEAVE", "KXCABLEAVE-26MAY22")
+    assert url == "https://kalshi.com/markets/kxcableave/kxcableave-26may22"
 
 
-def test_kalshi_market_url_returns_falsy_for_empty_string():
-    assert not kalshi_market_url("")
+def test_kalshi_market_url_lowercases_mixed_case_input():
+    url = kalshi_market_url("KxIsrNormCount", "KXISRNORMCOUNT-27Dec31")
+    assert url == "https://kalshi.com/markets/kxisrnormcount/kxisrnormcount-27dec31"
 
 
-def test_kalshi_market_url_returns_falsy_for_none():
-    assert not kalshi_market_url(None)
+def test_kalshi_market_url_none_when_series_ticker_missing():
+    assert kalshi_market_url("", "KXCABLEAVE-26MAY22") is None
+    assert kalshi_market_url(None, "KXCABLEAVE-26MAY22") is None
 
 
-def test_kalshi_market_url_never_returns_the_confirmed_404_form():
-    """Regression guard: must never reintroduce kalshi.com/markets/{market_ticker}."""
-    result = kalshi_market_url("KXSOMEEVENT-26AUG01")
-    assert result is None
-    # Even if a future implementation changes this, it must never be the
-    # bare market-ticker form already confirmed to 404.
+def test_kalshi_market_url_none_when_event_ticker_missing():
+    assert kalshi_market_url("KXCABLEAVE", "") is None
+    assert kalshi_market_url("KXCABLEAVE") is None  # event_ticker omitted entirely
+
+
+def test_kalshi_market_url_none_when_both_missing():
+    assert kalshi_market_url("", "") is None
+    assert kalshi_market_url(None, None) is None
+
+
+def test_kalshi_market_url_never_returns_the_confirmed_404_bare_ticker_form():
+    """Regression guard: must never emit the bare market-ticker (no series) 404-prone form."""
+    result = kalshi_market_url("KXSOMESERIES", "KXSOMEEVENT-26AUG01")
+    assert result == "https://kalshi.com/markets/kxsomeseries/kxsomeevent-26aug01"
     assert result != "https://kalshi.com/markets/KXSOMEEVENT-26AUG01"
+    assert result != "https://kalshi.com/markets/kxsomeevent-26aug01"  # no series segment at all
 
 
-def test_signal_with_missing_event_ticker_renders_bare_ticker_no_href():
+def test_signal_with_missing_series_ticker_renders_bare_ticker_no_href():
     """
-    Simulates the report-rendering contract PART E requires: a caller gets
-    a falsy url back and must render plain ticker text, never href="".
+    Simulates the report-rendering contract: a caller gets a falsy url back
+    (e.g. because series_ticker wasn't captured for this older row) and
+    must render plain ticker text, never href="".
     """
-    ticker = "KXNOEVENTTICKER-26JAN01"
-    url = kalshi_market_url(None)
+    ticker = "KXNOSERIESTICKER-26JAN01"
+    url = kalshi_market_url("", "KXNOSERIESTICKER-26JAN01")
     rendered = f'<a href="{url}">{ticker}</a>' if url else ticker
     assert rendered == ticker
     assert "href=" not in rendered
 
 
-# ─── live resolve-check (the actual PART C/D investigation) ──────────────────
+# ─── live resolve-check (the confirmation mechanism) ─────────────────────────
 
 @pytest.mark.network
-def test_live_resolve_check_cannot_distinguish_real_from_fake_market():
+def test_live_events_redirect_distinguishes_real_from_fake_tickers():
     """
-    Fetches >= 2 real, currently-open Kalshi events and constructs
-    https://kalshi.com/markets/{event_ticker} for each, alongside one
-    fabricated ticker. Asserts the real candidates return 200 with no
-    redirect to the homepage (the narrow, literal proof bar) — AND shows
-    the fabricated ticker behaves identically, which is why this pattern
-    is NOT treated as confirmed by kalshi_market_url.
+    Hits kalshi.com's /events/{ticker} endpoint (server-side 308 redirects,
+    NOT the client-rendered /markets/[...slug] catch-all this project
+    previously ruled out) for >= 2 real, currently-listed Kalshi event
+    tickers, plus one fabricated ticker. Asserts the real tickers redirect
+    into a genuine two-segment series/ticker structure — the SAME shape
+    kalshi_market_url constructs — while the fake ticker's redirect does
+    NOT resolve into that structure, confirming this is a real server-side
+    lookup, not path rewriting that would apply to any input.
 
     Requires live Kalshi API credentials (config.json / .env) and network
     access — skipped automatically if unavailable so offline CI is
@@ -91,48 +113,49 @@ def test_live_resolve_check_cannot_distinguish_real_from_fake_market():
     except Exception as e:
         pytest.skip(f"Live Kalshi API unavailable in this environment: {e}")
 
-    real_tickers = [e["event_ticker"] for e in events[:2] if e.get("event_ticker")]
-    assert len(real_tickers) >= 2, "Need at least 2 real event tickers to test against"
+    real = [(e["event_ticker"], e["series_ticker"]) for e in events[:2]
+            if e.get("event_ticker") and e.get("series_ticker")]
+    assert len(real) >= 2, "Need at least 2 real (event_ticker, series_ticker) pairs to test against"
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+    def _redirect_target(event_ticker: str) -> str:
+        url = f"https://kalshi.com/events/{event_ticker}"
+        r = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        return r.url.replace("https://kalshi.com", "").strip("/")
+
+    print("\n=== Live /events/ redirect resolve-check ===")
+    for event_ticker, series_ticker in real:
+        final_path = _redirect_target(event_ticker)  # e.g. "markets/kxhooda/kxhooda-28janfunded"
+        segments = final_path.split("/")
+        # Real tickers resolve into markets/{series}/{ticker} — three
+        # segments where segments[1] matches the KNOWN series_ticker
+        # (lowercased) — a genuine DB lookup, confirmed against data
+        # independently fetched from the live trading API, not assumed.
+        resolved_to_series = (
+            len(segments) >= 3 and segments[0] == "markets"
+            and segments[1] == series_ticker.lower()
+        )
+        print(f"  REAL  {event_ticker:<30} series={series_ticker:<20} "
+              f"-> /{final_path}  resolved_to_series={resolved_to_series}")
+        assert resolved_to_series, (
+            f"{event_ticker} did not redirect into its known series {series_ticker!r} "
+            f"(got /{final_path})"
+        )
 
     fake_ticker = "ZZZZNOTAREALTICKER99999"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    homepage_paths = {"", "/", "/markets"}
-
-    def _check(ticker: str) -> dict:
-        url = f"https://kalshi.com/markets/{ticker}"
-        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
-        final_path = resp.url.replace("https://kalshi.com", "").rstrip("/")
-        return {
-            "ticker": ticker,
-            "url": url,
-            "status": resp.status_code,
-            "final_url": resp.url,
-            "redirected_to_homepage": final_path in homepage_paths,
-            "body_len": len(resp.text),
-        }
-
-    real_results = [_check(t) for t in real_tickers]
-    fake_result = _check(fake_ticker)
-
-    print("\n=== Live Kalshi URL resolve-check ===")
-    for r in real_results:
-        print(f"  REAL  {r['ticker']:<30} status={r['status']} "
-              f"final={r['final_url']} redirected_home={r['redirected_to_homepage']} "
-              f"body_len={r['body_len']}")
-    print(f"  FAKE  {fake_result['ticker']:<30} status={fake_result['status']} "
-          f"final={fake_result['final_url']} redirected_home={fake_result['redirected_to_homepage']} "
-          f"body_len={fake_result['body_len']}")
-
-    # The literal, narrow proof bar: real markets resolve 200, no homepage redirect.
-    for r in real_results:
-        assert r["status"] == 200
-        assert not r["redirected_to_homepage"]
-
-    # The actual finding: a FABRICATED ticker passes the identical narrow bar,
-    # so status/redirect alone cannot confirm page identity — this is why
-    # kalshi_market_url withholds construction rather than shipping this URL.
-    assert fake_result["status"] == 200
-    assert not fake_result["redirected_to_homepage"]
-    body_lens = [r["body_len"] for r in real_results] + [fake_result["body_len"]]
-    print(f"  Body length spread real-vs-fake: {max(body_lens) - min(body_lens)} bytes "
-          f"(near-identical HTML regardless of ticker validity)")
+    fake_path = _redirect_target(fake_ticker)
+    fake_segments = fake_path.split("/")
+    # A fabricated ticker has no real series to resolve to — the redirect
+    # must NOT produce the same markets/{series}/{ticker} three-segment
+    # structure a real ticker does (it stays a bare markets/{ticker}).
+    fake_looks_resolved = (
+        len(fake_segments) >= 3 and fake_segments[0] == "markets"
+        and fake_segments[1] != fake_ticker.lower()
+    )
+    print(f"  FAKE  {fake_ticker:<30} -> /{fake_path}  looks_resolved={fake_looks_resolved}")
+    assert not fake_looks_resolved, (
+        "Fabricated ticker unexpectedly resolved into a series/ticker structure — "
+        "the distinguishing signal no longer holds and kalshi_market_url's "
+        "confirmation should be re-examined"
+    )

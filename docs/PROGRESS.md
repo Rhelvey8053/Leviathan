@@ -2,6 +2,102 @@
 
 ---
 
+## 2026-07-23 — Kalshi Market-Link Pattern Confirmed (supersedes 2026-07-22 finding)
+
+**Trigger:** after the HTML email render shipped (entry below), the user
+reported the "Trade on Kalshi" links weren't rendering as real hyperlinks.
+That was expected per the 2026-07-22 investigation's conclusion (no
+confirmed URL pattern, so `kalshi_market_url` always returned `None`) — but
+the user asked to look into it again rather than accept that as final. This
+entry corrects that finding: a real pattern IS confirmed, via evidence the
+2026-07-22 pass didn't have.
+
+### What changed since 2026-07-22
+
+The earlier investigation only ever tested URLs *we constructed and
+requested*, and correctly found that meaningless — kalshi.com's
+`/markets/[...slug]` route is a Next.js client-rendered catch-all that
+returns HTTP 200 for literally any path, real or fabricated (146-byte body
+spread, identical headers). No amount of additional guessing against that
+endpoint would have changed the answer.
+
+This pass instead looked for **Kalshi-originated** confirmation instead of
+testing our own guesses, and found three independent sources agreeing on
+the same shape:
+
+1. **`https://kalshi.com/AGENTS.md`** — Kalshi's own documentation written
+   for AI agents states the market-page URL shape directly.
+2. **`sitemap-markets.xml`** (Kalshi's own crawled sitemap) — independently
+   shows the same `markets/{series_ticker}/{event_ticker}` structure
+   (optionally with a cosmetic title-slug inserted in the middle).
+3. **A genuine server-side redirect**, unlike the client-rendered catch-all:
+   `https://kalshi.com/events/{event_ticker}` issues a real 308 redirect
+   chain, and — critically — it behaves *differently* for real vs. fake
+   tickers. Live test output (`pytest tests/test_kalshi_url.py --network -v -s`):
+   a real ticker's redirect chain resolves into `markets/{series}/{event}`
+   matching its known series; a fabricated ticker does not resolve the same
+   way. This is the first genuinely distinguishing signal found across both
+   investigations — the `/events/` endpoint does real server-side lookup,
+   unlike `/markets/` which never rejects anything.
+
+**Confirmed pattern:** `https://kalshi.com/markets/{series_ticker}/{event_ticker}`
+(both lowercased). Requires `series_ticker`, which — unlike `event_ticker` —
+lives only on the **event** object returned by `fetch_events()`, never on a
+raw market object. `main.py`'s event-fetch loop now captures it per event
+and attaches it to every market dict from that event
+(`m["series_ticker"] = series_ticker`), the same way `event_ticker` already
+flows through. Threaded end to end: `main.py` (both signal-construction
+sites) → `analysis/resolve_first.py:log_selected` → `core/logger.py` schema
+(`series_ticker TEXT DEFAULT ''`, additive `_add_col` migration, new
+`log_signal` column) → `core/kalshi.kalshi_market_url(series_ticker,
+event_ticker)` (signature changed, now returns a real URL instead of always
+`None`) → `core/report.py` (`_rank_top_picks`, `_betting_queue_data`'s SQL
+SELECT, both `_kalshi_link_or_bare` call sites, `_synthetic_dry_run_signals`)
+so both the text and HTML renderers pick it up automatically via the
+existing shared-computation functions from the prior goal — zero divergence
+risk, no new code path duplicated between renderers.
+
+**Known, accepted gap:** `sitemap-markets.xml` has ~0/14 coverage of this
+project's actual tracked markets (low-liquidity/niche), so it cannot serve
+as a live per-ticker verification lookup for real use. The implementation
+trusts the confirmed *format* (backed by the 3-source evidence trail above)
+rather than verifying each individual ticker resolves — genuinely
+unverifiable per-ticker via plain HTTP given the client-render issue that
+still holds. Documented directly in `kalshi_market_url`'s docstring so this
+tradeoff isn't lost. Rows logged before this change have `series_ticker=''`
+and correctly render as bare ticker text, never a broken link.
+
+**Tests:** rewrote `tests/test_kalshi_url.py` (the old file asserted "always
+returns None" — true before, false now) and the Kalshi-link section of
+`tests/test_report_html.py` (5 cases: real-unmocked positive, mocked
+resolver, missing event_ticker, missing series_ticker, and an upgraded
+404-regression-guard that also confirms the correct link shape appears).
+Added 4 `series_ticker` schema/migration/round-trip tests to
+`tests/test_logger.py` mirroring the existing `event_ticker` tests. Updated
+the throwaway `signals` schema helpers in `tests/test_4c.py`, `test_4d.py`,
+and `test_report.py` to add the `series_ticker` column (same fix pattern as
+`event_ticker` before it). Full suite: 1648 passed, 1 skipped by default
+(the network-gated live test, run explicitly with `--network`).
+
+### No number changed
+
+Same as the prior goal: this is presentation/linking only. No scoring,
+threshold, filter, or config value changed anywhere.
+
+### Top 3 next steps
+
+1. Do the HUMAN TESTING CHECKLIST item 5 from the 2026-07-23 HTML-report
+   entry below — click a real link in a live-sent email and confirm it
+   resolves to the actual market page, not a 404.
+2. Backfill `series_ticker` for historical rows only if a concrete use case
+   needs it (mirrors the same open item for `event_ticker`) — not required
+   for new signals, which capture it going forward.
+3. If `sitemap-markets.xml` ever gains coverage of this project's tracked
+   markets, it could become a genuine per-ticker verification source rather
+   than just format confirmation — revisit if that changes.
+
+---
+
 ## 2026-07-23 — Email-Safe HTML Report (multipart/alternative)
 
 **Goal:** the daily report email was plain monospace text with weak hierarchy and

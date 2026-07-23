@@ -1863,12 +1863,12 @@ def _make_bq_db(tmp_path, pending_rows=None, fill_tickers=None):
             call_id TEXT, ticker TEXT, direction TEXT, market_price REAL,
             our_estimate REAL, edge REAL, close_time TEXT,
             confidence TEXT, result TEXT, source TEXT, timestamp TEXT,
-            title TEXT, event_ticker TEXT
+            title TEXT, event_ticker TEXT, series_ticker TEXT
         );
     """)
     for r in (pending_rows or []):
         conn.execute(
-            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 r.get("call_id", r["ticker"]),
                 r["ticker"], r.get("direction", "YES"),
@@ -1878,13 +1878,14 @@ def _make_bq_db(tmp_path, pending_rows=None, fill_tickers=None):
                 r.get("timestamp", "2026-06-20T00:00:00Z"),
                 r.get("title", ""),
                 r.get("event_ticker", ""),
+                r.get("series_ticker", ""),
             )
         )
     for tk in (fill_tickers or []):
         conn.execute(
-            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (tk, tk, "YES", 0.20, 0.50, 0.30, None, "MED", "", "real_fill",
-             "2026-06-20T00:00:00Z", "", "")
+             "2026-06-20T00:00:00Z", "", "", "")
         )
     conn.commit()
     conn.close()

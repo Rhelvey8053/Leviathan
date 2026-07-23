@@ -110,6 +110,7 @@ def _init_db() -> None:
             "net_edge_after_fee    REAL",
             "ev_after_fee_per_contract REAL",
             "event_ticker          TEXT    DEFAULT ''",
+            "series_ticker         TEXT    DEFAULT ''",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -210,8 +211,8 @@ def log_signal(signal: dict) -> None:
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
                  base_rate,net_edge,heuristic_direction,short_horizon,time_horizon,
                  close_time,leviathan_score,heuristic_label,
-                 net_edge_after_fee,ev_after_fee_per_contract,event_ticker)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -244,6 +245,7 @@ def log_signal(signal: dict) -> None:
                 _to_float(signal.get("net_edge_after_fee")),
                 _to_float(signal.get("ev_after_fee_per_contract")),
                 signal.get("event_ticker", ""),
+                signal.get("series_ticker", ""),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")

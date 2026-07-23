@@ -44,10 +44,11 @@ def _run_meta(**kwargs):
 
 def _sig(ticker="KXTST-01", direction="YES", confidence="MED", edge=0.15,
          time_horizon="MONTHLY", market_price=0.30, our_estimate=0.45,
-         event_ticker="", **kwargs):
+         event_ticker="", series_ticker="", **kwargs):
     base = {
         "ticker":          ticker,
         "event_ticker":    event_ticker,
+        "series_ticker":   series_ticker,
         "title":           f"Will {ticker} happen?",
         "direction":       direction,
         "confidence":      confidence,
@@ -131,14 +132,14 @@ def test_render_html_and_text_use_same_betting_queue_query(tmp_path):
             call_id TEXT, ticker TEXT, direction TEXT, market_price REAL,
             our_estimate REAL, edge REAL, close_time TEXT,
             confidence TEXT, result TEXT, source TEXT, timestamp TEXT, title TEXT,
-            event_ticker TEXT
+            event_ticker TEXT, series_ticker TEXT
         );
     """)
     conn.execute(
-        "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         ("bq1", "KXBQSHARED-01", "YES", 0.30, 0.60, 0.30,
          "2026-12-31T00:00:00Z", "HIGH", "", "paper",
-         "2026-06-20T00:00:00Z", "Shared queue title", "KXBQSHARED-01-EVT"),
+         "2026-06-20T00:00:00Z", "Shared queue title", "KXBQSHARED-01-EVT", "KXBQSHARED"),
     )
     conn.commit()
     conn.close()
@@ -155,52 +156,71 @@ def test_render_html_and_text_use_same_betting_queue_query(tmp_path):
     assert "Shared queue title" in html_body
 
 
-# ─── Kalshi links (PART C) ────────────────────────────────────────────────────
+# ─── Kalshi links (PART C, upgraded 2026-07-23 — pattern now confirmed) ──────
 
-def test_html_row_with_resolved_url_gets_href():
-    """A row whose event_ticker resolves via kalshi_market_url renders an <a href>."""
-    s = _sig(ticker="KXLINKED-01", event_ticker="KXLINKED-01-EVT")
+def test_html_row_with_series_and_event_ticker_gets_real_href():
+    """
+    With BOTH series_ticker and event_ticker present, the REAL (unmocked)
+    kalshi_market_url now constructs a working link — no mock needed,
+    since the pattern is confirmed (see core/kalshi.py, docs/PROGRESS.md).
+    """
+    s = _sig(ticker="KXLINKED-01", series_ticker="KXLINKED", event_ticker="KXLINKED-01-EVT")
+    html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                   new_signals=[s], repeat_signals=[],
+                                   now_utc=_FIXED_NOW)
+    assert 'href="https://kalshi.com/markets/kxlinked/kxlinked-01-evt"' in html_body
+
+
+def test_html_row_with_mocked_resolver_gets_href():
+    """The render-layer wiring itself (independent of kalshi_market_url's
+    specific logic) correctly turns a resolved URL into an <a href>."""
+    s = _sig(ticker="KXLINKED-02", series_ticker="KXLINKED2", event_ticker="KXLINKED-02-EVT")
     with patch.object(report, "kalshi_market_url",
-                      side_effect=lambda et: f"https://kalshi.com/markets/{et}" if et else None):
+                      side_effect=lambda st, et=None: f"https://kalshi.com/markets/{st}/{et}" if st and et else None):
         html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
                                        new_signals=[s], repeat_signals=[],
                                        now_utc=_FIXED_NOW)
-    assert 'href="https://kalshi.com/markets/KXLINKED-01-EVT"' in html_body
+    assert 'href="https://kalshi.com/markets/KXLINKED2/KXLINKED-02-EVT"' in html_body
 
 
 def test_html_row_with_empty_event_ticker_has_no_href():
-    """A row with no event_ticker shows the bare ticker with NO href anywhere for it."""
-    s = _sig(ticker="KXBARE-01", event_ticker="")
+    """A row missing event_ticker (series_ticker present or not) shows the
+    bare ticker with NO href anywhere for it."""
+    s = _sig(ticker="KXBARE-01", series_ticker="KXBARE", event_ticker="")
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
                                    new_signals=[s], repeat_signals=[],
                                    now_utc=_FIXED_NOW)
     assert "KXBARE-01" in html_body
     assert 'href=""' not in html_body
-    # With no event_ticker, kalshi_market_url (real, unmocked) returns None,
-    # so no <a href> should appear anywhere in this single-signal render.
+    # event_ticker missing -> kalshi_market_url (real, unmocked) returns
+    # None, so no <a href> should appear anywhere in this single-signal render.
+    assert "<a href" not in html_body
+
+
+def test_html_row_with_empty_series_ticker_has_no_href():
+    """A row missing series_ticker (the field a pre-upgrade row would lack)
+    shows the bare ticker with NO href, even with a valid event_ticker."""
+    s = _sig(ticker="KXNOSERIES-01", series_ticker="", event_ticker="KXNOSERIES-01-EVT")
+    html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                   new_signals=[s], repeat_signals=[],
+                                   now_utc=_FIXED_NOW)
+    assert "KXNOSERIES-01" in html_body
+    assert 'href=""' not in html_body
     assert "<a href" not in html_body
 
 
 def test_html_never_reintroduces_confirmed_404_form():
-    """Regression: even with a resolvable helper, must never emit the bare
-    market-ticker kalshi.com/markets/{ticker} 404-prone form as a real
-    href when kalshi_market_url legitimately returns None (current state)."""
-    s = _sig(ticker="KXNOFORM-01", event_ticker="")
+    """Regression: must never emit the bare market-ticker (no series
+    segment) kalshi.com/markets/{ticker} 404-prone form as a real href,
+    even when a link IS legitimately resolved for this signal."""
+    s = _sig(ticker="KXNOFORM-01", series_ticker="KXNOFORM", event_ticker="KXNOFORM-01")
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
                                    new_signals=[s], repeat_signals=[],
                                    now_utc=_FIXED_NOW)
     assert 'href="https://kalshi.com/markets/KXNOFORM-01"' not in html_body
-
-
-def test_current_kalshi_market_url_always_none_yields_bare_tickers_everywhere():
-    """Exercises the REAL (unmocked) goal_1 behavior: every pick and queue
-    row renders as bare ticker text since no URL pattern is confirmed yet."""
-    s = _sig(ticker="KXREAL-01", event_ticker="KXREAL-01-EVT")
-    html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
-                                   new_signals=[s], repeat_signals=[],
-                                   now_utc=_FIXED_NOW)
-    assert "KXREAL-01" in html_body
-    assert "<a href" not in html_body  # no links anywhere — kalshi_market_url returns None
+    assert 'href="https://kalshi.com/markets/kxnoform-01"' not in html_body
+    # The real, confirmed two-segment form IS expected to appear instead.
+    assert 'href="https://kalshi.com/markets/kxnoform/kxnoform-01"' in html_body
 
 
 # ─── multipart/alternative send (PART D) ─────────────────────────────────────

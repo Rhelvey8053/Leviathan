@@ -470,7 +470,7 @@
       },
       "depends_on": [],
       "action": "Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern.",
-      "notes": "No URL pattern confirmed -- kalshi.com is a client-rendered SPA where a fabricated ticker returns an identical 200/no-redirect/near-identical-HTML response to a real one, so kalshi_market_url() always returns None until a verifiable pattern exists. event_ticker itself is persisted and round-trips correctly. See docs/PROGRESS.md 2026-07-22 for the full investigation.",
+      "notes": "UPDATE 2026-07-23: URL pattern now confirmed -- https://kalshi.com/markets/{series_ticker}/{event_ticker}, backed by Kalshi's own AGENTS.md, its sitemap-markets.xml, and a genuine server-side redirect from /events/{event_ticker} that resolves real tickers but not fake ones. series_ticker (event-object-only field) now captured and threaded through end to end; kalshi_market_url() returns real links. See docs/PROGRESS.md 2026-07-23 (Kalshi Market-Link Pattern Confirmed) for the full evidence trail; 2026-07-22 entry has the original (since-superseded) investigation.",
       "status": "done"
     },
     {

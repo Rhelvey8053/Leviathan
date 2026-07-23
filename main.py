@@ -142,11 +142,17 @@ def main():
             event_ticker = event.get("event_ticker") or event.get("ticker", "")
             if not event_ticker or "KXMVE" in event_ticker:
                 continue
+            # series_ticker lives on the EVENT object only (not the raw market
+            # object) — capture it here and attach it to each market so it's
+            # available downstream for kalshi_market_url(), the same way
+            # event_ticker is already carried through.
+            series_ticker = event.get("series_ticker", "")
             try:
                 for m in kalshi.fetch_event_markets(config, event_ticker):
                     t = m.get("ticker")
                     if t and t not in seen:
                         seen.add(t)
+                        m["series_ticker"] = series_ticker
                         all_markets.append(m)
             except Exception as _e:
                 print(f"      [warn] fetch_event_markets({event_ticker}): {_e}")
@@ -626,6 +632,7 @@ def main():
             **cs,
             "title":           m.get("title", cs.get("title", "")),
             "event_ticker":    m.get("event_ticker", ""),
+            "series_ticker":   m.get("series_ticker", ""),
             "whale_detected":  whale.get("whale_detected", False),
             "whale_direction": whale.get("whale_direction"),
             "whale_reversal":  m.get("whale_reversal", False),
@@ -729,6 +736,7 @@ def main():
                     **cs,
                     "title":           m.get("title", cs.get("title", "")),
                     "event_ticker":    m.get("event_ticker", ""),
+                    "series_ticker":   m.get("series_ticker", ""),
                     "whale_detected":  whale.get("whale_detected", False),
                     "whale_direction": whale.get("whale_direction"),
                     "whale_reversal":  m.get("whale_reversal", False),
