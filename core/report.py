@@ -829,14 +829,15 @@ def _html_close_date(s: dict) -> str:
         return ""
 
 
-def _kalshi_link_or_bare(ticker: str, event_ticker: str, label: str | None = None) -> str:
+def _kalshi_link_or_bare(ticker: str, series_ticker: str, event_ticker: str,
+                          label: str | None = None) -> str:
     """
-    Returns an '<a href="...">display</a>' Kalshi link if event_ticker
-    resolves via kalshi_market_url, otherwise the bare display text with
-    NO href. Never emits href="" and never builds a URL itself —
-    kalshi_market_url is goal_1's single confirmed-pattern source of truth
-    (it currently always returns None, so every row renders as bare ticker
-    text until a pattern is confirmed).
+    Returns an '<a href="...">display</a>' Kalshi link if series_ticker
+    and event_ticker resolve via kalshi_market_url, otherwise the bare
+    display text with NO href. Never emits href="" and never builds a URL
+    itself — kalshi_market_url is the single confirmed-pattern source of
+    truth (rows logged before series_ticker was captured have it empty
+    and fall back to bare ticker text).
 
     `label`, if given, is treated as ALREADY-SAFE markup (e.g. a fixed
     string with an intentional "&nbsp;" entity) and is NOT re-escaped —
@@ -845,7 +846,7 @@ def _kalshi_link_or_bare(ticker: str, event_ticker: str, label: str | None = Non
     `ticker` is escaped here since it's raw, unescaped data.
     """
     display = label if label is not None else _esc(ticker)
-    url = kalshi_market_url(event_ticker)
+    url = kalshi_market_url(series_ticker, event_ticker)
     if not url:
         return display
     return f'<a href="{_esc(url)}" class="klink" style="color:#84b6fb;text-decoration:none;">{display}</a>'
@@ -900,6 +901,7 @@ def _rank_top_picks(signals: list[dict], n: int = 3) -> list[dict]:
             "strength":      strength,
             "ticker":        ticker,
             "event_ticker":  s.get("event_ticker", ""),
+            "series_ticker": s.get("series_ticker", ""),
             "close_fmt":     close_fmt,
             "close_time_raw": s.get("close_time") or s.get("expiration_time", ""),
             "urgency":       urgency,
@@ -973,8 +975,8 @@ def _betting_queue_data(db_path: str | None = None, top_n: int = 5, config: dict
     "unavailable" message), otherwise:
       {"rows": [...], "below_floor_count": int, "already_placed": [tickers],
        "unit_size": float, "min_ev_pct": float, "ev_floor": float}
-    Each row: ticker, event_ticker, direction, conf, title, mp, edge, days,
-    urgency, ev_after (float or None), ev_s (formatted), kelly (raw tuple
+    Each row: ticker, event_ticker, series_ticker, direction, conf, title,
+    mp, edge, days, urgency, ev_after (float or None), ev_s (formatted), kelly (raw tuple
     or None), kelly_s (formatted).
     """
     import sqlite3 as _sq
@@ -998,7 +1000,7 @@ def _betting_queue_data(db_path: str | None = None, top_n: int = 5, config: dict
 
         cur.execute(
             "SELECT ticker, direction, market_price, our_estimate, edge, close_time, "
-            "confidence, title, event_ticker "
+            "confidence, title, event_ticker, series_ticker "
             "FROM signals "
             "WHERE result = '' AND source != 'real_fill' AND direction != 'PASS' "
             "ORDER BY timestamp DESC"
@@ -1013,7 +1015,7 @@ def _betting_queue_data(db_path: str | None = None, top_n: int = 5, config: dict
     already_placed = []
     below_floor_count = 0
     for row in rows:
-        ticker, direction, mp, est, edge, close_time, conf, title, event_ticker = row
+        ticker, direction, mp, est, edge, close_time, conf, title, event_ticker, series_ticker = row
         if ticker in placed:
             already_placed.append(ticker)
             continue
@@ -1050,8 +1052,9 @@ def _betting_queue_data(db_path: str | None = None, top_n: int = 5, config: dict
         kelly    = _kelly_fraction(direction, mp_f, est)
         kelly_s  = f"{kelly[1]*100:.1f}%" if kelly else "—"
         candidates.append({
-            "ticker":       ticker,
-            "event_ticker": event_ticker or "",
+            "ticker":        ticker,
+            "event_ticker":  event_ticker or "",
+            "series_ticker": series_ticker or "",
             "direction":    direction,
             "conf":         conf or "?",
             "title":        (title or "").strip(),
@@ -1513,8 +1516,9 @@ def _pick_card_html(pick: dict) -> str:
             f'background-color:#1a2334;padding:4px 9px;border-radius:5px;">{_esc(pick["flag_path"])}</span></td>'
         )
 
-    kalshi_link = _kalshi_link_or_bare(pick["ticker"], pick["event_ticker"], label="Trade on Kalshi&nbsp;↗")
-    ticker_link = _kalshi_link_or_bare(pick["ticker"], pick["event_ticker"])
+    kalshi_link = _kalshi_link_or_bare(pick["ticker"], pick["series_ticker"], pick["event_ticker"],
+                                       label="Trade on Kalshi&nbsp;↗")
+    ticker_link = _kalshi_link_or_bare(pick["ticker"], pick["series_ticker"], pick["event_ticker"])
 
     rep_s = (f" · REPEAT ×{pick['repeat_count']}" if pick["repeat_count"] >= 2
              else (" · REPEAT" if pick["is_repeat"] else ""))
@@ -1566,7 +1570,8 @@ def _betting_row_html(row: dict) -> str:
     """Renders one BETTING QUEUE table row matching leviathan_report_email_v2.html."""
     dir_color = "#3ddc9f" if row["direction"] == "YES" else "#f9bd74"
     ev_s = row["ev_s"] if row["ev_s"] != "—" else "—"
-    link = _kalshi_link_or_bare(row["ticker"], row["event_ticker"], label=f"{_esc(row['ticker'])}&nbsp;↗")
+    link = _kalshi_link_or_bare(row["ticker"], row["series_ticker"], row["event_ticker"],
+                                label=f"{_esc(row['ticker'])}&nbsp;↗")
     title_s = _esc(row["title"]) if row["title"] else ""
     return f'''
         <tr>
@@ -2019,18 +2024,21 @@ def _synthetic_dry_run_signals() -> list[dict]:
     """Fallback signal data for --dry-run when the real DB has nothing recent."""
     return [
         {"ticker": "KXSPCELAUNCH-COMM-27JAN01", "event_ticker": "KXSPCELAUNCH-COMM-27JAN01",
+         "series_ticker": "KXSPCELAUNCH",
          "title": "When will Virgin Galactic launch its next commercial Delta-class SpaceShip flight?",
          "direction": "NO", "confidence": "MED", "flag_path": "HEURISTIC",
          "market_price": 0.595, "our_estimate": 0.40, "edge": 0.195,
          "time_horizon": "LONG", "close_time": "2027-01-01T15:00:00Z",
          "is_repeat": True, "repeat_count": 2},
         {"ticker": "KXALBUMRELEASEDATEBEY-NEW-JAN01-27", "event_ticker": "KXALBUMRELEASEDATEBEY-NEW-JAN01-27",
+         "series_ticker": "KXALBUMRELEASEDATEBEY",
          "title": "Will Beyoncé release a new album before Jan 1, 2027?",
          "direction": "NO", "confidence": "MED", "flag_path": "DRIFT",
          "market_price": 0.59, "our_estimate": 0.40, "edge": 0.19,
          "time_horizon": "LONG", "close_time": "2027-01-01T15:00:00Z",
          "is_repeat": True, "repeat_count": 2},
         {"ticker": "KXMANAGEROUTDATE-28TUCHEL-26AUG01", "event_ticker": "KXMANAGEROUTDATE-28TUCHEL-26AUG01",
+         "series_ticker": "KXMANAGEROUTDATE",
          "title": "Will Thomas Tuchel be out before Aug 1, 2026?",
          "direction": "NO", "confidence": "MED", "flag_path": "DRIFT",
          "market_price": 0.195, "our_estimate": 0.07, "edge": 0.125,

@@ -1942,3 +1942,85 @@ def test_log_signal_event_ticker_defaults_empty_when_absent(tmp_db):
         ).fetchone()
     assert row is not None
     assert row["event_ticker"] == ""
+
+
+# ─── series_ticker capture (Kalshi link URL confirmation, 2026-07-23) ────────
+
+def test_schema_includes_series_ticker(tmp_db):
+    """series_ticker column exists in the signals table."""
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "series_ticker" in cols
+
+
+def test_migration_adds_series_ticker_without_corrupting_existing_rows(tmp_path):
+    """
+    Construct a DB with the OLD (pre-series_ticker) schema, insert a row,
+    run the migration (_init_db), and confirm the row survives with the
+    new column present and defaulted to ''.
+    """
+    import sqlite3
+    db_file = str(tmp_path / "old_schema2.db")
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, whale_detected INTEGER DEFAULT 0, whale_direction TEXT,
+            outcome TEXT, result TEXT, pnl_if_traded REAL, run_id TEXT,
+            event_ticker TEXT DEFAULT ''
+        );
+    """)
+    conn.execute("INSERT INTO signals (call_id, ticker, direction, event_ticker) "
+                 "VALUES ('old2', 'KXOLDROW2', 'YES', 'KXOLDROW2-EVT')")
+    conn.commit()
+    conn.close()
+
+    old_db_path = logger.DB_PATH
+    try:
+        logger.DB_PATH = db_file
+        logger._init_db()
+        with logger._db() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(signals)").fetchall()}
+            assert "series_ticker" in cols
+            row = c.execute(
+                "SELECT ticker, event_ticker, series_ticker FROM signals WHERE call_id='old2'"
+            ).fetchone()
+            assert row["ticker"] == "KXOLDROW2"
+            assert row["event_ticker"] == "KXOLDROW2-EVT"  # pre-existing column untouched
+            assert row["series_ticker"] == ""
+    finally:
+        logger.DB_PATH = old_db_path
+
+
+def test_log_signal_stores_series_ticker(tmp_db):
+    """series_ticker round-trips when provided in the signal dict."""
+    sig = {
+        "ticker": "KXSER1", "event_ticker": "KXSER1-26AUG01", "series_ticker": "KXSER1",
+        "title": "Series ticker test",
+        "market_price": 0.30, "our_estimate": 0.45, "edge": 0.15,
+        "direction": "YES", "confidence": "MED", "run_id": "test",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT series_ticker FROM signals WHERE ticker='KXSER1'"
+        ).fetchone()
+    assert row is not None
+    assert row["series_ticker"] == "KXSER1"
+
+
+def test_log_signal_series_ticker_defaults_empty_when_absent(tmp_db):
+    """series_ticker defaults to '' (not NULL/crash) when not provided."""
+    sig = {
+        "ticker": "KXSER2", "title": "No series ticker",
+        "market_price": 0.25, "our_estimate": 0.40, "edge": 0.15,
+        "direction": "YES", "confidence": "MED", "run_id": "test",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT series_ticker FROM signals WHERE ticker='KXSER2'"
+        ).fetchone()
+    assert row is not None
+    assert row["series_ticker"] == ""

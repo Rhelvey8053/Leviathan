@@ -83,13 +83,13 @@ def _make_db(tmp_path, rows=None):
             call_id TEXT, ticker TEXT, direction TEXT, market_price REAL,
             our_estimate REAL, edge REAL, close_time TEXT,
             confidence TEXT, result TEXT, source TEXT, timestamp TEXT, title TEXT,
-            event_ticker TEXT
+            event_ticker TEXT, series_ticker TEXT
         );
         CREATE TABLE fills (ticker TEXT, filled_at TEXT);
     """)
     for r in (rows or []):
         conn.execute(
-            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO signals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 r.get("call_id", r["ticker"]),
                 r["ticker"],
@@ -103,6 +103,7 @@ def _make_db(tmp_path, rows=None):
                 r.get("timestamp", "2026-06-20T00:00:00Z"),
                 r.get("title", ""),
                 r.get("event_ticker", ""),
+                r.get("series_ticker", ""),
             ),
         )
     conn.commit()

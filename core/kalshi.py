@@ -356,34 +356,58 @@ def fetch_market_history(config: dict, ticker: str, period_seconds: int = 86400)
     return resp.json().get("history", [])
 
 
-def kalshi_market_url(event_ticker: str | None) -> str | None:
+def kalshi_market_url(series_ticker: str | None, event_ticker: str | None = None) -> str | None:
     """
-    Returns a kalshi.com market-page URL for a given event_ticker, or None
-    if no confirmed-working URL pattern exists.
+    Returns a kalshi.com market-page URL for a given (series_ticker,
+    event_ticker) pair, or None if either is missing/empty.
 
-    STATUS: NO CONFIRMED PATTERN — always returns None right now.
+    CONFIRMED PATTERN (2026-07-23, superseding the 2026-07-22 "no pattern
+    confirmed" finding — see docs/PROGRESS.md for the full trail):
 
-    kalshi.com's market pages are a client-rendered Next.js app behind a
-    catch-all route (X-Matched-Path: /markets/[...slug]). Empirically
-    verified (2026-07-22) across 3 real event tickers plus a fabricated
-    one: https://kalshi.com/markets/{event_ticker} returns HTTP 200 with
-    no redirect for EVERY input tried, including the fake ticker —
-    identical status code, identical response headers, and near-identical
-    (~148KB) HTML body with no server-rendered market title or content for
-    either the real or fake case. The distinguishing "not found" state is
-    rendered client-side by JS after the page loads, which a plain HTTP
-    request cannot see. This means HTTP status/redirect-based resolve-
-    testing (the required proof method — see docs/PROGRESS.md) cannot
-    distinguish a real market page from a fabricated one, so no pattern is
-    considered confirmed. Mirrors sources/accounts.py's POLY_URL pattern
-    in spirit (a single URL-builder for one platform) but intentionally
-    withholds construction until a verifiable pattern exists — see
-    docs/PROGRESS.md for the full investigation and next-step options
-    (most likely: capture a slug at scan time, as accounts.py already does
-    for Polymarket via eventSlug, if Kalshi's API ever exposes one).
+        https://kalshi.com/markets/{series_ticker.lower()}/{event_ticker.lower()}
 
-    Never emits a guessed URL and never reintroduces the confirmed-404
-    kalshi.com/markets/{market_ticker} form. Callers must treat a None
-    return as "render the bare ticker, no href" — never href="".
+    The 2026-07-22 investigation correctly found that HTTP status/redirect
+    checks against kalshi.com/markets/{ticker} are meaningless — it's a
+    client-rendered Next.js catch-all route (X-Matched-Path:
+    /markets/[...slug]) that returns 200 for ANY path, real or fabricated.
+    That blocker still holds; this is not a retest of the same method.
+
+    What changed: Kalshi's OWN infrastructure, not a guess of ours, now
+    confirms this exact two-segment shape three independent ways:
+      1. Kalshi's own AGENTS.md (https://kalshi.com/AGENTS.md, published
+         for AI agents citing markets) documents
+         "https://kalshi.com/markets/<series-ticker>/<event-ticker>".
+      2. Kalshi's own sitemap-markets.xml lists real, indexed markets at
+         this same shape (with an optional cosmetic title-slug inserted
+         between the two tickers, which the site's own /events/ redirect
+         omits — see point 3 — so it is not required).
+      3. Kalshi's own server issues a genuine 308 redirect chain (not
+         client-side routing) from /events/{event_ticker} to exactly
+         /markets/{series_ticker}/{event_ticker} for real tickers —
+         verified against KXISRNORMCOUNT-27DEC31 and KXCABLEAVE-26MAY22.
+         Tested against a fabricated ticker for contrast: the redirect
+         does not resolve it into a series/ticker structure at all,
+         confirming this is a real server-side lookup, not path rewriting.
+
+    Known gap: kalshi.com/sitemap-markets.xml (Kalshi's own crawled index)
+    has near-zero coverage of the niche, lower-liquidity markets this
+    project actually tracks (0/14 tested from live signals), so it can't
+    serve as a live per-ticker verification lookup — this function trusts
+    the confirmed FORMAT (backed by points 1-3 above) rather than
+    confirming each individual ticker resolves, which remains genuinely
+    unverifiable for any single market via HTTP due to the client-render
+    issue in the 2026-07-22 finding.
+
+    series_ticker is captured in main.py from the EVENT object (event
+    objects have it; raw market objects do not) and threaded through
+    alongside event_ticker (see docs/PROGRESS.md). Rows logged before this
+    existed have series_ticker='' and fall back to bare ticker text.
+
+    Never emits a guessed URL when a required field is missing, and never
+    reintroduces the confirmed-404 kalshi.com/markets/{market_ticker}
+    (bare ticker, no series) form. Callers must treat a None return as
+    "render the bare ticker, no href" — never href="".
     """
-    return None
+    if not series_ticker or not event_ticker:
+        return None
+    return f"https://kalshi.com/markets/{series_ticker.lower()}/{event_ticker.lower()}"
