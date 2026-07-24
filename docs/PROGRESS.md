@@ -2,6 +2,198 @@
 
 ---
 
+## 2026-07-23 — Power BI Export Schema: our_estimate, brier_scorer, brier_market
+
+Handoff task 02 (`LEVIATHAN_TASK_02.md`), run immediately after the
+market-baseline-brier work above. Two parts.
+
+### Part 1 — Amend `market-baseline-brier` + ship the tightened export
+
+The item's original `action` text ("expose both in the resolved-signal
+export") didn't name columns. `signals.csv` carried `market_price` and
+`edge` but not the scorer's probability — Brier is `(outcome -
+probability)^2`, so without `our_estimate` a dashboard would have to derive
+probability as `market_price + edge`, which breaks on the 18 rows where
+`edge` is blank. Replaced the `action` field verbatim with the text
+specifying `our_estimate`, `brier_scorer`, `brier_market` as explicit
+columns.
+
+**Single-source-of-truth refactor** (the actual point of this task, not
+just a rename): extracted `brier_component(value, direction, result)` in
+`core/logger.py` — the `(value - outcome_binary)^2` building block both
+`get_brier_score()` and `get_market_baseline_brier_score()` already computed
+inline, now factored into one function both call. Verified behavior-
+preserving before touching anything else (same arithmetic order: sum raw
+terms, divide, round only the final mean) — ran `test_logger.py` +
+`test_calibration.py` in isolation first, 178 passed, before moving on to
+the export changes, specifically to isolate which layer broke anything if
+something had.
+
+`core/export_to_csv.py` now imports `brier_component` directly and computes
+`brier_scorer`/`brier_market` at export time from the same raw columns
+(`our_estimate`/`market_price`, `direction`, `result`) analysis/calibration.py's
+aggregates read — not from the `market_baseline_brier` DB column persisted
+by last goal's `resolve_outcomes()`/backfill (that column still exists and
+is still written, just no longer the export's source, so a missing backfill
+run can never silently produce a stale CSV number). `our_estimate` added to
+`WHITELIST` as an explicit raw column (previously excluded as "pipeline
+plumbing" — now a deliberate exception since Brier needs it directly).
+
+Renamed the prior session's `scorer_brier`/`market_baseline_brier` CSV
+column names to `brier_scorer`/`brier_market` per the task's explicit
+naming — safe because those two names were invented in-session, never
+committed, never wired into the `.pbix` (unlike `market_price`/`edge`/etc.,
+which this task explicitly forbids renaming).
+
+### Part 2 — New item: `powerbi-schema-hardening`
+
+Appended to `backlog/backlog.json` (42 items total), bumped `updated`,
+regenerated `BACKLOG.md`. `python -m backlog.engine status`: zero validation
+errors. **Implementation intentionally deferred** — the handoff explicitly
+scopes `run_id` FK backfill, the `source` discriminator audit, and the
+blank-vs-zero column audit to "a separate session after"; only the backlog
+entry itself was added this session.
+
+**Tests:** `tests/test_export_to_csv.py` — renamed/rewrote the Brier-column
+test class for the new names, added `our_estimate` presence test and a
+cross-check test asserting the per-row CSV values equal `brier_component()`
+called directly on the same inputs (the literal single-source guarantee).
+Extended `_COMPUTED_COLS_EXPECTED`, removed `our_estimate` from
+`_DROPPED_COLS` (it's now intentionally whitelisted). One more pre-existing
+hardcoded item-count assertion bumped (41→42), same direct consequence as
+the 30→41 fix from the prior entry — not a regression. Full suite: **1674
+passed, 1 skipped**.
+
+### Top 3 next steps
+
+1. `powerbi-schema-hardening` itself — `run_id` FK first (per its own
+   ordering), since `signals.csv`/`runs.csv` share no join key today and
+   Power BI can't relate a signal to its run's cost/token/runtime data.
+2. Re-point the `.pbix` at the renamed `brier_scorer`/`brier_market` columns
+   if any visual already referenced the prior session's names (unlikely —
+   that work was never committed — but worth a quick check before this
+   merges).
+3. Same three carried over from the prior entry: `preregistration`,
+   re-run the scorer-vs-baseline comparison once `resolved_count` is large
+   enough to matter, and `llm-cost-ceiling` to unblock the backtesting chain.
+
+---
+
+## 2026-07-23 — Backlog Intake (11 items) + Market-Price Baseline Brier
+
+Handoff task (`LEVIATHAN_TASK.md`), two phases, executed in order, nothing
+else touched.
+
+### Phase 1 — Backlog intake
+
+Added `"infra"` to `VALID_AREAS` in `backlog/engine.py` (needed by
+`llm-cost-ceiling` and `unattended-ops` — `execution` already means trade
+execution, not pipeline operations, so a new area was warranted rather than
+overloading an existing one). Appended 11 new items to `backlog/backlog.json`
+(30 → 41), bumped `updated`, regenerated `BACKLOG.md`. `python -m
+backlog.engine status` reports zero validation errors. Every supplied
+`status` value matched what `determine_status()` independently computes
+(precedence: `blocked` > `locked` > `depends_on` wins over a `trigger` even
+when the trigger itself would resolve to `locked` — e.g.
+`multi-sample-scoring` has a `resolved_count>=25` trigger but also
+`depends_on`, so it lands on `blocked`, matching the item as authored) — no
+mismatches to report, no status hand-edited.
+
+New items: `market-baseline-brier`, `preregistration`, `llm-cost-ceiling`,
+`replay-settled-fetcher` (ready); `replay-asof-reconstruction`,
+`replay-runner`, `replay-instrument-validation`, `price-blind-arm`,
+`methodology-writeup`, `multi-sample-scoring` (blocked, pending
+dependencies); `unattended-ops` (ready). 5 ready / 6 blocked among the new
+items, exactly as the handoff predicted. These items chart a path from the
+current single-pass, price-anchored scorer toward a validated backtesting
+and replay pipeline — most are gated behind `market-baseline-brier` and
+`llm-cost-ceiling` specifically because a replay corpus scored at volume
+needs a cost cap, and any of it needs an honest baseline before "edge" means
+anything.
+
+### Phase 2 — `market-baseline-brier` (only item implemented; everything
+else above stays untouched per the handoff's explicit scope)
+
+**The problem:** `core/scorer.py:649` injects the current market price into
+every scoring prompt, and `core/scorer.py:245-253` (the ANCHORING GUARD)
+explicitly instructs the model to move its estimate toward that price absent
+strong contrary evidence. This is intentional and reasonable scorer design —
+but it means the existing scorer Brier score (`get_brier_score()`) cannot by
+itself distinguish "the scorer found real edge" from "the scorer echoed the
+price back close enough to look calibrated." A baseline that scores the raw
+market price with the identical formula, over the identical row population,
+is the only way to tell those apart.
+
+**What shipped**, read-only against signal generation (no scorer prompt,
+threshold, or pipeline code touched):
+
+- `market_baseline_brier REAL` — new additive column on `signals`
+  (`core/logger.py`, existing idempotent `_add_col` migration pattern).
+- `_market_baseline_brier(market_price, direction, outcome)` — shared helper,
+  `(market_price - outcome_binary)^2`, `outcome_binary` derived the same way
+  `get_brier_score()` already derives it from `direction`+`result` (so the
+  two scores are apples-to-apples over the same rows). Returns `None` —
+  never `0.5` — when `market_price` is missing; a market baseline test
+  proved this isn't hypothetical (one of the 11 real resolved rows,
+  `fcd6dbc8`, genuinely has no logged `market_price`).
+- `resolve_outcomes()` now computes and persists this column at the same
+  UPDATE that already writes `outcome`/`result`/`pnl_if_traded` — the natural
+  (only) point where a row's real outcome becomes known. This is a
+  resolution/settlement-path change, not a signal-generation change.
+- `backfill_market_baseline_brier()` — idempotent one-off backfill for rows
+  resolved before this column existed (only touches rows still `NULL`, skips
+  rows with no `market_price`). Run once against the real DB: 10 of 11
+  resolved rows backfilled, the 11th correctly left `NULL`.
+- `get_market_baseline_brier_score()` — aggregate, mirrors `get_brier_score()`
+  exactly (same `_PAPER` filter excluding `real_fill`/`research_probe`, same
+  EXCELLENT/GOOD/FAIR/POOR labels), substituting `market_price` for
+  `our_estimate` and adding the "exclude missing price" filter.
+- `analysis/calibration.py` — prints Market Baseline Brier directly below the
+  existing scorer Brier line, plus a verdict line (`scorer beats` /
+  `scorer WORSE than` / `scorer ~=` the baseline) so the comparison is
+  explicit, not left for a reader to compute by hand.
+- `core/export_to_csv.py` (the resolved-signal export) — `market_baseline_brier`
+  added to `WHITELIST` (persisted column, passes through as-is; blank, not
+  `"0.5"`, when `NULL`); `scorer_brier` added as a new computed column
+  (mirrors `is_win`'s pattern — computed at export time from `our_estimate`,
+  blank when unresolved or `our_estimate` missing) so both numbers sit next
+  to each other per row, not just in the aggregate.
+
+**Real finding on the current n=8 paper population** (after backfill):
+scorer Brier = 0.0578 (EXCELLENT by the 0-0.25 scale) vs market-baseline
+Brier = 0.0022 (also EXCELLENT, but ~26x lower) — the scorer is currently
+**worse** than just using the market price directly. At n=8 this is far too
+small to be conclusive, but it's exactly the failure mode this metric was
+built to catch, and it's now visible instead of hidden inside a
+misleadingly-good-looking scorer Brier number.
+
+**Tests:** `tests/test_logger.py` (+17: pending/perfect/random/excludes-null-
+price/excludes-probe-rows for the aggregate, helper unit tests, resolve_outcomes
+persistence including the missing-price case, backfill fill/skip/idempotent/
+unresolved-rows-untouched), new `tests/test_calibration.py` (+6: line
+presence, PENDING cases, both verdict directions, both scores shown
+together), `tests/test_export_to_csv.py` (+6 dedicated Brier-column tests,
++1 existing computed-columns-list extended for `scorer_brier`). One
+pre-existing test (`tests/test_backlog.py`, hardcoded item count) updated
+from 30 to 41 to reflect Phase 1's intake — a direct, correct consequence of
+adding items, not a regression. Full suite: **1672 passed, 1 skipped**
+(unchanged network-gated test from an earlier goal).
+
+### Top 3 next steps
+
+1. `preregistration` (also `ready`, priority 1) — write
+   `docs/PREREGISTRATION.md` now, before more resolved data accumulates,
+   per its own append-only/pre-commitment discipline.
+2. Re-run this comparison once n is large enough to matter (the
+   `brier-tracking` gate itself sits at `resolved_count>=25`) — 8 resolved
+   paper signals is not enough to act on the scorer-vs-baseline gap yet,
+   only enough to know the instrument is now watching for it.
+3. `llm-cost-ceiling` (ready, priority 2) — prerequisite for `replay-runner`
+   and `price-blind-arm`, both blocked on it; next logical item to unblock
+   the backtesting chain.
+
+---
+
 ## 2026-07-23 — Kalshi Market-Link Pattern Confirmed (supersedes 2026-07-22 finding)
 
 **Trigger:** after the HTML email render shipped (entry below), the user

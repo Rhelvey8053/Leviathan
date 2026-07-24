@@ -10,6 +10,8 @@ import csv
 import os
 import sqlite3
 
+from core.logger import brier_component
+
 _ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH    = os.path.join(_ROOT, "data", "leviathan.db")
 EXPORT_DIR = os.path.join(_ROOT, "data", "powerbi_export")
@@ -29,23 +31,31 @@ _NULL_STRINGS = frozenset({"None", "nan", "NaT"})
 # Computed columns that are derived at export time, not stored in the DB.
 _COMPUTED_COLS = frozenset({
     "is_resolved", "is_win", "confidence_rank", "horizon_rank",
-    "date", "pnl_scaled", "lv_band",
+    "date", "pnl_scaled", "lv_band", "brier_scorer", "brier_market",
 })
 
 # Analysis-relevant columns written to signals.csv, in display order.
 # Pipeline plumbing (run_id, from_signal, fill_count, fill_fee, outcome,
-# our_estimate, direction_aligned, entry_price, signal_call_id, logged_under,
+# direction_aligned, entry_price, signal_call_id, logged_under,
 # resolution_date, whale_direction, heuristic_direction, etc.) are excluded.
+# our_estimate is kept (unlike the rest of that plumbing list) because Brier
+# is (outcome - probability)^2 and without it a dashboard would have to
+# derive probability as market_price + edge, which breaks wherever edge is
+# blank. brier_scorer/brier_market are computed here from our_estimate/
+# market_price via the same core.logger.brier_component() analysis/
+# calibration.py's aggregates call, so the export and the calibration script
+# can never report different numbers for the same row.
 WHITELIST = [
     "call_id", "date", "timestamp", "ticker", "title",
     "source", "direction", "confidence", "confidence_rank",
     "flag_path", "time_horizon", "horizon_rank",
-    "market_price", "edge", "net_edge", "base_rate",
+    "market_price", "our_estimate", "edge", "net_edge", "base_rate",
     "result", "is_resolved", "is_win", "pnl_if_traded", "pnl_scaled",
     "leviathan_score", "lv_band",
     "close_time", "sig_edge", "sig_drift", "sig_br_none",
     "watchlist_signal", "whale_detected",
     "heuristic_label", "short_horizon",
+    "brier_scorer", "brier_market",
 ]
 
 _CONF_RANK    = {"HIGH": 0, "MED": 1, "LOW": 2}
@@ -124,6 +134,19 @@ def _add_computed_cols(row: dict) -> dict:
     except (TypeError, ValueError):
         # FIX 3: readable label so Power BI shows a category rather than blank
         r["lv_band"] = "Unscored"
+
+    # brier_scorer / brier_market per row, computed via the exact same
+    # core.logger.brier_component() analysis/calibration.py's aggregates
+    # call — same source columns (our_estimate/market_price, direction,
+    # result) — so the export and the calibration script can never disagree
+    # on a row's number. Blank (not 0.5) when unresolved or the relevant
+    # source value is missing.
+    direction = _clean_str(r.get("direction"))
+    component_scorer = brier_component(r.get("our_estimate"), direction, result)
+    r["brier_scorer"] = round(component_scorer, 4) if component_scorer is not None else ""
+
+    component_market = brier_component(r.get("market_price"), direction, result)
+    r["brier_market"] = round(component_market, 4) if component_market is not None else ""
 
     return r
 

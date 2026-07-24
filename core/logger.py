@@ -111,6 +111,7 @@ def _init_db() -> None:
             "ev_after_fee_per_contract REAL",
             "event_ticker          TEXT    DEFAULT ''",
             "series_ticker         TEXT    DEFAULT ''",
+            "market_baseline_brier REAL",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -508,6 +509,57 @@ def get_week_signals(days: int = 7) -> list[dict]:
 
 # ── Outcome resolution ────────────────────────────────────────────────────────
 
+def _market_baseline_brier(market_price, direction: str, outcome: str) -> float | None:
+    """
+    Brier score of the market price at scan time against the resolved
+    outcome: (market_price - outcome_binary)^2, where outcome_binary is 1 if
+    the market resolved YES, 0 if NO. Uses the same YES/NO-relative-to-
+    direction derivation as get_brier_score() so the two scores are directly
+    comparable apples-to-apples over the identical row population.
+
+    Returns None (never 0.5) when market_price is missing — a market with no
+    logged price at scan time has no baseline to compare against, and
+    silently guessing 0.5 would understate the scorer's real edge over it.
+    """
+    if market_price is None:
+        return None
+    win = direction == outcome
+    if direction == "YES":
+        outcome_binary = 1.0 if win else 0.0
+    elif direction == "NO":
+        outcome_binary = 0.0 if win else 1.0
+    else:
+        return None
+    return round((float(market_price) - outcome_binary) ** 2, 4)
+
+
+def backfill_market_baseline_brier() -> int:
+    """
+    One-off backfill for resolved rows written before market_baseline_brier
+    existed. Idempotent — only touches rows where the column is still NULL,
+    safe to run repeatedly (e.g. from a migration script). Rows missing
+    market_price at scan time are left NULL, never coerced to 0.5.
+    Returns the number of rows updated.
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT call_id, market_price, direction, outcome FROM signals "
+            "WHERE result IN ('WIN','LOSS') AND market_baseline_brier IS NULL"
+        ).fetchall()
+
+        updated = 0
+        for r in rows:
+            brier = _market_baseline_brier(r["market_price"], r["direction"] or "", r["outcome"] or "")
+            if brier is None:
+                continue
+            conn.execute(
+                "UPDATE signals SET market_baseline_brier=? WHERE call_id=?",
+                (brier, r["call_id"]),
+            )
+            updated += 1
+    return updated
+
+
 def resolve_outcomes(config: dict) -> int:
     """
     Checks all unresolved calls against the Kalshi API and fills in outcomes.
@@ -577,10 +629,13 @@ def resolve_outcomes(config: dict) -> int:
             else:
                 pnl = 0.0
 
+            baseline_brier = _market_baseline_brier(row["market_price"], direction, outcome)
+
             with _db() as conn:
                 conn.execute(
-                    "UPDATE signals SET outcome=?, result=?, pnl_if_traded=? WHERE call_id=?",
-                    (outcome, "WIN" if win else "LOSS", pnl, row["call_id"])
+                    "UPDATE signals SET outcome=?, result=?, pnl_if_traded=?, "
+                    "market_baseline_brier=? WHERE call_id=?",
+                    (outcome, "WIN" if win else "LOSS", pnl, baseline_brier, row["call_id"])
                 )
             resolved_count += 1
         except Exception as e:
@@ -938,15 +993,38 @@ def get_stats_probe(high_divergence_threshold: float = 0.10) -> dict:
     }
 
 
+def brier_component(value, direction: str, result: str) -> float | None:
+    """
+    Raw (unrounded) (value - outcome_binary)^2 — the Brier building block
+    shared by the scorer Brier (value=our_estimate) and the market-baseline
+    Brier (value=market_price). get_brier_score(), get_market_baseline_brier_score(),
+    and core/export_to_csv.py's per-row brier_scorer/brier_market export
+    columns all call this one function on the same raw source columns
+    (our_estimate/market_price, direction, result), so analysis/calibration.py
+    and the Power BI export can never disagree on an individual row.
+
+    outcome_binary = 1 if the trade was a WIN (direction resolved correctly),
+    0 if LOSS — same derivation get_brier_score() has always used:
+      - YES trades: outcome_binary = 1 if WIN, 0 if LOSS
+      - NO trades:  outcome_binary = 0 if WIN (YES didn't happen), 1 if LOSS
+
+    Returns None — never 0.5 — when value is missing or direction/result
+    don't resolve to a clean WIN/LOSS outcome. Callers should sum raw values
+    and round only the final mean for an aggregate; round per-row for display.
+    """
+    if value is None or direction not in ("YES", "NO") or result not in ("WIN", "LOSS"):
+        return None
+    win = result == "WIN"
+    outcome_binary = (1.0 if win else 0.0) if direction == "YES" else (0.0 if win else 1.0)
+    return (float(value) - outcome_binary) ** 2
+
+
 def get_brier_score() -> dict:
     """
     Compute Brier score for resolved paper signals.
 
-    Brier score = mean((estimate - outcome_binary)^2)
-      - outcome_binary: 1 if the trade was a WIN (our direction resolved correctly), 0 if LOSS
+    Brier score = mean((estimate - outcome_binary)^2), via brier_component().
       - estimate: our_estimate (Claude's probability for YES)
-      - For YES trades: outcome_binary = 1 if WIN, 0 if LOSS
-      - For NO trades:  outcome_binary = 0 if WIN (YES didn't happen), 1 if LOSS
 
     Lower is better. Perfect calibration = 0. Random 50/50 = 0.25.
     Returns None if no resolved signals exist.
@@ -971,13 +1049,56 @@ def get_brier_score() -> dict:
 
     total_sq = 0.0
     for r in rows:
-        estimate = float(r["our_estimate"])
-        win      = r["result"] == "WIN"
-        if r["direction"] == "YES":
-            outcome_binary = 1.0 if win else 0.0
-        else:
-            outcome_binary = 0.0 if win else 1.0
-        total_sq += (estimate - outcome_binary) ** 2
+        total_sq += brier_component(r["our_estimate"], r["direction"], r["result"])
+
+    brier = total_sq / len(rows)
+    if brier <= 0.10:
+        label = "EXCELLENT"
+    elif brier <= 0.20:
+        label = "GOOD"
+    elif brier <= 0.25:
+        label = "FAIR (near random)"
+    else:
+        label = "POOR"
+
+    return {"brier_score": round(brier, 4), "n": len(rows), "label": label}
+
+
+def get_market_baseline_brier_score() -> dict:
+    """
+    Baseline Brier score: same population, same outcome definition, and same
+    formula as get_brier_score(), but scores the market price at scan time
+    instead of our_estimate. Compares against get_brier_score() to answer
+    whether the scorer adds real edge over the market price, since the
+    scorer prompt injects the current market price (core/scorer.py:649) and
+    explicitly instructs staying near it (core/scorer.py:245-253) — scorer
+    Brier alone can't distinguish genuine edge from echoing the price back.
+
+    Rows with no market_price at scan time are excluded, never coerced to
+    0.5 — a missing price has no baseline to compare against.
+    Returns None if no resolved signal has a usable market_price.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT market_price, direction, result
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                  AND market_price IS NOT NULL
+                  AND direction IN ('YES','NO')
+                """
+            ).fetchall()
+    except Exception:
+        return {"brier_score": None, "n": 0, "label": "PENDING"}
+
+    if not rows:
+        return {"brier_score": None, "n": 0, "label": "PENDING — no resolved signals with a market price"}
+
+    total_sq = 0.0
+    for r in rows:
+        total_sq += brier_component(r["market_price"], r["direction"], r["result"])
 
     brier = total_sq / len(rows)
     if brier <= 0.10:

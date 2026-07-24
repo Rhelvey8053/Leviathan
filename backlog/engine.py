@@ -18,7 +18,7 @@ from pathlib import Path
 DEFAULT_FILE = Path(__file__).parent / "backlog.json"
 
 VALID_AREAS = frozenset({
-    "execution", "data-quality", "validation",
+    "execution", "data-quality", "validation", "infra",
     "reporting", "calibration", "smart-money", "backtesting",
 })
 VALID_OPS = frozenset({">=", "<=", "==", ">", "<"})

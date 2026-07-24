@@ -1,9 +1,14 @@
 # Leviathan Backlog
-Last updated: 2026-07-22 | Metrics: resolved=11, fills=7
+Last updated: 2026-07-23 | Metrics: resolved=11, fills=7
 
-## Ready (0)
+## Ready (5)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 1 | preregistration | Write docs/PREREGISTRATION.md stating, in advance and dated, the result at n=50 that would falsify the edge hypothesis and halt signal development. Specify the metric (scorer Brier vs market-baseline Brier), the margin required, and what happens if it is not met. | validation |
+| 2 | llm-cost-ceiling | Add a configurable daily spend cap in core/llm.py that accumulates cost_usd across calls and raises once breached. Surface the running total in the daily report footer. | infra |
+| 2 | powerbi-schema-hardening | Add run_id to data/powerbi_export/signals.csv as a foreign key to runs.csv. Confirm the source column reliably distinguishes live paper signals from any future replay corpus rows. Audit every column where blank currently appears and document, per column, whether blank means not-computed or zero. | reporting |
+| 2 | replay-settled-fetcher | Pull Kalshi settled markets with their final outcomes, reaching further back than the local snapshot archive begins. Persist to a dedicated table separate from live signals. | backtesting |
+| 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. Add graceful degradation when an upstream API changes shape, and a runbook in docs/ for diagnosing a failed run without reloading full project context. | infra |
 
 ## Locked (9)
 | Priority | ID | Gate | Area |
@@ -18,16 +23,23 @@ Last updated: 2026-07-22 | Metrics: resolved=11, fills=7
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (3)
+## Blocked (9)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
+| 2 | replay-asof-reconstruction | replay-settled-fetcher | backtesting |
+| 3 | replay-instrument-validation | replay-runner, market-baseline-brier | validation |
+| 3 | replay-runner | replay-asof-reconstruction, llm-cost-ceiling | backtesting |
+| 4 | price-blind-arm | market-baseline-brier, llm-cost-ceiling | validation |
+| 5 | methodology-writeup | replay-instrument-validation, preregistration | reporting |
+| 5 | multi-sample-scoring | llm-cost-ceiling, market-baseline-brier | calibration |
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (18)
+## Done (19)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 1 | market-baseline-brier | For every resolved signal, compute and persist the Brier score of the market price at scan time alongside the existing scorer Brier. Expose our_estimate, brier_scorer and brier_market as explicit columns in data/powerbi_export/signals.csv, and surface both Brier figures in analysis/calibration.py output. | validation |
 | 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
 | 1 | show-detail-fix | Decouple show_detail in compile_report from the scanner qualifying count; gate it on whether smart-money data itself has signals, so trader detail stops silently vanishing during signal dry spells. | reporting |
 | 1 | trade-reconciliation | Reconcile paper signals against actual Kalshi fills to confirm each signal has a corresponding real trade. | execution |

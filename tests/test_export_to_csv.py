@@ -304,14 +304,14 @@ def _make_full_db(path: str) -> None:
 
 _DROPPED_COLS = [
     "run_id", "from_signal", "fill_count", "fill_fee", "contract_type",
-    "segment", "outcome", "our_estimate", "direction_aligned", "entry_price",
+    "segment", "outcome", "direction_aligned", "entry_price",
     "signal_call_id", "logged_under", "resolution_date", "whale_direction",
     "heuristic_direction",
 ]
 
 _COMPUTED_COLS_EXPECTED = [
     "is_win", "is_resolved", "lv_band", "pnl_scaled",
-    "confidence_rank", "horizon_rank", "date",
+    "confidence_rank", "horizon_rank", "date", "brier_scorer", "brier_market",
 ]
 
 
@@ -594,6 +594,116 @@ class TestRealfillDedup(unittest.TestCase):
                 sys.stdout = old_stdout
             output = captured.getvalue()
         self.assertNotIn("WARNING: duplicate real_fill detected for KXBAR", output)
+
+
+def _make_brier_db(path: str) -> None:
+    """DB with rows covering the market-baseline-brier export scenarios."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, outcome TEXT, result TEXT
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.executemany(
+        "INSERT INTO signals (call_id,timestamp,ticker,title,market_price,our_estimate,"
+        "edge,direction,confidence,outcome,result)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            # Resolved WIN, both estimate and market_price present.
+            ("br_win",  "2026-06-19T10:00:00Z", "KX-WIN",  "Win market",
+             0.30, 1.0, 0.70, "YES", "HIGH", "YES", "WIN"),
+            # Resolved, but our_estimate is NULL — brier_scorer must be blank.
+            ("br_noest", "2026-06-20T10:00:00Z", "KX-NOEST", "No estimate market",
+             0.30, None, 0.70, "YES", "HIGH", "YES", "WIN"),
+            # Resolved, but market_price is NULL — brier_market stays blank.
+            ("br_nomp", "2026-06-21T10:00:00Z", "KX-NOMP", "No price market",
+             None, 0.90, 0.70, "YES", "HIGH", "YES", "WIN"),
+            # Unresolved — both Brier columns must be blank.
+            ("br_open", "2026-06-22T10:00:00Z", "KX-OPEN", "Open market",
+             0.30, 0.90, 0.10, "YES", "MED", None, None),
+        ]
+    )
+    conn.execute(
+        "INSERT INTO runs VALUES ('r1','2026-06-19T10:00:00Z',50,4,'claude-sonnet-4-6')"
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestBrierColumns(unittest.TestCase):
+    """
+    powerbi-schema-hardening Part 1 — our_estimate exposed raw, brier_scorer
+    and brier_market computed at export time via core.logger.brier_component(),
+    the same function analysis/calibration.py's aggregates call.
+    """
+
+    def _rows(self, tmpdir):
+        import csv
+        db  = os.path.join(tmpdir, "brier.db")
+        out = os.path.join(tmpdir, "export")
+        _make_brier_db(db)
+        export_csvs(db_path=db, export_dir=out)
+        with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+            return {r["call_id"]: r for r in csv.DictReader(f)}
+
+    def test_our_estimate_column_present(self):
+        """our_estimate is now an explicit raw column (previously excluded plumbing)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["br_win"]["our_estimate"], "1.0")
+
+    def test_brier_market_computed_correctly(self):
+        """brier_market = (market_price - outcome_binary)^2 for a resolved row."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        # YES resolves YES, market_price=0.30 -> (0.30-1.0)^2 = 0.49
+        self.assertEqual(rows["br_win"]["brier_market"], "0.49")
+
+    def test_brier_scorer_computed_correctly(self):
+        """brier_scorer = (our_estimate - outcome_binary)^2 for a resolved row."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        # YES resolves YES, our_estimate=1.0 -> (1.0-1.0)^2 = 0.0
+        self.assertEqual(rows["br_win"]["brier_scorer"], "0.0")
+
+    def test_brier_scorer_blank_when_estimate_missing(self):
+        """brier_scorer must be blank, not 0.5-derived, when our_estimate is NULL."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["br_noest"]["brier_scorer"], "")
+
+    def test_brier_market_blank_when_price_missing(self):
+        """brier_market must be blank, not '0.5', when market_price is NULL."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["br_nomp"]["brier_market"], "")
+
+    def test_both_brier_columns_blank_when_unresolved(self):
+        """Neither Brier column is populated for an unresolved (pending) row."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["br_open"]["brier_scorer"], "")
+        self.assertEqual(rows["br_open"]["brier_market"], "")
+
+    def test_brier_scorer_and_market_agree_with_logger_aggregate_formula(self):
+        """
+        Cross-check: the per-row values match core.logger.brier_component()
+        called directly on the same inputs -- the single-source-of-truth
+        guarantee the task requires.
+        """
+        from core.logger import brier_component
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        expected_scorer = round(brier_component(1.0, "YES", "WIN"), 4)
+        expected_market = round(brier_component(0.30, "YES", "WIN"), 4)
+        self.assertEqual(float(rows["br_win"]["brier_scorer"]), expected_scorer)
+        self.assertEqual(float(rows["br_win"]["brier_market"]), expected_market)
 
 
 if __name__ == "__main__":

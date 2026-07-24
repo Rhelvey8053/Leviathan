@@ -89,6 +89,27 @@ def main():
     else:
         print(f"  Brier Score:          PENDING -- no resolved signals yet")
 
+    baseline = logger.get_market_baseline_brier_score()
+    mb = baseline.get("brier_score")
+    mb_n = baseline.get("n", 0)
+    mb_label = baseline.get("label", "PENDING")
+    if mb is not None:
+        print(f"  Market Baseline Brier: {mb:.4f}  ({mb_label}, n={mb_n})")
+        print(f"  [scores the market price at scan time -- the scorer prompt anchors")
+        print(f"   to this price, so this is the floor the scorer must beat]")
+    else:
+        print(f"  Market Baseline Brier: PENDING -- no resolved signals with a market price yet")
+
+    if bs is not None and mb is not None:
+        delta = bs - mb  # negative = scorer beats baseline (lower Brier is better)
+        if delta < -0.01:
+            verdict = "scorer beats market-price baseline -- real edge over price echo"
+        elif delta > 0.01:
+            verdict = "scorer WORSE than market-price baseline -- likely anchoring, investigate"
+        else:
+            verdict = "scorer ~= market-price baseline -- no clear edge over price yet"
+        print(f"  Scorer vs Baseline:   {delta:+.4f}  --> {verdict}")
+
     if stats["resolved"] == 0:
         print()
         print("  No resolved signals yet. Run again after markets settle.")

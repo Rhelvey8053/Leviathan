@@ -1481,6 +1481,181 @@ def test_brier_score_excludes_probe_rows(tmp_db):
     assert result["n"] == 0  # probe not counted
 
 
+# ─── get_market_baseline_brier_score (market-baseline-brier) ─────────────────
+
+def test_market_baseline_brier_pending_when_no_resolved(tmp_db):
+    """Returns PENDING label and None score when no resolved signals exist."""
+    result = logger.get_market_baseline_brier_score()
+    assert result["brier_score"] is None
+    assert result["n"] == 0
+    assert "PENDING" in result["label"]
+
+
+def test_market_baseline_brier_perfect_for_all_wins(tmp_db):
+    """Baseline Brier = 0 when every YES signal wins and market_price=1.0."""
+    for i in range(3):
+        with logger._db() as conn:
+            conn.execute(
+                "INSERT INTO signals "
+                "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+                "VALUES (?,datetime('now'),?,?,?,?,?,?)",
+                (f"mb{i}", f"KX{i}", "YES", 1.0, "WIN", "YES", "paper")
+            )
+    result = logger.get_market_baseline_brier_score()
+    assert result["brier_score"] == pytest.approx(0.0)
+    assert result["n"] == 3
+
+
+def test_market_baseline_brier_25_for_random(tmp_db):
+    """Baseline Brier = 0.25 when market_price=0.5 and outcomes are 50/50."""
+    for i, (win, price) in enumerate([(True, 0.5), (False, 0.5)]):
+        outcome = "YES" if win else "NO"
+        result_val = "WIN" if win else "LOSS"
+        with logger._db() as conn:
+            conn.execute(
+                "INSERT INTO signals "
+                "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+                "VALUES (?,datetime('now'),?,?,?,?,?,?)",
+                (f"mbr{i}", f"KXR{i}", "YES", price, result_val, outcome, "paper")
+            )
+    result = logger.get_market_baseline_brier_score()
+    assert result["brier_score"] == pytest.approx(0.25)
+
+
+def test_market_baseline_brier_excludes_null_market_price(tmp_db):
+    """
+    A resolved row with no market_price at scan time must be excluded from
+    the aggregate, never silently coerced to 0.5 (explicit project constraint).
+    """
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('nomp',datetime('now'),'KXNOMP','YES',NULL,'WIN','YES','paper')"
+        )
+    result = logger.get_market_baseline_brier_score()
+    assert result["n"] == 0
+    assert "PENDING" in result["label"]
+
+
+def test_market_baseline_brier_excludes_probe_rows(tmp_db):
+    """Probe rows (source=research_probe) are excluded, matching get_brier_score()."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('probe2',datetime('now'),'KXP2','YES',0.9,'WIN','YES','research_probe')"
+        )
+    result = logger.get_market_baseline_brier_score()
+    assert result["n"] == 0
+
+
+# ─── _market_baseline_brier / backfill_market_baseline_brier ─────────────────
+
+def test_market_baseline_brier_helper_none_when_price_missing():
+    """The per-row helper returns None (never 0.5) when market_price is None."""
+    assert logger._market_baseline_brier(None, "YES", "YES") is None
+
+
+def test_market_baseline_brier_helper_computes_expected_value():
+    """(price - outcome_binary)^2, e.g. price=0.30 vs outcome YES → 0.49."""
+    assert logger._market_baseline_brier(0.30, "YES", "YES") == pytest.approx(0.49)
+    assert logger._market_baseline_brier(0.30, "YES", "NO") == pytest.approx(0.09)
+    assert logger._market_baseline_brier(0.30, "NO", "NO") == pytest.approx(0.09)
+    assert logger._market_baseline_brier(0.30, "NO", "YES") == pytest.approx(0.49)
+
+
+def test_resolve_outcomes_persists_market_baseline_brier(tmp_db):
+    """resolve_outcomes() writes market_baseline_brier alongside outcome/result."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT market_baseline_brier FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    # YES at 0.30 resolves YES → (0.30 - 1.0)^2 = 0.49
+    assert row["market_baseline_brier"] == pytest.approx(0.49)
+
+
+def test_resolve_outcomes_leaves_market_baseline_brier_null_when_price_missing(tmp_db):
+    """No market_price at scan time → column stays NULL, never coerced to 0.5."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", None)
+
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT market_baseline_brier FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["market_baseline_brier"] is None
+
+
+def test_backfill_market_baseline_brier_fills_existing_resolved_rows(tmp_db):
+    """Rows resolved before this column existed get backfilled correctly."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bf1',datetime('now'),'KXBF','YES',0.30,'WIN','YES','paper')"
+        )
+    updated = logger.backfill_market_baseline_brier()
+    assert updated == 1
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT market_baseline_brier FROM signals WHERE call_id='bf1'"
+        ).fetchone()
+    assert row["market_baseline_brier"] == pytest.approx(0.49)
+
+
+def test_backfill_market_baseline_brier_skips_null_market_price(tmp_db):
+    """A resolved row with no market_price is not counted as backfilled."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bf2',datetime('now'),'KXBF2','YES',NULL,'WIN','YES','paper')"
+        )
+    updated = logger.backfill_market_baseline_brier()
+    assert updated == 0
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT market_baseline_brier FROM signals WHERE call_id='bf2'"
+        ).fetchone()
+    assert row["market_baseline_brier"] is None
+
+
+def test_backfill_market_baseline_brier_is_idempotent(tmp_db):
+    """Running the backfill twice does not double-count or change values already set."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bf3',datetime('now'),'KXBF3','NO',0.60,'LOSS','YES','paper')"
+        )
+    first = logger.backfill_market_baseline_brier()
+    second = logger.backfill_market_baseline_brier()
+    assert first == 1
+    assert second == 0  # nothing left to fill
+
+
+def test_backfill_market_baseline_brier_ignores_unresolved_rows(tmp_db):
+    """Unresolved rows (no result) are never touched by the backfill."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bf4',datetime('now'),'KXBF4','YES',0.40,'','','paper')"
+        )
+    updated = logger.backfill_market_baseline_brier()
+    assert updated == 0
+
+
 # ─── get_stats_by_confidence ─────────────────────────────────────────────────
 
 def _insert_conf(call_id, confidence, result_val, pnl, tmp_db):

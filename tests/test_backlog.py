@@ -42,8 +42,8 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_21_items(backlog_data):
-    assert len(backlog_data["items"]) == 30
+def test_parses_and_42_items(backlog_data):
+    assert len(backlog_data["items"]) == 42
 
 
 def test_all_ids_unique(backlog_data):
