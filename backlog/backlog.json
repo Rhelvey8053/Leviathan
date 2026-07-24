@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-07-22",
+  "updated": "2026-07-23",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -485,6 +485,185 @@
       "action": "Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can never diverge.",
       "notes": "No number changed -- render_html and compile_report both call shared _rank_top_picks/_betting_queue_data/_header_data. Kalshi links inert until kalshi_market_url resolves a real pattern (see kalshi-event-ticker-capture). See docs/PROGRESS.md 2026-07-23 for full report + human testing checklist.",
       "status": "done"
+    },
+    {
+      "id": "market-baseline-brier",
+      "title": "Market-Price Baseline Brier",
+      "area": "validation",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "For every resolved signal, compute and persist the Brier score of the market price at scan time alongside the existing scorer Brier. Expose our_estimate, brier_scorer and brier_market as explicit columns in data/powerbi_export/signals.csv, and surface both Brier figures in analysis/calibration.py output.",
+      "notes": "The scorer prompt injects current market price (core/scorer.py:649) and explicitly instructs anchoring to it (scorer.py:245-253), so scorer Brier alone cannot distinguish real edge from price echo. Arithmetic on data already in the DB, so no gate. Must exist before resolved_count clears the brier-tracking gate at 25. SHIPPED 2026-07-23: market_baseline_brier column (core/logger.py, additive migration), computed+persisted at resolution time in resolve_outcomes() and via backfill_market_baseline_brier() for the 10 pre-existing resolved rows with a usable market_price (1 of 11 has no market_price and is correctly left NULL, never coerced to 0.5). get_market_baseline_brier_score() mirrors get_brier_score() exactly. Surfaced in analysis/calibration.py (side by side with scorer Brier, plus a verdict line) and in the signals.csv export (scorer_brier computed column + persisted market_baseline_brier). Real result on the current n=8 paper population: scorer Brier 0.0578 vs baseline 0.0022 -- scorer currently WORSE than the market price, exactly the anchoring risk this metric exists to catch. See docs/PROGRESS.md 2026-07-23."
+    },
+    {
+      "id": "preregistration",
+      "title": "Pre-Registered Kill Criteria",
+      "area": "validation",
+      "priority": 1,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Write docs/PREREGISTRATION.md stating, in advance and dated, the result at n=50 that would falsify the edge hypothesis and halt signal development. Specify the metric (scorer Brier vs market-baseline Brier), the margin required, and what happens if it is not met.",
+      "notes": "No code. Worthless if written after the data is seen. Same discipline as the IDEAS.md append-only rule, applied to results instead of scope. Append-only once committed."
+    },
+    {
+      "id": "llm-cost-ceiling",
+      "title": "LLM Daily Cost Ceiling",
+      "area": "infra",
+      "priority": 2,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Add a configurable daily spend cap in core/llm.py that accumulates cost_usd across calls and raises once breached. Surface the running total in the daily report footer.",
+      "notes": "Per-call cost is computed at core/llm.py:146 but nothing enforces a limit. Prerequisite for replay-runner, which will multiply scoring volume."
+    },
+    {
+      "id": "replay-settled-fetcher",
+      "title": "Settled Market Fetcher",
+      "area": "backtesting",
+      "priority": 2,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Pull Kalshi settled markets with their final outcomes, reaching further back than the local snapshot archive begins. Persist to a dedicated table separate from live signals.",
+      "notes": "Read-only against existing tables. Local snapshots only reach 2026-07-08, so the archive alone caps corpus size well below what is useful."
+    },
+    {
+      "id": "replay-asof-reconstruction",
+      "title": "As-Of Market State Reconstruction",
+      "area": "backtesting",
+      "priority": 2,
+      "status": "blocked",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [
+        "replay-settled-fetcher"
+      ],
+      "action": "Given a ticker and a historical date, reconstruct the market state as it stood then, sourcing from data/snapshots where available and Kalshi history beyond that. Output must match the dict shape core.scorer.score_markets already consumes.",
+      "notes": "Matching the existing input shape is the hard requirement. If reconstruction emits a different shape the scorer gets modified to accommodate it, which breaks comparability with live signals and defeats the point."
+    },
+    {
+      "id": "replay-runner",
+      "title": "Retroactive Replay Runner",
+      "area": "backtesting",
+      "priority": 3,
+      "status": "blocked",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [
+        "replay-asof-reconstruction",
+        "llm-cost-ceiling"
+      ],
+      "action": "Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. Write results to a table physically separate from live paper signals.",
+      "notes": "Replayed scores are contaminated by look-ahead: the model's training data and web search both know how these resolved. Separation must be enforced in schema, not by convention, so no later query can accidentally pool the two populations."
+    },
+    {
+      "id": "replay-instrument-validation",
+      "title": "Instrument Validation On Replay Corpus",
+      "area": "validation",
+      "priority": 3,
+      "status": "blocked",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [
+        "replay-runner",
+        "market-baseline-brier"
+      ],
+      "action": "Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price range; the resolved_count >= 10 smart-money wallet threshold is empirically defensible.",
+      "notes": "This tests the instrument, not the forecaster. Contaminated data cannot establish edge and no edge claim may cite it. The value is discovering broken grading logic now instead of at n=25 with live signals that took three months to accumulate."
+    },
+    {
+      "id": "price-blind-arm",
+      "title": "Price-Blind Scoring Arm",
+      "area": "validation",
+      "priority": 4,
+      "status": "blocked",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [
+        "market-baseline-brier",
+        "llm-cost-ceiling"
+      ],
+      "action": "Add a scoring mode that omits the Current market price line and all market-anchoring instructions. Run it on a sampled subset of scored markets daily and log to a separate column. Do not feed it into signal selection.",
+      "notes": "Shadow arm only. Provides the counterfactual for whether the anchored scorer adds information over the price itself. Sample rate must stay inside the daily cost ceiling."
+    },
+    {
+      "id": "unattended-ops",
+      "title": "Unattended Operation Hardening",
+      "area": "infra",
+      "priority": 4,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Alert on absence rather than presence: notify if no successful run has completed within N hours. Add graceful degradation when an upstream API changes shape, and a runbook in docs/ for diagnosing a failed run without reloading full project context.",
+      "notes": "Target completion early October. Available maintenance time drops sharply after 2026-10-21 and the pipeline must survive unattended or data accumulation silently stops. Current failure mode is a scheduler that stops firing with nothing watching."
+    },
+    {
+      "id": "methodology-writeup",
+      "title": "Public Methodology Writeup",
+      "area": "reporting",
+      "priority": 5,
+      "status": "blocked",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [
+        "replay-instrument-validation",
+        "preregistration"
+      ],
+      "action": "Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. Publish for outside review.",
+      "notes": "The price-anchoring issue survived months of solo review. Outside readers catch this class of problem quickly. Also converts the project from a private repo into something legible to a reader."
+    },
+    {
+      "id": "multi-sample-scoring",
+      "title": "Multi-Sample Score Aggregation",
+      "area": "calibration",
+      "priority": 5,
+      "status": "blocked",
+      "trigger": {
+        "all": [
+          {
+            "metric": "resolved_count",
+            "op": ">=",
+            "value": 25
+          }
+        ]
+      },
+      "depends_on": [
+        "llm-cost-ceiling",
+        "market-baseline-brier"
+      ],
+      "action": "Score each qualifying market N times independently and aggregate to a single estimate, replacing the single-pass call in score_markets.",
+      "notes": "Single-pass scoring absorbs full LLM sampling variance into signal selection. Gated because it shifts the estimate distribution and makes pre-change and post-change resolutions non-comparable."
+    },
+    {
+      "id": "powerbi-schema-hardening",
+      "title": "Power BI Export Schema Hardening",
+      "area": "reporting",
+      "priority": 2,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Add run_id to data/powerbi_export/signals.csv as a foreign key to runs.csv. Confirm the source column reliably distinguishes live paper signals from any future replay corpus rows. Audit every column where blank currently appears and document, per column, whether blank means not-computed or zero.",
+      "notes": "signals.csv and runs.csv share no join key today, so Power BI cannot relate signals to the cost, token and runtime data in runs.csv, and joining on date is ambiguous because the pipeline runs twice daily. The source discriminator must exist and be filtered on before replay-runner produces look-ahead-contaminated rows; adding it while it has a single value is free, retrofitting it later means auditing every visual for silent contamination. Blank vs zero matters because Power BI AVERAGE skips blanks: net_edge and base_rate are blank on 37 of 182 rows, close_time on 25."
     }
   ]
 }
