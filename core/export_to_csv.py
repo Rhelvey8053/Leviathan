@@ -35,7 +35,7 @@ _COMPUTED_COLS = frozenset({
 })
 
 # Analysis-relevant columns written to signals.csv, in display order.
-# Pipeline plumbing (run_id, from_signal, fill_count, fill_fee, outcome,
+# Pipeline plumbing (from_signal, fill_count, fill_fee, outcome,
 # direction_aligned, entry_price, signal_call_id, logged_under,
 # resolution_date, whale_direction, heuristic_direction, etc.) are excluded.
 # our_estimate is kept (unlike the rest of that plumbing list) because Brier
@@ -44,9 +44,12 @@ _COMPUTED_COLS = frozenset({
 # blank. brier_scorer/brier_market are computed here from our_estimate/
 # market_price via the same core.logger.brier_component() analysis/
 # calibration.py's aggregates call, so the export and the calibration script
-# can never report different numbers for the same row.
+# can never report different numbers for the same row. run_id is kept as an
+# explicit foreign key into runs.csv (powerbi-schema-hardening) — blank only
+# for rows that never originated from a scan run (real_fill/research_probe),
+# never coerced or guessed via nearest-timestamp matching.
 WHITELIST = [
-    "call_id", "date", "timestamp", "ticker", "title",
+    "call_id", "run_id", "date", "timestamp", "ticker", "title",
     "source", "direction", "confidence", "confidence_rank",
     "flag_path", "time_horizon", "horizon_rank",
     "market_price", "our_estimate", "edge", "net_edge", "base_rate",

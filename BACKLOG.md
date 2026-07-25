@@ -1,12 +1,11 @@
 # Leviathan Backlog
-Last updated: 2026-07-23 | Metrics: resolved=11, fills=7
+Last updated: 2026-07-24 | Metrics: resolved=11, fills=7
 
-## Ready (5)
+## Ready (4)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | preregistration | Write docs/PREREGISTRATION.md stating, in advance and dated, the result at n=50 that would falsify the edge hypothesis and halt signal development. Specify the metric (scorer Brier vs market-baseline Brier), the margin required, and what happens if it is not met. | validation |
 | 2 | llm-cost-ceiling | Add a configurable daily spend cap in core/llm.py that accumulates cost_usd across calls and raises once breached. Surface the running total in the daily report footer. | infra |
-| 2 | powerbi-schema-hardening | Add run_id to data/powerbi_export/signals.csv as a foreign key to runs.csv. Confirm the source column reliably distinguishes live paper signals from any future replay corpus rows. Audit every column where blank currently appears and document, per column, whether blank means not-computed or zero. | reporting |
 | 2 | replay-settled-fetcher | Pull Kalshi settled markets with their final outcomes, reaching further back than the local snapshot archive begins. Persist to a dedicated table separate from live signals. | backtesting |
 | 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. Add graceful degradation when an upstream API changes shape, and a runbook in docs/ for diagnosing a failed run without reloading full project context. | infra |
 
@@ -36,7 +35,7 @@ Last updated: 2026-07-23 | Metrics: resolved=11, fills=7
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (19)
+## Done (20)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | market-baseline-brier | For every resolved signal, compute and persist the Brier score of the market price at scan time alongside the existing scorer Brier. Expose our_estimate, brier_scorer and brier_market as explicit columns in data/powerbi_export/signals.csv, and surface both Brier figures in analysis/calibration.py output. | validation |
@@ -46,6 +45,7 @@ Last updated: 2026-07-23 | Metrics: resolved=11, fills=7
 | 2 | discovery-funnel-diagnostic | Per-stage drop-off counter + gating-metric distributions for discover_winners; diagnoses why the winner gate finds zero (sample sourcing vs. skill genuinely rare). No threshold/gate changes. Unblocks the locked per-wallet items. | smart-money |
 | 2 | email-html-render | Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can never diverge. | reporting |
 | 2 | kalshi-event-ticker-capture | Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern. | data-quality |
+| 2 | powerbi-schema-hardening | Add run_id to data/powerbi_export/signals.csv as a foreign key to runs.csv. Confirm the source column reliably distinguishes live paper signals from any future replay corpus rows. Audit every column where blank currently appears and document, per column, whether blank means not-computed or zero. | reporting |
 | 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |

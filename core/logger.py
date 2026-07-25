@@ -560,6 +560,108 @@ def backfill_market_baseline_brier() -> int:
     return updated
 
 
+def backfill_run_id() -> dict:
+    """
+    One-off backfill for rows with a blank run_id (powerbi-schema-hardening).
+    Idempotent — only touches rows where run_id is still NULL/''.
+
+    The ONLY genuine recovery path: a row with signal_call_id populated
+    (pull_real_fills sets this when a real_fill is matched to a prior paper
+    signal) whose referenced paper row has a real run_id — that's a true
+    foreign-key traversal, not a guess. Rows with no signal_call_id (every
+    research_probe row, and any unmatched real_fill) have no recorded link
+    to a scan run at all: log_probe() never sets run_id, and
+    pull_real_fills() hardcodes run_id='' for every real_fill row regardless
+    of match status. These are NEVER backfilled via nearest-timestamp
+    matching or any other inference — that would fabricate a relationship
+    that doesn't exist in the data, the same discipline applied to
+    market_baseline_brier's missing-price rows.
+
+    Returns {"backfilled": n, "unrecoverable": n} — unrecoverable is exact,
+    not an estimate, so it can be reported rather than silently absorbed.
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT call_id, signal_call_id FROM signals "
+            "WHERE (run_id IS NULL OR run_id = '')"
+        ).fetchall()
+
+        backfilled = 0
+        unrecoverable = 0
+        for r in rows:
+            sig_call_id = r["signal_call_id"]
+            recovered_run_id = None
+            if sig_call_id:
+                ref = conn.execute(
+                    "SELECT run_id FROM signals WHERE call_id=?", (sig_call_id,)
+                ).fetchone()
+                if ref and ref["run_id"]:
+                    recovered_run_id = ref["run_id"]
+
+            if recovered_run_id:
+                conn.execute(
+                    "UPDATE signals SET run_id=? WHERE call_id=?",
+                    (recovered_run_id, r["call_id"]),
+                )
+                backfilled += 1
+            else:
+                unrecoverable += 1
+
+    return {"backfilled": backfilled, "unrecoverable": unrecoverable}
+
+
+def audit_run_id_coverage() -> dict:
+    """
+    Read-only audit (powerbi-schema-hardening): how many signals rows have a
+    populated run_id, broken down by source, so a blank run_id can be told
+    apart from a bug. A blank run_id is structurally expected for
+    research_probe (log_probe never sets it) and real_fill
+    (pull_real_fills hardcodes '') — it is NOT expected for source='paper',
+    where main.py always attaches the current run_id.
+    """
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT source, run_id FROM signals"
+        ).fetchall()
+
+    total = len(rows)
+    blank = sum(1 for r in rows if not r["run_id"])
+    by_source: dict = {}
+    for r in rows:
+        src = r["source"] or "(none)"
+        bucket = by_source.setdefault(src, {"total": 0, "blank": 0})
+        bucket["total"] += 1
+        if not r["run_id"]:
+            bucket["blank"] += 1
+
+    return {"total": total, "blank": blank, "by_source": by_source}
+
+
+def audit_source_discriminator() -> dict:
+    """
+    Read-only audit (powerbi-schema-hardening): confirms the source column
+    is populated on every row and lists every distinct value actually
+    present, so "no value other than paper appears" can be verified rather
+    than assumed. As of 2026-07-24 this is FALSE on the real DB — paper,
+    real_fill, and research_probe all currently appear — but the paper-only
+    filter (source='paper' OR source IS NULL, used throughout core/logger.py)
+    already correctly excludes the other two, so the discriminator is still
+    reliable; the notes assumption about *how many* values exist was wrong,
+    not the mechanism itself.
+    """
+    with _db() as conn:
+        rows = conn.execute("SELECT source FROM signals").fetchall()
+
+    total = len(rows)
+    blank = sum(1 for r in rows if not r["source"])
+    counts: dict = {}
+    for r in rows:
+        val = r["source"] or "(blank)"
+        counts[val] = counts.get(val, 0) + 1
+
+    return {"total": total, "blank": blank, "by_value": counts}
+
+
 def resolve_outcomes(config: dict) -> int:
     """
     Checks all unresolved calls against the Kalshi API and fills in outcomes.
