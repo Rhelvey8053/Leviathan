@@ -2,6 +2,55 @@
 
 ---
 
+## 2026-07-25 — preregistration: pre-registered kill criterion (no code)
+
+Next `ready` item off the backlog, priority 1 for a reason: worthless if
+written after n=50's data is seen, so it had to happen before any further
+data accumulates. No code changed — pure documentation, per the item's own
+scope.
+
+Wrote `docs/PREREGISTRATION.md`. Registers, in advance and dated
+(2026-07-25), a falsification criterion for the scorer edge hypothesis:
+
+- **Metric:** a *paired* per-row comparison — `brier_market_i - brier_scorer_i`
+  for every resolved paper signal with both `our_estimate` and `market_price`
+  present — not a naive comparison of the two aggregate Brier scores as if
+  independent samples, which would understate the evidence needed and
+  overstate apparent significance.
+- **Checkpoint:** first paired n ≥ 50.
+- **Pass/fail bar:** the 95% CI (z=1.96, matching `core.report._wilson_ci()`'s
+  existing convention) on the mean paired delta must exclude zero on the
+  positive side. A positive point estimate alone is explicitly insufficient
+  — noise that happens to land favorably at n=50 is not evidence.
+- **On FAIL:** precisely scoped — new heuristics/scoring changes halt;
+  `price-blind-arm`, replay validation, and this document's own dated
+  amendment are explicitly *not* halted (the tools needed to diagnose *why*
+  must stay available). Resuming requires a written post-mortem first, not
+  just more elapsed time.
+
+Recorded current state for dating purposes only, explicitly labeled as
+context and not a checkpoint result: paired n=8 today, resolution rate
+suggests n=50 is a long way off — which is exactly why locking the
+criterion in now (genuinely blind to the eventual outcome) rather than
+waiting was the point.
+
+Backlog item marked `done`, `BACKLOG.md` regenerated, zero validation
+errors. Full suite re-run as a sanity check (no code touched): **1686
+passed, 1 skipped**, unchanged.
+
+### Top 3 next steps
+
+1. `llm-cost-ceiling` (ready, priority 2) — prerequisite for both
+   `replay-runner` and `price-blind-arm`; unblocks the most items of
+   anything currently ready.
+2. `replay-settled-fetcher` (ready, priority 2) — read-only, extends corpus
+   depth past the 2026-07-08 local snapshot floor.
+3. When paired n approaches 50, evaluate the checkpoint in
+   `docs/PREREGISTRATION.md` and append the dated result — do not
+   pre-emptively peek at `ci_95_low` before n is actually reached.
+
+---
+
 ## 2026-07-24 — powerbi-schema-hardening: run_id FK, source audit, blank-vs-zero audit
 
 Implements the `powerbi-schema-hardening` backlog item appended (but
