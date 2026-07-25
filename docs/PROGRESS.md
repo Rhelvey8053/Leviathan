@@ -2,6 +2,84 @@
 
 ---
 
+## 2026-07-24 — powerbi-schema-hardening: run_id FK, source audit, blank-vs-zero audit
+
+Implements the `powerbi-schema-hardening` backlog item appended (but
+deliberately not implemented) in the prior session — its own handoff
+explicitly scoped this to "a separate session after," now that one. Order
+followed the item's own ordering.
+
+### 1 — `run_id` foreign key
+
+`run_id` added as an explicit `signals.csv` column (`core/export_to_csv.py`
+`WHITELIST`), joining to `run_id` in `runs.csv`. Ran `backfill_run_id()`
+(new, `core/logger.py`) against the real DB: **0 backfilled, 17
+unrecoverable**. All 17 are `real_fill`/`research_probe` rows — `log_probe()`
+never writes `run_id` at all, and `pull_real_fills()` hardcodes `run_id=''`
+regardless of match status, because a fill is an execution event, not a
+scan run. One genuine (non-guessed) recovery path exists and is checked:
+a `real_fill` row's `signal_call_id`, if it points to a matched paper
+signal, can borrow that signal's real `run_id` — a true FK traversal.
+Nothing on the current data hits this path (none of the 17 blank rows have
+a populated `signal_call_id`), but it's implemented and tested for when
+future data does. **No nearest-timestamp inference was used or considered
+viable** — the pipeline runs twice daily, so timestamp-proximity would
+misattribute rows to the wrong run.
+
+### 2 — `source` discriminator
+
+**Corrected an assumption in the item's own notes.** The notes claimed "no
+value other than paper currently appears" — false: `audit_source_discriminator()`
+(new) found three distinct values on the real DB (`paper` 165, `real_fill` 7,
+`research_probe` 10), and `source` is populated on all 182 rows (0 blank).
+The discriminator is still reliable despite the wrong value-count
+assumption: every paper-only aggregate in `core/logger.py` already filters
+via `source='paper' OR source IS NULL`, confirmed already excluding the
+other two sources (pre-existing tests). This generalizes correctly to a
+future `replay-runner` source value, provided it picks something distinct
+from `'paper'` — the mechanism was verified, not just assumed.
+
+### 3 — Blank-vs-zero audit
+
+Written to `docs/POWERBI_EXPORT_SCHEMA.md` — a decision record, not a code
+change, per the item's own instruction. Full column-by-column table for
+every column with a nonzero blank rate (19 columns), each with a meaning and
+a zero-safety verdict. **Headline finding: no column in this export
+currently uses blank to mean zero** — every blank means "not computed" or
+"not applicable," confirming the pipeline's existing convention rather than
+finding a contradiction. The two highest-stakes cases, both already handled
+correctly and now explicitly documented: `result`/`is_win`/`pnl_if_traded`
+(blank = pending, never LOSS or "broke even") and `market_price`/
+`brier_scorer`/`brier_market` (blank = no data, never 0.5 or "perfect
+calibration"). No existing column value was altered.
+
+**Do-not list honored:** no column renamed or dropped, no existing value
+changed to eliminate a blank, scorer prompt/heuristics/thresholds untouched.
+
+**Tests:** `tests/test_logger.py` (+9: backfill recovery via matched
+signal_call_id, unrecoverable when no link or the linked row is also blank,
+already-populated rows left alone, coverage/discriminator audits broken
+down by source, blank-source detection), `tests/test_export_to_csv.py`
+(+4: run_id column present, passes through for paper rows, blank-not-"None"
+for real_fill, joins correctly to runs.csv; `_DROPPED_COLS` updated since
+run_id is no longer excluded plumbing). Full suite: **1686 passed, 1
+skipped**.
+
+### Top 3 next steps
+
+1. `title-scraping-fix` (existing backlog item) — the one blank column in
+   the audit that's a genuine defect rather than confirmed-expected
+   behavior; everything else in the table turned out to be working as
+   intended.
+2. Re-run `audit_source_discriminator()` before `replay-runner` ships its
+   first row, to confirm its new source value doesn't collide with
+   `'paper'` — the concrete risk this item's notes were guarding against.
+3. Carried over: `preregistration`, re-run the scorer-vs-baseline Brier
+   comparison once `resolved_count` is large enough to matter, and
+   `llm-cost-ceiling` to unblock the backtesting chain.
+
+---
+
 ## 2026-07-23 — Power BI Export Schema: our_estimate, brier_scorer, brier_market
 
 Handoff task 02 (`LEVIATHAN_TASK_02.md`), run immediately after the

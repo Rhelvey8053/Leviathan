@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-07-23",
+  "updated": "2026-07-24",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -657,13 +657,13 @@
       "title": "Power BI Export Schema Hardening",
       "area": "reporting",
       "priority": 2,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
       "depends_on": [],
       "action": "Add run_id to data/powerbi_export/signals.csv as a foreign key to runs.csv. Confirm the source column reliably distinguishes live paper signals from any future replay corpus rows. Audit every column where blank currently appears and document, per column, whether blank means not-computed or zero.",
-      "notes": "signals.csv and runs.csv share no join key today, so Power BI cannot relate signals to the cost, token and runtime data in runs.csv, and joining on date is ambiguous because the pipeline runs twice daily. The source discriminator must exist and be filtered on before replay-runner produces look-ahead-contaminated rows; adding it while it has a single value is free, retrofitting it later means auditing every visual for silent contamination. Blank vs zero matters because Power BI AVERAGE skips blanks: net_edge and base_rate are blank on 37 of 182 rows, close_time on 25."
+      "notes": "signals.csv and runs.csv share no join key today, so Power BI cannot relate signals to the cost, token and runtime data in runs.csv, and joining on date is ambiguous because the pipeline runs twice daily. The source discriminator must exist and be filtered on before replay-runner produces look-ahead-contaminated rows; adding it while it has a single value is free, retrofitting it later means auditing every visual for silent contamination. Blank vs zero matters because Power BI AVERAGE skips blanks: net_edge and base_rate are blank on 37 of 182 rows, close_time on 25. SHIPPED 2026-07-24: run_id added as an explicit FK column in signals.csv (165/182 rows populated -- every paper row has one; the 17 blank rows are real_fill/research_probe, which structurally never get a run_id, confirmed via backfill_run_id() finding 0 backfillable + 17 genuinely unrecoverable, never guessed via nearest-timestamp matching). source discriminator confirmed populated on all 182 rows, but the notes assumption was WRONG -- 3 distinct values exist today (paper/real_fill/research_probe), not just paper; the paper-only filter already used throughout core/logger.py correctly excludes the other two regardless. Full blank-vs-zero audit written to docs/POWERBI_EXPORT_SCHEMA.md -- every blank column means not-computed, never zero; no existing values altered. See docs/PROGRESS.md 2026-07-24."
     }
   ]
 }

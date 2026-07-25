@@ -303,7 +303,7 @@ def _make_full_db(path: str) -> None:
 
 
 _DROPPED_COLS = [
-    "run_id", "from_signal", "fill_count", "fill_fee", "contract_type",
+    "from_signal", "fill_count", "fill_fee", "contract_type",
     "segment", "outcome", "direction_aligned", "entry_price",
     "signal_call_id", "logged_under", "resolution_date", "whale_direction",
     "heuristic_direction",
@@ -704,6 +704,91 @@ class TestBrierColumns(unittest.TestCase):
         expected_market = round(brier_component(0.30, "YES", "WIN"), 4)
         self.assertEqual(float(rows["br_win"]["brier_scorer"]), expected_scorer)
         self.assertEqual(float(rows["br_win"]["brier_market"]), expected_market)
+
+
+def _make_run_id_db(path: str) -> None:
+    """DB with rows covering the powerbi-schema-hardening run_id FK scenarios."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            direction TEXT, confidence TEXT, source TEXT, run_id TEXT
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.executemany(
+        "INSERT INTO signals (call_id,timestamp,ticker,title,direction,confidence,source,run_id)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        [
+            ("rid_paper", "2026-06-19T10:00:00Z", "KX-PAPER", "Paper signal",
+             "YES", "HIGH", "paper", "run-42"),
+            ("rid_fill", "2026-06-20T10:00:00Z", "KX-FILL", "Real fill",
+             "YES", "HIGH", "real_fill", ""),
+        ]
+    )
+    conn.execute(
+        "INSERT INTO runs VALUES ('run-42','2026-06-19T10:00:00Z',50,2,'claude-sonnet-4-6')"
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestRunIdColumn(unittest.TestCase):
+    """powerbi-schema-hardening — run_id exposed as an explicit FK to runs.csv."""
+
+    def _rows(self, tmpdir):
+        import csv
+        db  = os.path.join(tmpdir, "runid.db")
+        out = os.path.join(tmpdir, "export")
+        _make_run_id_db(db)
+        export_csvs(db_path=db, export_dir=out)
+        with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+            return {r["call_id"]: r for r in csv.DictReader(f)}
+
+    def test_run_id_column_present(self):
+        """run_id appears as a header in signals.csv."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import csv
+            db  = os.path.join(tmpdir, "runid.db")
+            out = os.path.join(tmpdir, "export")
+            _make_run_id_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                headers = next(csv.reader(f))
+        self.assertIn("run_id", headers)
+
+    def test_run_id_passes_through_for_paper_row(self):
+        """A paper row's real run_id passes through unchanged."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["rid_paper"]["run_id"], "run-42")
+
+    def test_run_id_blank_not_none_string_for_real_fill(self):
+        """
+        A real_fill row with no run_id must export as '' -- never the
+        literal string 'None' or 'nan' -- matching every other string
+        column's null-handling.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["rid_fill"]["run_id"], "")
+
+    def test_run_id_joins_to_runs_csv(self):
+        """A populated run_id in signals.csv matches a real run_id in runs.csv."""
+        import csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "runid.db")
+            out = os.path.join(tmpdir, "export")
+            _make_run_id_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "runs.csv"), newline="", encoding="utf-8") as f:
+                run_ids = {r["run_id"] for r in csv.DictReader(f)}
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                rows = {r["call_id"]: r for r in csv.DictReader(f)}
+        self.assertIn(rows["rid_paper"]["run_id"], run_ids)
 
 
 if __name__ == "__main__":

@@ -1656,6 +1656,131 @@ def test_backfill_market_baseline_brier_ignores_unresolved_rows(tmp_db):
     assert updated == 0
 
 
+# ─── backfill_run_id / audit_run_id_coverage (powerbi-schema-hardening) ──────
+
+def _insert_run_id_row(call_id, run_id, source, signal_call_id=None):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,run_id,source,signal_call_id) "
+            "VALUES (?,datetime('now'),?,?,?,?,?)",
+            (call_id, f"KX{call_id}", "YES", run_id, source, signal_call_id)
+        )
+
+
+def test_backfill_run_id_recovers_via_matched_signal_call_id(tmp_db):
+    """
+    A real_fill row whose signal_call_id points to a paper row with a real
+    run_id IS a genuine FK traversal, not a guess -- it must be backfilled.
+    """
+    _insert_run_id_row("paper1", "run-abc", "paper")
+    _insert_run_id_row("fill1", "", "real_fill", signal_call_id="paper1")
+
+    result = logger.backfill_run_id()
+    assert result == {"backfilled": 1, "unrecoverable": 0}
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT run_id FROM signals WHERE call_id='fill1'"
+        ).fetchone()
+    assert row["run_id"] == "run-abc"
+
+
+def test_backfill_run_id_unrecoverable_when_no_signal_call_id(tmp_db):
+    """
+    A research_probe row has no signal_call_id at all -- nearest-timestamp
+    guessing is explicitly disallowed, so it must be reported as
+    unrecoverable, never backfilled.
+    """
+    _insert_run_id_row("probe1", "", "research_probe", signal_call_id=None)
+
+    result = logger.backfill_run_id()
+    assert result == {"backfilled": 0, "unrecoverable": 1}
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT run_id FROM signals WHERE call_id='probe1'"
+        ).fetchone()
+    assert row["run_id"] == ""
+
+
+def test_backfill_run_id_unrecoverable_when_referenced_row_also_blank(tmp_db):
+    """
+    signal_call_id points somewhere, but that row's own run_id is also
+    blank -- still nothing genuine to recover, must not fabricate a value.
+    Both rows are counted unrecoverable: paper2 has no signal_call_id of its
+    own, and fill2's reference resolves to a row with no run_id to borrow.
+    """
+    _insert_run_id_row("paper2", "", "paper")
+    _insert_run_id_row("fill2", "", "real_fill", signal_call_id="paper2")
+
+    result = logger.backfill_run_id()
+    assert result == {"backfilled": 0, "unrecoverable": 2}
+
+
+def test_backfill_run_id_ignores_rows_already_populated(tmp_db):
+    """A row with a run_id already set is untouched and not counted either way."""
+    _insert_run_id_row("paper3", "run-xyz", "paper")
+
+    result = logger.backfill_run_id()
+    assert result == {"backfilled": 0, "unrecoverable": 0}
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT run_id FROM signals WHERE call_id='paper3'"
+        ).fetchone()
+    assert row["run_id"] == "run-xyz"
+
+
+def test_audit_run_id_coverage_breaks_down_by_source(tmp_db):
+    """Blank run_id is expected for real_fill/research_probe, not for paper."""
+    _insert_run_id_row("p1", "run-1", "paper")
+    _insert_run_id_row("p2", "run-1", "paper")
+    _insert_run_id_row("rf1", "", "real_fill")
+    _insert_run_id_row("rp1", "", "research_probe")
+
+    result = logger.audit_run_id_coverage()
+    assert result["total"] == 4
+    assert result["blank"] == 2
+    assert result["by_source"]["paper"] == {"total": 2, "blank": 0}
+    assert result["by_source"]["real_fill"] == {"total": 1, "blank": 1}
+    assert result["by_source"]["research_probe"] == {"total": 1, "blank": 1}
+
+
+# ─── audit_source_discriminator (powerbi-schema-hardening) ───────────────────
+
+def test_audit_source_discriminator_no_blanks(tmp_db):
+    """source is populated on every row in a healthy DB."""
+    _insert_run_id_row("s1", "run-1", "paper")
+    _insert_run_id_row("s2", "", "real_fill")
+
+    result = logger.audit_source_discriminator()
+    assert result["blank"] == 0
+    assert result["total"] == 2
+
+
+def test_audit_source_discriminator_lists_every_distinct_value(tmp_db):
+    """
+    Confirms the discriminator reports every value actually present rather
+    than assuming only 'paper' exists.
+    """
+    _insert_run_id_row("s1", "run-1", "paper")
+    _insert_run_id_row("s2", "", "real_fill")
+    _insert_run_id_row("s3", "", "research_probe")
+
+    result = logger.audit_source_discriminator()
+    assert result["by_value"] == {"paper": 1, "real_fill": 1, "research_probe": 1}
+
+
+def test_audit_source_discriminator_flags_blank_source(tmp_db):
+    """A row with no source at all is counted as blank, not silently dropped."""
+    _insert_run_id_row("s1", "run-1", None)
+
+    result = logger.audit_source_discriminator()
+    assert result["blank"] == 1
+    assert result["by_value"] == {"(blank)": 1}
+
+
 # ─── get_stats_by_confidence ─────────────────────────────────────────────────
 
 def _insert_conf(call_id, confidence, result_val, pnl, tmp_db):
