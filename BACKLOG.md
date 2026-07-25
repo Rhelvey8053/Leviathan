@@ -1,10 +1,9 @@
 # Leviathan Backlog
-Last updated: 2026-07-24 | Metrics: resolved=11, fills=7
+Last updated: 2026-07-25 | Metrics: resolved=11, fills=7
 
-## Ready (4)
+## Ready (3)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 1 | preregistration | Write docs/PREREGISTRATION.md stating, in advance and dated, the result at n=50 that would falsify the edge hypothesis and halt signal development. Specify the metric (scorer Brier vs market-baseline Brier), the margin required, and what happens if it is not met. | validation |
 | 2 | llm-cost-ceiling | Add a configurable daily spend cap in core/llm.py that accumulates cost_usd across calls and raises once breached. Surface the running total in the daily report footer. | infra |
 | 2 | replay-settled-fetcher | Pull Kalshi settled markets with their final outcomes, reaching further back than the local snapshot archive begins. Persist to a dedicated table separate from live signals. | backtesting |
 | 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. Add graceful degradation when an upstream API changes shape, and a runbook in docs/ for diagnosing a failed run without reloading full project context. | infra |
@@ -35,10 +34,11 @@ Last updated: 2026-07-24 | Metrics: resolved=11, fills=7
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (20)
+## Done (21)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | market-baseline-brier | For every resolved signal, compute and persist the Brier score of the market price at scan time alongside the existing scorer Brier. Expose our_estimate, brier_scorer and brier_market as explicit columns in data/powerbi_export/signals.csv, and surface both Brier figures in analysis/calibration.py output. | validation |
+| 1 | preregistration | Write docs/PREREGISTRATION.md stating, in advance and dated, the result at n=50 that would falsify the edge hypothesis and halt signal development. Specify the metric (scorer Brier vs market-baseline Brier), the margin required, and what happens if it is not met. | validation |
 | 1 | realfill-dedup | Audit real_fill rows in leviathan.db and remove duplicate fills that do not match actual positions held. | data-quality |
 | 1 | show-detail-fix | Decouple show_detail in compile_report from the scanner qualifying count; gate it on whether smart-money data itself has signals, so trader detail stops silently vanishing during signal dry spells. | reporting |
 | 1 | trade-reconciliation | Reconcile paper signals against actual Kalshi fills to confirm each signal has a corresponding real trade. | execution |

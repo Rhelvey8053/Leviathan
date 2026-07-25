@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-07-24",
+  "updated": "2026-07-25",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -504,13 +504,13 @@
       "title": "Pre-Registered Kill Criteria",
       "area": "validation",
       "priority": 1,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
       "depends_on": [],
       "action": "Write docs/PREREGISTRATION.md stating, in advance and dated, the result at n=50 that would falsify the edge hypothesis and halt signal development. Specify the metric (scorer Brier vs market-baseline Brier), the margin required, and what happens if it is not met.",
-      "notes": "No code. Worthless if written after the data is seen. Same discipline as the IDEAS.md append-only rule, applied to results instead of scope. Append-only once committed."
+      "notes": "No code. Worthless if written after the data is seen. Same discipline as the IDEAS.md append-only rule, applied to results instead of scope. Append-only once committed. SHIPPED 2026-07-25: docs/PREREGISTRATION.md written. Pre-registers a PAIRED comparison (brier_market_i - brier_scorer_i per resolved row, using the existing brier_component() and the source=paper/result-resolved/direction-valid/both-values-present population) evaluated at the first paired n>=50, with a 95% CI (z=1.96, matching core.report._wilson_ci existing convention) on the mean paired delta as the pass/fail bar -- a raw point-estimate comparison is explicitly insufficient. Defines exactly what \"halt signal development\" means (new heuristics/scoring changes halt; price-blind-arm, replay validation, and this document's own amendment are explicitly not halted) and requires a written post-mortem before resuming. Current state recorded for dating purposes only (paired n=8 as of writing, well below the n=50 checkpoint) -- not a checkpoint evaluation. Append-only from here."
     },
     {
       "id": "llm-cost-ceiling",
