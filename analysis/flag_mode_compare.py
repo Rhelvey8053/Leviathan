@@ -19,7 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import scanner
+from core import scanner
 from analysis.drift_diagnosis import get_filtered_with_drift_data, drift_fire_rate
 
 SNAPSHOT_DIR = os.path.join(ROOT, "data", "snapshots")
@@ -66,7 +66,7 @@ def run_mode(markets: list[dict], base_config: dict, flag_mode: str) -> dict:
     cfg["markets"]["flag_mode"] = flag_mode
 
     filtered = scanner.filter_markets(markets, cfg)
-    scored   = scanner.score_markets(filtered, cfg)
+    scored, _hp_filtered = scanner.score_markets(filtered, cfg)
     flagged  = [m for m in scored if m.get("flag")]
 
     path_counts = {"EDGE": 0, "BR_NONE": 0, "DRIFT": 0, "HEURISTIC": 0}

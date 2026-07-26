@@ -143,6 +143,8 @@
   "llm": {
     "backend": "cli",
     "model": "claude-sonnet-4-6",
-    "max_web_searches": 8
+    "max_web_searches": 8,
+    "daily_cost_ceiling_usd": 20.0,
+    "_llm_notes": "daily_cost_ceiling_usd (goal llm-cost-ceiling) only applies to real metered spend via score_via_api/probe_via_api (core/llm.py) -- the main scan runs backend=cli against the Pro subscription with no per-token bill, so this ceiling protects research probes, eval re-scoring, and the future replay-runner, which will call the API path at volume. $20/day is a starting guess, not a measured figure; revisit once replay-runner exists and real per-market API cost is observed."
   }
 }

@@ -411,6 +411,19 @@ class TestLoadSnapshotFallback(unittest.TestCase):
             saved = list(Path(tmp_snap_dir).glob("markets_*.json"))
             self.assertEqual(len(saved), 1)
 
+            # Regression guard: must match the {"header":...,"markets":...}
+            # envelope backtesting.asof_reconstruction shares this directory
+            # and requires -- a prior version wrote a bare JSON array here,
+            # which broke historical-state reconstruction for every
+            # ticker/date via an uncaught AttributeError the first time
+            # asof_reconstruction tried to read any file in the directory.
+            with open(saved[0], encoding="utf-8") as f:
+                payload = json.load(f)
+            self.assertIsInstance(payload, dict)
+            self.assertIn("header", payload)
+            self.assertIn("fetched_at", payload["header"])
+            self.assertEqual(payload["markets"], fake_markets)
+
 
 if __name__ == "__main__":
     unittest.main()

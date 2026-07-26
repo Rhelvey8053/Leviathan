@@ -174,7 +174,7 @@ def main(use_snapshot: bool = False):
     print()
 
     # Stage 2: score (needed before dedup so we can pick by net_edge)
-    pre_scored = scanner.score_markets(filtered, config)
+    pre_scored, _hp_filtered = scanner.score_markets(filtered, config)
 
     # Stage 3: post-scoring dedup — keeps best-signal market per event
     if mkt_cfg.get("dedup_by_event", False):

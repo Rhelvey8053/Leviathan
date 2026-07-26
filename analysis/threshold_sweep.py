@@ -22,7 +22,7 @@ from itertools import product
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import scanner
+from core import scanner
 
 SNAPSHOT_DIR = os.path.join(ROOT, "data", "snapshots")
 REPORTS_DIR  = os.path.join(ROOT, "reports")
@@ -142,7 +142,7 @@ def run_sweep(markets: list[dict], grid: list[dict]) -> list[dict]:
     results = []
     for cfg in grid:
         filtered = scanner.filter_markets(markets, cfg)
-        scored   = scanner.score_markets(filtered, cfg)
+        scored, _hp_filtered = scanner.score_markets(filtered, cfg)
 
         flagged = [m for m in scored if m.get("flag")]
         path_counts = {"EDGE": 0, "BR_NONE": 0, "DRIFT": 0, "OTHER": 0}

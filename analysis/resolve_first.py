@@ -62,11 +62,31 @@ def load_snapshot(config: dict) -> list[dict]:
     from core import kalshi as _kalshi
     markets = _kalshi.fetch_markets(config)
     if markets:
+        # Must match the {"header": ..., "markets": [...]} envelope
+        # analysis.snapshot_markets.save_snapshot() writes -- a prior
+        # version here wrote a bare JSON array instead, and
+        # backtesting.asof_reconstruction._load_snapshot_index() (which
+        # shares this same directory) has no fallback for that shape: an
+        # uncaught AttributeError on the resulting file would break
+        # historical-state reconstruction for every ticker/date, not just
+        # the one file, until it was manually removed. Built inline here
+        # (rather than calling save_snapshot() directly) so this still
+        # writes to this module's own SNAPSHOT_DIR -- save_snapshot() has
+        # its own hardcoded module-level SNAPSHOT_DIR, not a parameter.
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         out = SNAPSHOT_DIR / f"markets_{ts}.json"
         SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "header": {
+                "fetched_at":   datetime.now(timezone.utc).isoformat(),
+                "environment":  config.get("environment", "demo"),
+                "event_count":  0,
+                "market_count": len(markets),
+            },
+            "markets": markets,
+        }
         with open(out, "w", encoding="utf-8") as f:
-            json.dump(markets, f)
+            json.dump(payload, f)
         print(f"[resolve_first] Saved snapshot: {out.name}")
     return markets or []
 

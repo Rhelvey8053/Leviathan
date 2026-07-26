@@ -1919,10 +1919,21 @@ def compute_orderbook_signal(orderbook: dict) -> dict:
                 total += float(lvl.get("size") or lvl.get("quantity") or 0)
         return total
 
-    # Kalshi may nest under "yes" key or at top level
-    yes_book = orderbook.get("yes") or orderbook
-    bids = _extract_levels(yes_book.get("bids") or yes_book.get("bid") or [])
-    asks = _extract_levels(yes_book.get("asks") or yes_book.get("ask") or [])
+    # Real Kalshi GetMarketOrderbook shape (confirmed live 2026-07-25):
+    # {"orderbook_fp": {"yes_dollars": [[price, size], ...], "no_dollars": [...]}}
+    # yes_dollars = resting YES-buy orders (the YES bid book); no_dollars =
+    # resting NO-buy orders, which is the YES ask book (accepting a NO bid
+    # at price P is equivalent to selling YES at P) -- depth only cares
+    # about size per level, not price, so no price inversion is needed.
+    ob_fp = orderbook.get("orderbook_fp")
+    if isinstance(ob_fp, dict):
+        bids = _extract_levels(ob_fp.get("yes_dollars") or [])
+        asks = _extract_levels(ob_fp.get("no_dollars") or [])
+    else:
+        # Older/alternate shape some callers may still pass in directly.
+        yes_book = orderbook.get("yes") or orderbook
+        bids = _extract_levels(yes_book.get("bids") or yes_book.get("bid") or [])
+        asks = _extract_levels(yes_book.get("asks") or yes_book.get("ask") or [])
 
     bid_depth = _sum_sizes(bids)
     ask_depth = _sum_sizes(asks)

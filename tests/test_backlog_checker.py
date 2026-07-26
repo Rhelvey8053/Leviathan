@@ -1,8 +1,14 @@
 """
 tests/test_backlog_checker.py - Offline tests for backlog/checker.py.
 
-All DB tests use a tmp sqlite DB with controlled data.
-backlog.json is loaded read-only; backlog_checker never mutates it in --email mode.
+All DB tests use a tmp sqlite DB with controlled data. All backlog.json
+mutation tests use a tmp copy (tmp_backlog fixture / an inline synthetic
+file) -- the real backlog.json is never touched by this file.
+
+run(email_mode=True) DOES persist newly-unlocked status transitions to
+disk (fixed 2026-07-25 -- a prior version silently discarded them, so a
+scheduled --email run re-reported the same gate as newly unlocked forever;
+see test_email_mode_persists_newly_unlocked_status_to_disk).
 """
 
 import json
@@ -250,11 +256,60 @@ def test_execute_action_stubs_return_true_and_print(backlog_data, capsys):
 # --email integration against real DB
 # ---------------------------------------------------------------------------
 
-def test_email_mode_exits_zero():
+def test_email_mode_exits_zero(tmp_backlog, tmp_db):
     result = subprocess.run(
-        [sys.executable, str(BACKLOG_CHECKER_PY), "--email"],
+        [sys.executable, str(BACKLOG_CHECKER_PY), "--email",
+         "--file", str(tmp_backlog), "--db", str(tmp_db)],
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
     assert "=== LEVIATHAN BACKLOG UPDATE ===" in result.stdout
     assert "Live Metrics:" in result.stdout
+
+
+def test_email_mode_persists_newly_unlocked_status_to_disk(tmp_path, tmp_db):
+    """
+    Regression guard: a prior version of run(email_mode=True) mutated the
+    in-memory backlog dict (via compare_statuses) and rendered BACKLOG.md
+    from it, but never called save_backlog() in the --email branch --
+    only the interactive C/M path did. So backlog.json on disk never
+    advanced past "locked", and every subsequent scheduled --email run
+    re-evaluated the same already-met trigger and re-reported the same
+    item as "Newly Unlocked" forever. This test uses a synthetic backlog
+    with one locked item whose trigger is already satisfied by tmp_db's
+    4 resolved signals, and asserts the on-disk file actually flips to
+    "ready" after a single --email run -- and stays "ready" (not
+    re-reported) on a second run.
+    """
+    synthetic = {
+        "version": "1.0",
+        "updated": "2026-01-01",
+        "metrics_glossary": {"resolved_count": "total resolved signals in DB"},
+        "items": [{
+            "id": "test-item", "title": "Test", "area": "validation",
+            "priority": 1, "status": "locked",
+            "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 1}]},
+            "depends_on": [], "action": "Do the thing.", "notes": "",
+        }],
+    }
+    backlog_path = tmp_path / "backlog.json"
+    backlog_path.write_text(json.dumps(synthetic), encoding="utf-8")
+
+    run1 = subprocess.run(
+        [sys.executable, str(BACKLOG_CHECKER_PY), "--email",
+         "--file", str(backlog_path), "--db", str(tmp_db)],
+        capture_output=True, text=True,
+    )
+    assert run1.returncode == 0, run1.stderr
+    assert "test-item" in run1.stdout
+
+    on_disk = json.loads(backlog_path.read_text(encoding="utf-8"))
+    assert on_disk["items"][0]["status"] == "ready"
+
+    run2 = subprocess.run(
+        [sys.executable, str(BACKLOG_CHECKER_PY), "--email",
+         "--file", str(backlog_path), "--db", str(tmp_db)],
+        capture_output=True, text=True,
+    )
+    assert run2.returncode == 0, run2.stderr
+    assert "Newly Unlocked: 0" in run2.stdout

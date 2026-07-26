@@ -2,6 +2,491 @@
 
 ---
 
+## 2026-07-25 — Full codebase bug sweep: 11 HIGH-severity fixes
+
+User-requested full sweep ("leave nothing unturned"), not a backlog item.
+Six parallel agents each combed a disjoint slice of the ~18,600-line
+non-test codebase for concrete, verifiable bugs (crashes, silent wrong
+behavior, corrupted stats) — not style. Combined with my own review of
+`main.py` and `backtesting/*.py` (the code freshest from today's work),
+this surfaced roughly 30 verified findings, ranked and reported to the
+user. Fixed all 11 rated HIGH severity; the ~19 MEDIUM/LOW findings were
+reported but left unfixed pending a future pass.
+
+**Own finding, fixed first:** `backtesting/asof_reconstruction.py`'s
+`_find_candlestick()` had a genuine look-ahead leak — it could select a
+candle whose period ends up to ~24h *after* the requested as-of instant
+(confirmed against a real ticker: requesting 2026-05-18T00:00 returned a
+candle covering through 2026-05-18T04:00), and didn't skip candles with
+missing `price.close_dollars` (a no-trade day), which would silently flow
+`None` into `scanner.score_market()`'s `float(x or 0)` coercions as an
+indistinguishable fabricated zero. Both fixed: the function now only
+selects the latest candle with `end_period_ts <= as_of_ts` and a real
+price. 3 new tests added on top of the existing 19.
+
+**11 HIGH-severity fixes, each with new regression tests and verified
+against real Kalshi data where applicable:**
+
+1. **`core/kalshi.py fetch_orderbook()`** — read a nonexistent `"orderbook"`
+   envelope key; real key is `orderbook_fp`. The order-book-imbalance
+   signal (`ob_flag`) was permanently `False` for every market, silently,
+   forever. Fixed in `core/scanner.py compute_orderbook_signal()` to read
+   the real shape (`yes_dollars`/`no_dollars` level arrays).
+2. **`core/kalshi.py fetch_trades()`** — called a nonexistent
+   `/markets/{ticker}/trades` endpoint (real one: `/markets/trades` with a
+   `ticker` query param, same path `fetch_recent_trades()` already used).
+   Whale detection silently saw zero trades for every market, forever.
+3. **`core/llm.py` cost ceiling undercount** — when Claude doesn't call
+   the tool on the first attempt, `_force_tool()`'s second billed call was
+   the only one priced; the first call's tokens (typically the larger of
+   the two — full system prompt + web search) were dropped from both the
+   returned cost and the persisted daily ceiling total. Reproduced: a
+   50k-input/2k-output first call + a 200/100 forced call reported
+   `$0.003` instead of the true `$0.183`. Fixed `_finalize_token_info` to
+   sum both calls.
+4. **`core/scorer.py _score_via_cli()`** — the DEFAULT backend
+   (`config.llm.backend` defaults to `"cli"`) never validated the parsed
+   response shape, unlike the API path. A response missing `"ticker"`
+   would crash the entire scheduled run via an uncaught `KeyError` in
+   `main.py`'s unguarded `{s["ticker"]: s for s in claude_scores}`. Fixed
+   by reusing `core.llm._validate_scores()`.
+5. **`core/logger.py pull_real_fills()`** — matched real Kalshi fills
+   against the *most recent* paper signal per ticker regardless of
+   direction, so a later PASS decision could displace the actual YES/NO
+   call a fill should confirm, marking correct real-money fills
+   "contradictory". Fixed by reusing the existing `_NO_PASS` filter
+   (already used elsewhere in this file, just not here).
+6. **`core/whales.py`** — `signal_trades = large_trades or block_trades`
+   silently dropped every block trade from the direction vote whenever any
+   large trade existed, contradicting its own comment ("majority side of
+   large + block trades"). Reproduced: one 310-contract YES trade + two
+   290-contract NO block trades (580 combined) incorrectly voted "YES".
+   Fixed to vote over the deduplicated union of both sets.
+7. **`backlog/checker.py run(email_mode=True)`** — mutated the in-memory
+   backlog dict and rendered `BACKLOG.md` from it, but never called
+   `save_backlog()` in the `--email` branch (only the interactive C/M path
+   did). Since this mode is the one actually scheduled via Windows Task
+   Scheduler per the module's own docstring, `backlog.json` on disk never
+   advanced past `"locked"`, so the same gate got re-reported as "Newly
+   Unlocked" in every subsequent scheduled run, forever. Fixed to persist
+   immediately after `compare_statuses()`, in both modes.
+8. **`analysis/filter_stats.py` + `net_edge_analysis.py`** —
+   `scanner.score_markets()` returns `(scored_list, hp_filtered_count)`;
+   both scripts used the return value unpacked, crashing on every real run
+   the moment `dedup_by_event`/flag-filtering touched the tuple. The real
+   `config.json` has `dedup_by_event: true`, so this fired unconditionally.
+9. **`analysis/drift_diagnosis.py`, `flag_mode_compare.py`,
+   `threshold_sweep.py`** — all three still did `import scanner`, a
+   pre-`core/` package reorg style; `ModuleNotFoundError` on the first
+   line executed. The latter two also had the same `score_markets`
+   unpacking bug as #8 underneath.
+10. **`analysis/resolve_first.py load_snapshot()` fallback** — wrote a
+    bare JSON array instead of the `{"header":...,"markets":...}` envelope
+    `analysis/snapshot_markets.py` writes and `backtesting/asof_reconstruction.py`
+    requires from the *same shared directory*. A resulting file would
+    break historical-state reconstruction for every ticker/date via an
+    uncaught `AttributeError`, not just corrupt itself. Fixed to write the
+    matching envelope; also hardened `asof_reconstruction._load_snapshot_index()`
+    to defensively skip any wrong-shaped file rather than crash on it, as
+    a second line of defense regardless of what wrote it.
+
+**Tests:** ~29 new tests across the fixes above (`test_scanner.py`,
+`test_kalshi_trades_orderbook.py` [new], `test_llm.py`, `test_scorer.py`,
+`test_logger.py`, `test_whales.py`, `test_backlog_checker.py`,
+`test_filter_stats.py` [new], `test_net_edge_analysis.py` [new],
+`test_analysis_scanner_scripts.py` [new], `test_asof_reconstruction.py`,
+`test_resolve_first.py`), each reproducing the exact failure scenario
+before confirming the fix. One test-hygiene catch along the way: my first
+fix for finding #10 called `analysis.snapshot_markets.save_snapshot()`
+directly, which uses its own hardcoded `SNAPSHOT_DIR` rather than
+`resolve_first.py`'s patchable one — running the existing test with that
+fix in place wrote a real stray file into the actual `data/snapshots/`
+directory (caught immediately via the existing test's assertion failing
+for the wrong reason, and cleaned up before finalizing). Reworked to
+construct the envelope inline against `resolve_first.py`'s own
+`SNAPSHOT_DIR` instead.
+
+Full suite: **1787 passed, 1 skipped, 0 failed** (95.9s), up from 1758
+before this sweep.
+
+**Not fixed, reported to the user for a future pass (~19 MEDIUM/LOW
+findings):** `core/logger.py resolve_outcomes()` silently resolving PASS
+rows; `core/report.py`'s EV-floor-filtered count including
+`research_probe` rows; `get_stats_by_close_horizon()` bucketing negative
+day-deltas as "urgent"; `sources/odds_api.py` caching a failed/partial
+fetch as valid for 6 hours; `sources/polymarket.py`'s first-index
+fallback on 3+-outcome markets; `sources/accounts.py`'s asymmetric
+"up"/"down" outcome handling; `sources/metaculus.py`'s falsy-zero `q2`
+coalescing; `scripts/verify_pnl.py`'s PnL formula diverging from
+`core/logger.py`'s real one; `backlog/checker.py evaluate_triggers()`'s
+missing-metric-defaults-to-0 landmine; `backlog/engine.py validate_item()`
+not validating the `status` field; `scripts/gate_notifier.py` pruning
+gates that could reappear; `core/scanner.py estimate_base_rate()`'s
+antitrust-before-chip-export keyword ordering contradicting its own
+comment; `core/scanner.py dedup_by_event*()` crashing on an explicit
+`event_ticker: None`; `analysis/research_probe.py _mid()`'s one-sided
+fallback; `analysis/eval_rescore.py` joining to the wrong signal instance
+on a duplicate ticker; `main.py`'s hardcoded `event_count=0` in every
+live snapshot header.
+
+---
+
+## 2026-07-25 — replay-runner: retroactive replay driver over the settled corpus
+
+Next `ready` item (priority 3, unlocked once both replay-asof-reconstruction
+and llm-cost-ceiling were done).
+
+**As-of date selection, verified against real data first:** pulled full
+candlestick lifetimes for several real `settled_markets` tickers before
+choosing a rule. Findings: some tickers show genuine multi-week price
+uncertainty before close; others are already near-certain (0.9+/0.1-) days
+out; some sparse/thin markets have `None` (no-trade) candles on many days;
+and one long-running tennis-futures ticker showed a 5-day round-trip to
+0.08 and back to 0.85 that looks like a data anomaly rather than real
+sentiment — exactly the kind of thing that would have silently corrupted a
+naively-chosen fixed lookback. Landed on: try lookback windows
+30/14/7/3/1 days before `close_time`, furthest first, and accept the first
+one whose reconstructed `mid_price` falls inside
+`config.markets.min_market_price`/`max_market_price` — the same price band
+`core.scanner.filter_markets()` already applies on the live pipeline. This
+reuses an existing, already-defensible threshold instead of inventing a new
+number, and directly prevents "backtesting" a market that's already been
+telegraphed by consensus price.
+
+**Shipped:**
+- `backtesting/replay_runner.py` (new module): `run_replay(config,
+  max_markets)` samples settled tickers not yet replayed, finds a
+  qualifying as-of state via the rule above, scores it through
+  `core.scorer.score_markets()` with `llm.backend` forced to `"api"` (real
+  metered billing + the daily cost ceiling — the CLI/Pro path has no cost
+  concept and would defeat the ceiling entirely), and persists to a new
+  `replay_signals` table — idempotent `INSERT OR IGNORE` on `ticker`, never
+  joined with live `signals`. A ceiling-triggered stop is a pause (partial
+  results already committed), not lost work.
+- `export_and_report()`: writes `replay_signals`/`replay_resolutions` CSVs
+  to `data/replay_export/` (never mixed into the live
+  `data/powerbi_export/` directory) and drives the existing, **unmodified**
+  `backtesting.harness.BacktestRunner` over them.
+- `core/scorer.py`: additive `now` parameter on `build_prompt()` and
+  `score_markets()` (default `None` → real `datetime.now()`, so every live
+  caller is unaffected) — without it, the prompt's "days remaining" text
+  would silently describe the wrong horizon for a replayed historical
+  market. Verified directly: building a prompt with `now` pinned to
+  2026-06-01 for a market closing 2026-06-20 correctly renders "19d
+  remaining", not a number based on today's real date.
+
+**LOOK-AHEAD CONTAMINATION — permanent, structural, stated plainly in the
+module docstring, not something this item fixes:** Claude's training data
+and any live web search may already know how a replayed market resolved.
+Schema separation protects downstream analysis from silently pooling
+replay results with live ones; it cannot remove the contamination itself.
+
+**KNOWN SIMPLIFICATION:** does not replicate `main.py`'s post-hoc
+confidence-downgrade business rules (HIGH→MED gates) — grades Claude's raw
+response as returned. Extracting those rules into a shared helper would
+mean touching the live pipeline's own logic, a larger change than this
+item's scope.
+
+**Verified against real data, cost held back deliberately:** a full dry run
+against the real `settled_markets`/candlestick data (only the actual paid
+Claude call stubbed) correctly found 5 of 9 sampled candidates
+reconstructable and price-band-legitimate, with `now` correctly reflecting
+each historical as-of date. **No real (metered) scoring call has been made
+yet** — every other real-cost action this session (the live `main.py` run)
+got an explicit heads-up first, and this module forces metered billing
+where the live path normally has none, so the same courtesy applies before
+the first genuine invocation.
+
+**Tests:** `tests/test_replay_runner.py` (+19: table init, candidate
+selection and its already-replayed/series_ticker exclusions, price-band
+bounds, as-of lookback preference and its data/band-exhausted None paths,
+hit/miss/PASS grading, forced-API-backend confirmation, persistence,
+cost-ceiling stop behavior, idempotency across repeated calls, max_markets
+bound, CSV export shape). `core.scorer.score_markets` mocked throughout —
+no real API spend in the test suite itself. Full suite: **1758 passed, 1
+skipped, 0 failed** (99.3s).
+
+**Unlocked:** `replay-instrument-validation` (both its dependencies —
+this item and `market-baseline-brier` — are now done).
+
+**Top 3 next steps:**
+1. Get explicit go-ahead to run a small real batch (e.g. `--max-markets 3`)
+   to confirm the API scoring loop behaves correctly against genuine
+   Claude responses, not just mocks — and observe real per-market cost to
+   replace the `$20/day` ceiling's "starting guess, not a measured figure"
+   placeholder with an actual number.
+2. Once real cost is observed, size a sensible default `max_markets` for
+   unattended/scheduled replay runs (if any get scheduled) against the
+   daily ceiling.
+3. `replay-instrument-validation` (newly unlocked) is next in priority
+   order once real replay data exists to validate instruments against.
+
+---
+
+## 2026-07-25 — fix-fetch-market-history-endpoint: live price-trend feature repaired
+
+The bug found while building replay-asof-reconstruction (below), filed as its
+own item and picked up next since it was already highest-priority `ready`.
+
+**Fix:** `main.py`'s step-5 loop (was line 364) called the now-deleted
+`core.kalshi.fetch_market_history()`, which hit a dead endpoint
+(`/markets/{ticker}/history`) and had silently returned nothing for every
+call site since it was written. Replaced with `fetch_market_candlesticks()`
+(added for replay-asof-reconstruction). No new plumbing was needed for
+`series_ticker` — it's already merged onto every market dict at fetch time
+(`main.py` line ~155), so the item's own action text overstated that part
+of the work. `period_interval` is chosen per horizon: 60 (hourly) for
+INTRADAY's 1-day lookback so there are enough points to show a trend, 1440
+(daily) for every longer horizon. Candlestick `price.close_dollars` sits on
+the same 0-1 probability scale the old code assumed for `yes_price`, so the
+existing `start*100`/`end*100` trend-percentage formatting needed no
+rescaling.
+
+**Verified against real data:** `KXCITRINI-28JUL01` (MONTHLY horizon) — 7
+daily candles, produced `-5.0% (24.0% → 19.0%) — declining (7d)`, where the
+old code silently produced nothing.
+
+`fetch_market_history()` itself was deleted outright rather than left as
+dead code — zero remaining callers, zero dedicated tests, no reason to keep
+it as a landmine for a future caller to accidentally revive.
+
+**Tests:** no new test file — `core.kalshi.fetch_market_candlesticks()` was
+already covered by `tests/test_kalshi_settled_fetch.py` from the prior item;
+`main.py`'s orchestration logic has no existing unit-test harness (it's
+verified by actually running the pipeline, which this fix was smoke-tested
+against directly). Full suite still green after the edit.
+
+---
+
+## 2026-07-25 — replay-asof-reconstruction: historical market-state reconstruction
+
+Next `ready` item (priority 2, unlocked by replay-settled-fetcher above).
+
+**Correction to the record first:** this item's own action text and
+replay-settled-fetcher's note above both assumed `data/snapshots` only
+reaches back to 2026-07-08 — that claim was never actually checked against
+the files on disk. A directory listing today shows **92 snapshot files
+starting 2026-06-16**, three weeks earlier than believed. `core/kalshi.py`
+and `settled_fetcher.py`'s docstrings have been corrected; the
+replay-settled-fetcher entry above is left as-is (historical record).
+
+**Architecture, verified against real data before writing any code** (per
+the advisor's push-back on the first pass — verify, don't assume):
+1. `core.kalshi.fetch_market_history()` — the function this item's design
+   assumed would serve as the "Kalshi history beyond snapshots" fallback —
+   is **broken**. It calls `/markets/{ticker}/history`, which doesn't exist
+   on Kalshi's API: every ticker tried, including active high-volume
+   markets, returned a plain-text `404 page not found`, never JSON. The
+   function's `if status==404: return []` has silently swallowed this for
+   every call site since it was written, meaning `main.py:364`'s live
+   price-trend/drift-history report text **has never actually produced
+   data**. Filed as its own backlog item (`fix-fetch-market-history-endpoint`)
+   rather than fixed here — different blast radius (live pipeline call site,
+   not this new backtesting module).
+2. The *real* endpoint is `/series/{series_ticker}/markets/{ticker}/candlesticks`
+   — confirmed working, returns real OHLC + yes_bid/yes_ask + volume/open_interest
+   per period. `period_interval` only accepts 1, 60, or 1440 minutes
+   (confirmed empirically; other values reject with a validation error).
+3. `core.scanner.score_market()` and everything it calls
+   (`compute_drift_signal`, `compute_whale_reversal`, `compute_spread_signal`,
+   `estimate_base_rate`, `get_heuristic_label`, `kalshi_fee`) are pure
+   functions of the market dict + config — confirmed via grep that none of
+   them call `datetime.now()`. `filter_markets()` does, but replay never
+   calls that function. So calling `score_market()` on a reconstructed
+   historical dict is safe: no wall-clock leakage from today into a replayed
+   date.
+
+**Shipped:**
+- `core/kalshi.py`: `fetch_market_candlesticks()` (new function, does not
+  touch the broken `fetch_market_history()` or its live call site).
+- `backtesting/asof_reconstruction.py` (new module):
+  `reconstruct_market_state(config, ticker, as_of_date)` — two source tiers,
+  tried in order: **EXACT** (latest `data/snapshots/*.json` at or before
+  `as_of_date` that contains the ticker — verbatim bid/ask/last-price, no
+  aggregation) then **APPROXIMATE** (`fetch_market_candlesticks()`, daily
+  close-of-period candle — a real precision loss to "within one day," named
+  explicitly via a `reconstruction_tier` field rather than blurred). Returns
+  `None` if neither tier has data for that ticker/date — never fabricates,
+  same discipline as every other missing-data decision this session.
+  Reuses `scanner.score_market()` **verbatim** on the reconstructed raw
+  dict — no scanner/heuristic logic duplicated — so the output is
+  guaranteed byte-for-byte the same shape `core.scorer.score_markets()`
+  already consumes, plus three additional transparency keys
+  (`reconstruction_tier`/`reconstruction_source`/`reconstruction_as_of`)
+  that downstream `.get()`-based consumers simply ignore.
+- Static metadata (`series_ticker`/`event_ticker`/`category`/`title`/
+  `close_time`) sourced from `settled_markets` if present, else merged
+  across every snapshot occurrence of the ticker (newest-first, first
+  non-empty value per field wins) — a single nearest-snapshot lookup was
+  tried first and silently produced blank `series_ticker` for tickers whose
+  earliest captured snapshot predated that field being populated; caught by
+  a real smoke test, not by inspection.
+- Permanent, structural limitation (documented in the module docstring, not
+  a bug): whale/watchlist/Polymarket cross-reference enrichment (main.py
+  steps 4-6) has no historical archive, so those keys are simply absent on
+  every replayed market.
+
+**Verified against real data**, not just mocked tests: reconstructed
+`KXNFLENDSTREAK-40NYJ-3031` as of today via the exact/snapshot tier, and
+`KXLIRRSTRIKE-26-MAY19` (a real settled market, pre-snapshot-floor) as of
+2026-05-18 via the approximate/candlestick tier — both produced fully
+scored, correctly-shaped output; an as-of date before the market's actual
+open correctly returned `None`.
+
+**Tests:** `tests/test_asof_reconstruction.py` (+19: snapshot indexing,
+exact-tier lookup and its at-or-before boundary, static-metadata merge and
+its settled_markets-priority, candlestick-tier candle selection and its
+exception/empty handling, full end-to-end integration for both tiers,
+confirms exact tier wins when both are available, confirms `time_horizon`
+derives from `as_of_date` not wall-clock `now()`), plus
+`tests/test_kalshi_settled_fetch.py` (+5: candlestick endpoint shape,
+default `period_interval`, 404 handling, and a regression guard that the
+new function hits a genuinely different path than the broken
+`fetch_market_history()`). Full suite: **1739 passed, 1 skipped, 0
+failed** (199.8s).
+
+**Unlocked:** `replay-runner` (both its dependencies — this item and
+`llm-cost-ceiling` — are now done).
+
+**Top 3 next steps:**
+1. Fix `fetch_market_history()`'s dead endpoint (`fix-fetch-market-history-endpoint`,
+   now `ready`) — a real, currently-live bug independent of replay.
+2. Build `replay-runner`: drive `backtesting.harness` over `settled_markets`
+   using `reconstruct_market_state()`, grading each replayed score against
+   the known outcome in a schema-separated table. Note `core.scorer.build_prompt()`
+   computes `days_left` via `datetime.now(timezone.utc)` (line 623) for its
+   own prompt text — out of scope for this item, but `replay-runner` will
+   need to pass an as-of-relative day count instead, or accept degraded
+   prompt text for replayed markets.
+3. Consider whether candlestick `period_interval=60` (hourly) gives replay-runner
+   meaningfully better precision than the current daily default, now that a
+   real corpus exists to measure it against.
+
+---
+
+## 2026-07-25 — replay-settled-fetcher: Kalshi settled-market corpus
+
+Next `ready` item (priority 2). The local snapshot archive (`data/snapshots`)
+only reaches back to 2026-07-08, capping any backtesting corpus built from it
+alone well below what's useful for the eventual replay pipeline.
+
+**Finding before writing any persistence code:** naively querying
+`/markets?status=settled` directly returns the same KXMVE parlay flood
+`fetch_events()`'s docstring already warned about for open markets — sampled
+999 of 1000 results were KXMVE multi-game-extended parlays. Querying
+`/events?status=settled` instead (then each settled event's markets)
+returned 0 of 400 KXMVE — confirmed empirically before building on it,
+rather than assumed.
+
+**Shipped:**
+- `core/kalshi.py`: `fetch_settled_events()` and `fetch_settled_event_markets()`
+  — the settled-status counterparts to the existing open-only `fetch_events()`/
+  `fetch_event_markets()`, which are left untouched so no existing caller's
+  behavior changes. `max_fetch` is independent of `config.markets.max_events`
+  (that value bounds the live per-run scan budget; this is for corpus depth).
+- `backtesting/settled_fetcher.py` (new module): fetches settled events,
+  excludes KXMVE, fetches each event's settled markets, and persists to a
+  new `settled_markets` table via idempotent `INSERT OR IGNORE` keyed on
+  `ticker`. `series_ticker`/`category` are carried over from the event object
+  (same lesson as the earlier Kalshi-link work — they don't exist on the raw
+  market object). **Read-only against `signals`/`runs`** — confirmed by a
+  test that the module never creates or touches either table.
+- CLI entry point: `python -m backtesting.settled_fetcher [--max-events N]`.
+
+**Real backfill run** (not just a mocked-test proof): 1999/2000 events
+scanned (one transient connection reset on a single event, caught and
+skipped rather than aborting the whole run), 12,681 markets fetched, 12,593
+newly inserted, 81 skipped as unresolved (voided/no clean YES-or-NO result).
+`settled_markets` now holds **12,600 rows** across 1,203 events / 656
+series, `close_time` spanning **2026-05-19 to 2026-07-25** — **4,505 rows
+(36%) predate the 2026-07-08 snapshot floor**, the concrete depth problem
+this item exists to fix.
+
+**Tests:** `tests/test_kalshi_settled_fetch.py` (+7: status/param
+correctness, pagination, max_fetch cap, empty-page stop, a regression guard
+proving the existing open-only `fetch_event_markets()` is unchanged),
+`tests/test_settled_fetcher.py` (+9: table creation and isolation from
+signals/runs, persistence, series_ticker/category carry-through, KXMVE
+exclusion, unresolved-market skip, idempotent re-run, missing-ticker
+graceful skip). Full suite: **1715 passed, 1 skipped**.
+
+**Side effect:** marking this item `done` and re-running the checker's
+trigger evaluation unlocked `replay-asof-reconstruction` (its only
+dependency) — now `ready`.
+
+### Top 3 next steps
+
+1. `replay-asof-reconstruction` (newly ready) — the next link in the replay
+   chain; its hard requirement is matching `core.scorer.score_markets`'s
+   existing input shape exactly, per its own notes.
+2. `price-blind-arm` (ready) — shadow-scoring arm, unblocked since
+   2026-07-25's `llm-cost-ceiling` work.
+3. Investigate the single connection-reset failure
+   (`KXSECAG-26DEC31`) if a re-run is convenient — likely transient, but
+   worth confirming that ticker resolves on retry rather than silently
+   staying absent forever.
+
+---
+
+## 2026-07-25 — llm-cost-ceiling: daily spend cap in core/llm.py
+
+Next `ready` item off the backlog (priority 2). Real Anthropic API spend
+via `score_via_api`/`probe_via_api` was unbounded — unlike `main.py`'s
+CLI/Pro-subscription scan path, which has no per-token bill. Matters most
+once `replay-runner` starts calling these at volume.
+
+`_check_cost_ceiling(config)` reads `daily_cost_ceiling_usd` from
+`config.json`'s `llm` section (default $20/day, `DEFAULT_DAILY_COST_CEILING_USD`
+if unset) and is called **before** issuing each API request in both
+`score_via_api` and `probe_via_api` — a pre-flight check, not a post-hoc one,
+so a caller looping over many markets (`replay-runner`) stops making new
+calls the instant the ceiling is hit rather than only finding out after the
+call that breached it already ran. Raises `LLMCostCeilingExceeded`.
+
+Running total persists in `data/llm_daily_cost.json` (gitignored, same
+pattern as `scripts/gate_notifier.py`'s `data/gate_state.json`) so the
+ceiling holds across process restarts and across every caller — research
+probes, eval re-scoring, and the future replay-runner all share the same
+counter, not per-process state that resets on every invocation. Resets on
+UTC day rollover; a stale prior-day total is never carried into today's
+figure. `_finalize_token_info()` is the single point both API functions
+route through before returning, so accumulation can't be skipped by one
+code path and not the other.
+
+Surfaced in **both** report footers (`core/report.py`, text and HTML) via
+`core.llm.get_daily_cost_usd()` — shown alongside, not instead of, the
+existing "Cost (est.)" line, since that line is a notional Pro-subscription
+equivalent for the main scan and this is a different, real number from a
+different code path. Verified via `--dry-run` in both bodies.
+
+**Side effect:** running the checker's `evaluate_triggers`/`compare_statuses`
+after marking this item `done` correctly unlocked `price-blind-arm` (its
+other dependency, `market-baseline-brier`, already shipped 2026-07-23) —
+now `ready`. `multi-sample-scoring` also depends on this item but stays
+`blocked` (its own `resolved_count>=25` trigger isn't met yet at
+`resolved_count=8`) — the engine only flips blocked→ready in one step when
+both conditions clear together, so it correctly doesn't move partway.
+
+**Tests:** `tests/test_llm.py` (+13: state helpers including stale-day
+reset, ceiling check pass/raise/default-ceiling, integration tests proving
+the API client is never called once already breached, cost accumulates
+across successive calls, `daily_total_usd` present and correct). Added an
+autouse fixture isolating every test in the file from the real state file
+on disk. Full suite: **1699 passed, 1 skipped**.
+
+### Top 3 next steps
+
+1. `price-blind-arm` (newly ready, priority 4) — now unblocked; a
+   shadow-scoring mode with no market-price line, the natural complement to
+   `preregistration`'s falsification test.
+2. `replay-settled-fetcher` (ready, priority 2) — read-only, extends corpus
+   depth past the 2026-07-08 local snapshot floor.
+3. Once `replay-runner` exists and makes its first real API calls, revisit
+   `daily_cost_ceiling_usd`'s $20 default — it's a starting guess, not a
+   measured figure, per its own config note.
+
+---
+
 ## 2026-07-25 — preregistration: pre-registered kill criterion (no code)
 
 Next `ready` item off the backlog, priority 1 for a reason: worthless if

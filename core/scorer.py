@@ -14,7 +14,7 @@ import re
 import subprocess
 import tempfile as _tempfile
 
-from .llm import _find_claude, score_via_api as _score_via_api
+from .llm import _find_claude, _validate_scores, score_via_api as _score_via_api
 from .report import compute_leviathan_score
 
 SYSTEM_PROMPT = (
@@ -611,7 +611,14 @@ def build_system_prompt(calibration: dict | None = None,
 
 
 
-def build_prompt(markets: list[dict]) -> str:
+def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
+    """
+    now: overrides the wall-clock reference used for "days remaining" prompt
+    text. Defaults to the real current time for every existing (live) caller
+    — pass an explicit value only when scoring a reconstructed historical
+    market (replay-runner), so the prompt's day-count reflects the as-of
+    date being replayed rather than today.
+    """
     lines = [
         "Score the following Kalshi prediction markets. For each, search for recent "
         "relevant information and estimate the true probability of YES occurring.\n",
@@ -620,7 +627,7 @@ def build_prompt(markets: list[dict]) -> str:
     ]
 
     from datetime import datetime, timezone as _tz
-    _now = datetime.now(_tz.utc)
+    _now = now if now is not None else datetime.now(_tz.utc)
 
     for i, m in enumerate(markets, 1):
         mid_price = m.get("mid_price")
@@ -992,7 +999,18 @@ def build_prompt(markets: list[dict]) -> str:
 
 
 def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
-    """Legacy CLI path -- subprocess to local claude binary with Pro OAuth."""
+    """
+    Legacy CLI path -- subprocess to local claude binary with Pro OAuth.
+
+    Validates the parsed response the same way score_via_api does
+    (core.llm._validate_scores) before returning. This is the DEFAULT
+    backend (config.llm.backend defaults to "cli") -- a prior version
+    returned the CLI's parsed JSON completely unvalidated, so a response
+    missing a required field (e.g. "ticker") would sail through
+    score_markets() back to main.py, where the ticker-keyed dict
+    comprehension building scored_by_ticker has no exception handler
+    around it and would crash the entire scheduled run on a KeyError.
+    """
     import os as _os, time as _time
     claude_cmd = _find_claude()
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
@@ -1028,9 +1046,11 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
         start, end = all_text.find("["), all_text.rfind("]"  )
         raw_json = all_text[start:end + 1] if start != -1 and end > start else all_text
     try:
-        return json.loads(raw_json)
+        scores = json.loads(raw_json)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
+    _validate_scores(scores)
+    return scores
 
 
 def score_markets(
@@ -1038,8 +1058,16 @@ def score_markets(
     config: dict,
     calibration: dict | None = None,
     flag_cal: dict | None = None,
+    now: "datetime | None" = None,
 ) -> tuple[list[dict], dict]:
-    """Score flagged markets via CLI or API backend."""
+    """
+    Score flagged markets via CLI or API backend.
+
+    now: passed straight through to build_prompt() — see its docstring.
+    Live callers never set this; replay-runner passes the as-of date it's
+    replaying so prompt text describes days-remaining relative to that
+    date, not today.
+    """
     if not flagged_markets:
         return [], {}
 
@@ -1051,7 +1079,7 @@ def score_markets(
 
     max_markets = config.get("scoring", {}).get("max_markets_per_run", 20)
     batch = flagged_markets[:max_markets]
-    user_prompt  = build_prompt(batch)
+    user_prompt  = build_prompt(batch, now=now)
     sys_prompt   = build_system_prompt(calibration, flag_cal=flag_cal)
 
     backend = config.get("llm", {}).get("backend", "cli")

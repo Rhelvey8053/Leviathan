@@ -358,11 +358,27 @@ def main():
             except Exception:
                 orderbook_by_ticker[ticker] = {}
             try:
-                horizon = m.get("time_horizon", "MONTHLY")
-                period  = _period_map.get(horizon, 86400 * 7)
-                label   = _period_label.get(horizon, "7d")
-                hist    = kalshi.fetch_market_history(config, ticker, period_seconds=period)
-                prices  = [float(h["yes_price"]) for h in hist if h.get("yes_price")]
+                horizon       = m.get("time_horizon", "MONTHLY")
+                period        = _period_map.get(horizon, 86400 * 7)
+                label         = _period_label.get(horizon, "7d")
+                series_ticker = m.get("series_ticker")
+                end_ts        = int(time.time())
+                start_ts      = end_ts - period
+                # Hourly candles for the 1-day INTRADAY lookback (enough points to
+                # show a trend); daily candles for every longer horizon.
+                period_interval = 60 if horizon == "INTRADAY" else 1440
+                hist = (
+                    kalshi.fetch_market_candlesticks(
+                        config, series_ticker, ticker, start_ts, end_ts, period_interval,
+                    )
+                    if series_ticker else []
+                )
+                hist.sort(key=lambda c: c.get("end_period_ts", 0))
+                prices = [
+                    float(c["price"]["close_dollars"])
+                    for c in hist
+                    if c.get("price", {}).get("close_dollars")
+                ]
                 if len(prices) >= 2:
                     start  = prices[0]
                     end    = prices[-1]

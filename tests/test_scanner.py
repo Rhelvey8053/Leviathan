@@ -2271,3 +2271,52 @@ def test_ma_stage_base_rate(title, expected):
 def test_ma_heuristic_label(title, expected_label):
     label = scanner.get_heuristic_label({"title": title})
     assert label == expected_label, f"{title!r}: expected {expected_label!r}, got {label!r}"
+
+
+# ─── compute_orderbook_signal ────────────────────────────────────────────────
+
+def test_compute_orderbook_signal_empty_returns_none_fields():
+    result = scanner.compute_orderbook_signal({})
+    assert result == {"ob_bid_depth": None, "ob_ask_depth": None,
+                       "ob_imbalance": None, "ob_flag": False, "ob_direction": None}
+
+
+def test_compute_orderbook_signal_real_kalshi_shape():
+    """
+    Real Kalshi GetMarketOrderbook shape: {"orderbook_fp": {"yes_dollars":
+    [[price,size],...], "no_dollars": [...]}}. A prior version of this
+    function assumed a nonexistent "orderbook" envelope key and silently
+    computed zero depth (ob_flag=False) for every real market -- this is
+    the regression guard.
+    """
+    orderbook = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.0100", "1050.00"], ["0.0800", "200.00"], ["0.0900", "16.00"]],
+            "no_dollars": [["0.0100", "1075.00"], ["0.3000", "200.00"]],
+        }
+    }
+    result = scanner.compute_orderbook_signal(orderbook)
+    assert result["ob_bid_depth"] == 1266.0
+    assert result["ob_ask_depth"] == 1275.0
+    assert result["ob_flag"] is False  # imbalance ~0.498, within 0.35-0.65 band
+
+
+def test_compute_orderbook_signal_real_shape_flags_imbalance():
+    orderbook = {
+        "orderbook_fp": {
+            "yes_dollars": [["0.5000", "100.00"]],
+            "no_dollars": [["0.5000", "900.00"]],
+        }
+    }
+    result = scanner.compute_orderbook_signal(orderbook)
+    assert result["ob_imbalance"] == 0.1
+    assert result["ob_flag"] is True
+    assert result["ob_direction"] == "NO"
+
+
+def test_compute_orderbook_signal_falls_back_to_yes_key_shape():
+    """Older/alternate shape (no orderbook_fp key) still works."""
+    orderbook = {"yes": {"bids": [[0.5, 100]], "asks": [[0.6, 50]]}}
+    result = scanner.compute_orderbook_signal(orderbook)
+    assert result["ob_bid_depth"] == 100.0
+    assert result["ob_ask_depth"] == 50.0
