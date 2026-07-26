@@ -372,6 +372,50 @@ def test_fill_direction_contradictory(tmp_db):
     assert row["direction_aligned"] == 0
 
 
+def test_fill_matches_earlier_actionable_signal_not_a_later_pass(tmp_db):
+    """
+    Regression guard: a later PASS decision on the same ticker must not
+    displace the earlier YES/NO call a real fill should be matched
+    against. Prior behavior: pull_real_fills()'s signal lookup included
+    ALL paper rows regardless of direction, so "most recent row wins" put
+    the PASS row in ticker_signals, and a fill correctly matching the
+    earlier YES call got marked direction_aligned=0 (contradictory)
+    purely because Claude passed on the same ticker on a later,
+    unrelated scan.
+    """
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             edge, direction, confidence, whale_detected, whale_direction,
+             outcome, result, pnl_if_traded, run_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, ("sig-yes", "2026-06-01T00:00:00Z", "KXIPO-TEST", "Test Market",
+              0.30, 0.40, 0.10, "YES", "MED", 0, "", "", "", None, "run-test"))
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             edge, direction, confidence, whale_detected, whale_direction,
+             outcome, result, pnl_if_traded, run_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, ("sig-later-pass", "2026-06-10T00:00:00Z", "KXIPO-TEST", "Test Market",
+              0.35, None, None, "PASS", "LOW", 0, "", "", "", None, "run-test"))
+
+    with patch("core.kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="YES")]):
+        summary = logger.pull_real_fills({})
+
+    assert summary["matched"]       == 1
+    assert summary["aligned"]       == 1
+    assert summary["contradictory"] == 0
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT signal_call_id, direction_aligned FROM signals WHERE source='real_fill'"
+        ).fetchone()
+    assert row["signal_call_id"]    == "sig-yes"
+    assert row["direction_aligned"] == 1
+
+
 def test_fill_unrelated_ticker_no_match(tmp_db):
     """Fill on a ticker with no prior signal → from_signal=0."""
     _insert("sig-def", "KNOWN-TICKER", "YES", 0.30)

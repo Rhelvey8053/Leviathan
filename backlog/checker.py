@@ -363,6 +363,22 @@ def run(backlog_path=DEFAULT_BACKLOG, db_path=DEFAULT_DB, email_mode=False):
     trigger_results = evaluate_triggers(backlog, metrics)
     newly_unlocked = compare_statuses(backlog, trigger_results)
 
+    # compare_statuses() only mutates the in-memory dict -- persist any
+    # locked/blocked -> ready transition immediately, in BOTH modes.
+    # Becoming "ready" is a fact (the trigger/dependency conditions are
+    # met), independent of what a human later decides to do about it
+    # (continue/manual-review/skip via _prompt_item, which does its own
+    # separate save for the ready -> done transition). A prior version
+    # only ever saved here on the interactive C/M path, so --email
+    # mode (the scheduled, non-interactive path this module's own
+    # docstring describes running via Windows Task Scheduler) discarded
+    # the mutation on exit -- backlog.json on disk never advanced past
+    # "locked", so every subsequent scheduled run re-evaluated the same
+    # already-met trigger and re-sent the same "Newly Unlocked" email
+    # indefinitely.
+    if newly_unlocked:
+        save_backlog(backlog_path, backlog)
+
     write_markdown(backlog, metrics)
 
     if email_mode:

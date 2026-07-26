@@ -360,14 +360,21 @@ def pull_real_fills(config: dict) -> dict:
     try:
         with _db() as conn:
             sig_rows = conn.execute(
-                "SELECT call_id, ticker, direction FROM signals "
-                "WHERE source='paper' OR source IS NULL "
-                "ORDER BY timestamp ASC"
+                f"SELECT call_id, ticker, direction FROM signals "
+                f"WHERE {_NO_PASS} ORDER BY timestamp ASC"
             ).fetchall()
     except Exception:
         sig_rows = []
 
-    # Most-recent paper signal per ticker (last in ASC order wins)
+    # Most-recent actionable (YES/NO) paper signal per ticker (last in ASC
+    # order wins). A later PASS decision on the same ticker must never
+    # displace this -- PASS rows are excluded above by the direction
+    # filter, since a fill can only ever be matched against the actual
+    # YES/NO call it was meant to confirm, not whatever Claude said most
+    # recently regardless of direction (a prior version included PASS
+    # rows here, so a real fill correctly matching an earlier YES/NO call
+    # could be marked "contradictory" simply because Claude passed on the
+    # same ticker on a later, unrelated scan).
     ticker_signals: dict = {}
     for row in sig_rows:
         if row["ticker"]:

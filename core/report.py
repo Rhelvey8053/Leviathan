@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from analysis.smart_money_scan import _is_sports_title
 from core.fees import kalshi_fee
 from core.kalshi import kalshi_market_url
+from core.llm import get_daily_cost_usd, DEFAULT_DAILY_COST_CEILING_USD
 
 load_dotenv()
 
@@ -1483,6 +1484,8 @@ def compile_report(
     if tokens:
         out.append(f"  Tokens (est.):     {tokens:,}")
     out.append(f"  Cost (est.):       {_usd(run_meta.get('cost_usd'))}  (API equiv. — Pro sub)")
+    llm_ceiling = config.get("llm", {}).get("daily_cost_ceiling_usd", DEFAULT_DAILY_COST_CEILING_USD)
+    out.append(f"  LLM Daily Spend:   ${get_daily_cost_usd():.2f} / ${float(llm_ceiling):.2f}  (real API, resets daily)")
     out.append(f"  Runtime:           {runtime_s:.0f}s")
     out.append("")
     out.append(_rule("="))
@@ -1783,7 +1786,7 @@ def render_html(
     <!-- FOOTER -->
     <tr><td class="px" style="border-top:1px solid #273246;padding-top:18px;">
       <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10.5px;color:#8695ac;line-height:1.9;">
-        signals generated <span style="color:#c6cfde;">{run_meta.get('signals_generated', 0)}</span> &nbsp;·&nbsp; filtered (high price) <span style="color:#c6cfde;">{run_meta.get('high_price_filtered', 0)}</span> &nbsp;·&nbsp; model <span style="color:#c6cfde;">{_esc(model)}</span> &nbsp;·&nbsp; cost <span style="color:#c6cfde;">${run_meta.get('cost_usd') or 0:.2f} · Pro</span>
+        signals generated <span style="color:#c6cfde;">{run_meta.get('signals_generated', 0)}</span> &nbsp;·&nbsp; filtered (high price) <span style="color:#c6cfde;">{run_meta.get('high_price_filtered', 0)}</span> &nbsp;·&nbsp; model <span style="color:#c6cfde;">{_esc(model)}</span> &nbsp;·&nbsp; cost <span style="color:#c6cfde;">${run_meta.get('cost_usd') or 0:.2f} · Pro</span> &nbsp;·&nbsp; LLM daily spend <span style="color:#c6cfde;">${get_daily_cost_usd():.2f} / ${float(config.get('llm', {}).get('daily_cost_ceiling_usd', DEFAULT_DAILY_COST_CEILING_USD)):.2f}</span>
       </div>
       <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#66738a;padding-top:11px;letter-spacing:1px;">LEVIATHAN // PREDICTION-MARKET INTELLIGENCE</div>
     </td></tr>

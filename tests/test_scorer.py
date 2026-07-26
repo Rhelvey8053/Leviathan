@@ -1313,3 +1313,64 @@ def test_pre_claude_lv_gate_passes_strong_market_to_batch():
     except (RuntimeError, FileNotFoundError, Exception) as exc:
         # Reaching here means the gate passed and we hit the CLI step — correct
         assert "claude" in str(exc).lower() or True
+
+
+# ─── _score_via_cli: response validation ─────────────────────────────────────
+
+def _mock_cli_result(stdout, returncode=0):
+    from unittest.mock import MagicMock
+    result = MagicMock()
+    result.returncode = returncode
+    result.stdout = stdout
+    result.stderr = ""
+    return result
+
+
+def test_score_via_cli_raises_on_missing_required_field(monkeypatch):
+    """
+    Regression guard: the CLI backend is the DEFAULT (config.llm.backend
+    defaults to "cli"), and a prior version returned the parsed JSON
+    completely unvalidated. A response missing "ticker" would previously
+    sail through to main.py's `{s["ticker"]: s for s in claude_scores}`
+    dict comprehension -- which has no exception handler around it -- and
+    crash the entire scheduled run.
+    """
+    import json as _json
+    from unittest.mock import patch
+    bad_response = _json.dumps([{
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])  # missing "ticker"
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(bad_response)):
+        with pytest.raises(ValueError, match="missing fields"):
+            scorer._score_via_cli("sys", "user")
+
+
+def test_score_via_cli_raises_on_bad_direction_enum(monkeypatch):
+    import json as _json
+    from unittest.mock import patch
+    bad_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "MAYBE", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(bad_response)):
+        with pytest.raises(ValueError, match="bad direction"):
+            scorer._score_via_cli("sys", "user")
+
+
+def test_score_via_cli_accepts_valid_response(monkeypatch):
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
+        scores = scorer._score_via_cli("sys", "user")
+    assert scores[0]["ticker"] == "KXTEST-01"

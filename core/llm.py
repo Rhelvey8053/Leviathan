@@ -17,15 +17,96 @@ _find_claude() is the canonical CLI binary finder — imported by scorer.py and
 analysis/research_probe.py for the legacy backend="cli" path.
 """
 
+import json
 import os
 import shutil
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ── Daily cost ceiling (llm-cost-ceiling) ─────────────────────────────────────
+# Real Anthropic API spend from score_via_api/probe_via_api is metered and
+# unbounded by default -- unlike main.py's CLI/Pro-subscription scan path,
+# which has no per-token bill. This matters most once replay-runner starts
+# calling these functions at volume. State persists in a small JSON file
+# (same pattern as scripts/gate_notifier.py's data/gate_state.json) so the
+# ceiling holds across process restarts and across every caller (research
+# probes, eval re-scoring, future replay-runner), not just one run.
+
+DAILY_COST_STATE_PATH = os.path.join(_ROOT, "data", "llm_daily_cost.json")
+DEFAULT_DAILY_COST_CEILING_USD = 20.0
+
+
+class LLMCostCeilingExceeded(RuntimeError):
+    """Raised when today's accumulated LLM spend has already met/exceeded the configured ceiling."""
+
+
+def _today_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _load_daily_cost_state() -> dict:
+    try:
+        with open(DAILY_COST_STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"date": _today_str(), "total_cost_usd": 0.0}
+
+
+def _save_daily_cost_state(state: dict) -> None:
+    os.makedirs(os.path.dirname(DAILY_COST_STATE_PATH), exist_ok=True)
+    with open(DAILY_COST_STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+def get_daily_cost_usd() -> float:
+    """
+    Today's accumulated real API spend from core.llm calls (UTC day).
+    Returns 0.0 if no calls have been made today, or if the persisted state
+    is from a prior day (the total resets with the day; a stale file is
+    never carried over into today's figure).
+    """
+    state = _load_daily_cost_state()
+    if state.get("date") != _today_str():
+        return 0.0
+    return float(state.get("total_cost_usd", 0.0))
+
+
+def _accumulate_daily_cost(cost_usd: float) -> float:
+    """Adds cost_usd to today's running total (resetting on a new UTC day), persists, returns the new total."""
+    today = _today_str()
+    state = _load_daily_cost_state()
+    if state.get("date") != today:
+        state = {"date": today, "total_cost_usd": 0.0}
+    state["total_cost_usd"] = round(float(state.get("total_cost_usd", 0.0)) + cost_usd, 6)
+    _save_daily_cost_state(state)
+    return state["total_cost_usd"]
+
+
+def _check_cost_ceiling(config: dict) -> None:
+    """
+    Raises LLMCostCeilingExceeded if today's accumulated spend has already
+    met or exceeded the configured ceiling -- called BEFORE issuing an API
+    request, so a caller looping over many markets (replay-runner) stops
+    making new calls the moment the ceiling is hit, rather than finding out
+    only after the call that breached it already ran.
+    """
+    llm_cfg = config.get("llm", {})
+    ceiling = float(llm_cfg.get("daily_cost_ceiling_usd", DEFAULT_DAILY_COST_CEILING_USD))
+    current = get_daily_cost_usd()
+    if current >= ceiling:
+        raise LLMCostCeilingExceeded(
+            f"Daily LLM cost ceiling reached: ${current:.2f} >= ${ceiling:.2f} "
+            f"for {_today_str()}. No further API calls until the ceiling resets "
+            f"tomorrow, or daily_cost_ceiling_usd is raised in config.json."
+        )
 
 # ── Per-model pricing (USD per token, July 2026) ──────────────────────────────
 _PRICING: dict[str, dict[str, float]] = {
@@ -164,6 +245,39 @@ def _token_info(response: Any, model: str) -> dict:
     }
 
 
+def _finalize_token_info(*responses: Any, model: str) -> dict:
+    """
+    token_info for a completed exchange, with combined cost folded into
+    today's running total (daily_total_usd) -- the single point both
+    score_via_api and probe_via_api go through before returning, so the
+    ceiling is enforced no matter which one a caller uses.
+
+    Accepts one response for the common case, or two when _force_tool()
+    fired a second billed call after Claude reached end_turn without
+    calling the tool on the first attempt -- an expected, even routine,
+    occurrence per this module's own docstring. A prior version only
+    priced whichever single response was passed in, silently dropping the
+    other call's tokens (typically the larger of the two, since the first
+    call carries the full system prompt and any web-search results) from
+    both the returned cost_usd and the persisted daily ceiling total,
+    letting the ceiling be blown through unnoticed on exactly this path.
+    """
+    combined = {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+    }
+    for response in responses:
+        info = _token_info(response, model)
+        for key in ("input_tokens", "output_tokens",
+                    "cache_creation_input_tokens", "cache_read_input_tokens"):
+            combined[key] += info[key]
+        combined["cost_usd"] += info["cost_usd"]
+    combined["cost_usd"] = round(combined["cost_usd"], 6)
+    combined["daily_total_usd"] = _accumulate_daily_cost(combined["cost_usd"])
+    return combined
+
+
 def _find_tool_use(response: Any, name: str) -> Any | None:
     """Return the first tool_use content block with the given name, or None."""
     for block in response.content:
@@ -251,6 +365,8 @@ def score_via_api(
     explicitly passed — production callers are unaffected. The eval harness
     (analysis/eval_rescore.py) pins temperature=0 for reproducible re-scoring.
     """
+    _check_cost_ceiling(config)
+
     llm_cfg      = config.get("llm", {})
     model        = llm_cfg.get("model", "claude-sonnet-4-6")
     max_searches = int(llm_cfg.get("max_web_searches", 8))
@@ -284,7 +400,7 @@ def score_via_api(
             if block is not None:
                 scores = block.input["scores"]
                 _validate_scores(scores)
-                return scores, _token_info(response, model)
+                return scores, _finalize_token_info(response, model=model)
 
             # Claude finished without calling record_scores — force it
             forced = _force_tool(
@@ -297,7 +413,8 @@ def score_via_api(
                 raise RuntimeError("score_via_api: forced record_scores returned no tool_use block")
             scores = block.input["scores"]
             _validate_scores(scores)
-            return scores, _token_info(forced, model)
+            # Both calls are billed -- price the pair together, not just the forced one.
+            return scores, _finalize_token_info(response, forced, model=model)
 
         except (anthropic.APIError, anthropic.APITimeoutError) as e:
             last_exc = e
@@ -321,6 +438,8 @@ def probe_via_api(
     Returns (probe_input_dict, token_info).
     probe_input_dict keys: ticker, claude_estimate, predicted_direction, confidence, rationale.
     """
+    _check_cost_ceiling(config)
+
     llm_cfg      = config.get("llm", {})
     model        = llm_cfg.get("model", "claude-sonnet-4-6")
     max_searches = int(llm_cfg.get("max_web_searches", 8))
@@ -350,7 +469,7 @@ def probe_via_api(
 
             block = _find_tool_use(response, "record_probe")
             if block is not None:
-                return block.input, _token_info(response, model)
+                return block.input, _finalize_token_info(response, model=model)
 
             forced = _force_tool(
                 client, model, system, messages,
@@ -359,7 +478,8 @@ def probe_via_api(
             block = _find_tool_use(forced, "record_probe")
             if block is None:
                 raise RuntimeError("probe_via_api: forced record_probe returned no tool_use block")
-            return block.input, _token_info(forced, model)
+            # Both calls are billed -- price the pair together, not just the forced one.
+            return block.input, _finalize_token_info(response, forced, model=model)
 
         except (anthropic.APIError, anthropic.APITimeoutError) as e:
             last_exc = e

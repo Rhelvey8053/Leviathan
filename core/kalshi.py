@@ -135,20 +135,44 @@ def fetch_market(config: dict, ticker: str) -> dict:
 
 def fetch_trades(config: dict, ticker: str, limit: int = 0) -> list[dict]:
     """
-    Returns recent trades for a market.
-    Each trade: {price, count, size, created_time, taker_side}
+    Returns recent trades for a single market, newest first.
+
+    /markets/{ticker}/trades does not exist on Kalshi's API (confirmed
+    empirically) — there is exactly one trades endpoint, /markets/trades,
+    filtered to one market via a `ticker` query parameter (the same path
+    fetch_recent_trades() already uses for the unfiltered global feed).
+    This function silently 404'd on every call before this fix, so whale
+    detection always saw zero trades for every market.
+
+    Each trade: {ticker, count_fp, yes_price_dollars, no_price_dollars,
+                 taker_side, taker_outcome_side, taker_book_side,
+                 created_time, is_block_trade, trade_id}
     """
     base_url = _get_base_url(config)
-    path = f"/markets/{ticker}/trades"
+    path     = "/markets/trades"
     lookback = limit or config.get("whales", {}).get("lookback_trades", 100)
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        params={"limit": lookback},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json().get("trades", [])
+    trades   = []
+    cursor   = None
+    while len(trades) < lookback:
+        params = {"ticker": ticker, "limit": min(100, lookback - len(trades))}
+        if cursor:
+            params["cursor"] = cursor
+        resp = requests.get(
+            f"{base_url}{path}",
+            headers=_auth_headers("GET", _vpath(path)),
+            params=params,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        page = data.get("trades", [])
+        if not page:
+            break
+        trades.extend(page)
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+    return trades[:lookback]  # defensive cap in case a page over-delivers past the requested limit
 
 
 def fetch_recent_trades(config: dict, limit: int = 500) -> list[dict]:
@@ -242,6 +266,112 @@ def fetch_event_markets(config: dict, event_ticker: str) -> list[dict]:
     return resp.json().get("markets", [])
 
 
+def fetch_settled_events(config: dict, max_fetch: int = 2000) -> list[dict]:
+    """
+    Returns settled (resolved) events (replay-settled-fetcher). Querying
+    /events?status=settled excludes the KXMVE parlay flood entirely —
+    confirmed empirically: 0 of 400 sampled settled events were KXMVE, vs
+    999 of 1000 when querying /markets?status=settled directly (the same
+    flood fetch_events()'s "open" path already routes around).
+
+    max_fetch is independent of config.markets.max_events — that value
+    bounds the live per-run scan budget; this is for backtesting corpus
+    depth, so callers pulling historical data should pass something much
+    larger to reach further back than the local snapshot archive
+    (data/snapshots, earliest file 2026-06-16 — confirmed by directory
+    listing 2026-07-25; an earlier "2026-07-08" floor claim in this
+    codebase's docs was never actually checked against the files on disk
+    and was off by three weeks).
+    """
+    base_url = _get_base_url(config)
+    path = "/events"
+
+    events = []
+    cursor = None
+    while len(events) < max_fetch:
+        params = {"status": "settled", "limit": 200}
+        if cursor:
+            params["cursor"] = cursor
+        resp = requests.get(
+            f"{base_url}{path}",
+            headers=_auth_headers("GET", _vpath(path)),
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        page = data.get("events", [])
+        if not page:
+            break
+        events.extend(page)
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+
+    return events[:max_fetch]
+
+
+def fetch_settled_event_markets(config: dict, event_ticker: str) -> list[dict]:
+    """
+    Returns settled markets for a specific event ticker — the
+    settled-market counterpart to fetch_event_markets(), which is
+    hardcoded to status='open' for the live scan path and is left
+    unchanged so existing callers keep their current behavior.
+    """
+    base_url = _get_base_url(config)
+    path = "/markets"
+    resp = requests.get(
+        f"{base_url}{path}",
+        headers=_auth_headers("GET", _vpath(path)),
+        params={"status": "settled", "event_ticker": event_ticker, "limit": 200},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json().get("markets", [])
+
+
+def fetch_market_candlesticks(
+    config: dict, series_ticker: str, ticker: str,
+    start_ts: int, end_ts: int, period_interval: int = 1440,
+) -> list[dict]:
+    """
+    Returns Kalshi candlestick history for a market (replay-asof-reconstruction;
+    also main.py's live price-trend text, migrated here from the now-deleted
+    fetch_market_history(), which called /markets/{ticker}/history — an
+    endpoint that does not exist on Kalshi's API. Confirmed empirically:
+    every ticker tried, including high-volume open markets, returned a
+    plain-text "404 page not found", not a JSON 404, and the old function's
+    `if resp.status_code == 404: return []` silently swallowed that for
+    every call site, live pipeline included, so it never actually returned
+    data. This function uses the real endpoint:
+    /series/{series_ticker}/markets/{ticker}/candlesticks, confirmed
+    working and returning real OHLC + yes_bid/yes_ask + volume/open_interest
+    per period.
+
+    period_interval is in minutes; Kalshi only accepts 1, 60, or 1440
+    (confirmed empirically — other values reject with a validation error).
+    period_interval=1 additionally caps the requested range to 5000 minutes
+    (~3.5 days) per call.
+
+    series_ticker must come from the event/settled_markets record, never
+    guessed — it does not live on the raw market object (same rule as
+    fetch_settled_events()'s event/market split above).
+    """
+    base_url = _get_base_url(config)
+    path = f"/series/{series_ticker}/markets/{ticker}/candlesticks"
+    resp = requests.get(
+        f"{base_url}{path}",
+        headers=_auth_headers("GET", _vpath(path)),
+        params={"start_ts": start_ts, "end_ts": end_ts, "period_interval": period_interval},
+        timeout=15,
+    )
+    if resp.status_code == 404:
+        return []
+    resp.raise_for_status()
+    return resp.json().get("candlesticks", [])
+
+
 def fetch_market_with_retry(config: dict, ticker: str) -> dict:
     """
     Fetch a single market by ticker, retrying once after a 2s delay if the title
@@ -272,6 +402,13 @@ def fetch_orderbook(config: dict, ticker: str) -> dict:
     """
     Returns the full order book for a market — all bid/ask price levels.
     Used for order book imbalance signal (deeper than just best bid/ask).
+
+    Real response shape (confirmed live 2026-07-25):
+    {"orderbook_fp": {"yes_dollars": [[price, size], ...], "no_dollars": [...]}}
+    — passed through as-is; core.scanner.compute_orderbook_signal() is the
+    consumer that reads orderbook_fp specifically (a prior version of that
+    function assumed a nonexistent "orderbook" envelope key and silently
+    computed zero depth for every market).
     """
     base_url = _get_base_url(config)
     path     = f"/markets/{ticker}/orderbook"
@@ -281,8 +418,7 @@ def fetch_orderbook(config: dict, ticker: str) -> dict:
         timeout=10,
     )
     resp.raise_for_status()
-    data = resp.json()
-    return data.get("orderbook", data)
+    return resp.json()
 
 
 def fetch_fills(config: dict) -> list[dict]:
@@ -338,22 +474,6 @@ def fetch_positions(config: dict) -> list[dict]:
     if not positions:
         print("  [kalshi] fetch_positions: no positions returned")
     return positions
-
-
-def fetch_market_history(config: dict, ticker: str, period_seconds: int = 86400) -> list[dict]:
-    """Returns price history for the last N seconds."""
-    base_url = _get_base_url(config)
-    path = f"/markets/{ticker}/history"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        params={"period_seconds": period_seconds},
-        timeout=10,
-    )
-    if resp.status_code == 404:
-        return []  # market exists but has no history yet (new/niche market types)
-    resp.raise_for_status()
-    return resp.json().get("history", [])
 
 
 def kalshi_market_url(series_ticker: str | None, event_ticker: str | None = None) -> str | None:

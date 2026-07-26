@@ -9,6 +9,18 @@ import pytest
 from unittest.mock import MagicMock, patch, call
 
 
+@pytest.fixture(autouse=True)
+def _isolate_daily_cost_state(tmp_path, monkeypatch):
+    """
+    Every test in this file gets a throwaway daily-cost state file --
+    never touches data/llm_daily_cost.json on disk. Applies to all tests
+    here, not just the cost-ceiling ones, since score_via_api/probe_via_api
+    now always accumulate cost as a side effect of returning.
+    """
+    import core.llm as llm
+    monkeypatch.setattr(llm, "DAILY_COST_STATE_PATH", str(tmp_path / "llm_daily_cost.json"))
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _valid_score(**overrides):
@@ -149,6 +161,46 @@ class TestScoreViaApi:
         assert mock_client.messages.create.call_count == 2
         assert scores[0]["ticker"] == "KXTEST-01"
 
+    def test_force_tool_call_prices_both_calls_not_just_the_forced_one(self):
+        """
+        Regression guard: when the first call doesn't call the tool, BOTH
+        billed calls' tokens must be counted in the returned cost_usd --
+        a prior version priced only the forced call, silently dropping the
+        first call's tokens (typically the larger of the two, since it
+        carries the full system prompt + any web search) from both the
+        return value and the persisted daily ceiling total.
+        """
+        score = _valid_score()
+        text_block      = MagicMock()
+        text_block.type = "text"
+        text_block.name = None
+        first_resp = _make_response([text_block], stop_reason="end_turn")
+        first_resp.usage = MagicMock(
+            input_tokens=50_000, output_tokens=2_000,
+            cache_creation_input_tokens=0, cache_read_input_tokens=0,
+        )
+
+        forced_block = _make_tool_use_block("record_scores", {"scores": [score]})
+        forced_resp  = _make_response([forced_block])
+        forced_resp.usage = MagicMock(
+            input_tokens=200, output_tokens=100,
+            cache_creation_input_tokens=0, cache_read_input_tokens=0,
+        )
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.side_effect = [first_resp, forced_resp]
+
+            from core.llm import score_via_api
+            _, token_info = score_via_api("sys", "user", _make_config())
+
+        assert token_info["input_tokens"] == 50_000 + 200
+        assert token_info["output_tokens"] == 2_000 + 100
+        # Sonnet 4.6 pricing: $3/M input, $15/M output.
+        expected_cost = (50_200 * 3.00 + 2_100 * 15.00) / 1_000_000
+        assert token_info["cost_usd"] == pytest.approx(expected_cost, abs=1e-6)
+
     def test_api_error_twice_then_success(self):
         """Retries twice on APIError; third attempt succeeds."""
         import anthropic as _ant
@@ -283,6 +335,151 @@ class TestProbeViaApi:
             from core.llm import probe_via_api
             with pytest.raises(RuntimeError, match="probe_via_api"):
                 probe_via_api("sys", "user", _make_config())
+
+
+# ── llm-cost-ceiling ──────────────────────────────────────────────────────────
+
+class TestDailyCostState:
+    """Low-level state helpers: get_daily_cost_usd / _accumulate_daily_cost."""
+
+    def test_get_daily_cost_usd_zero_when_no_state_file(self):
+        from core.llm import get_daily_cost_usd
+        assert get_daily_cost_usd() == 0.0
+
+    def test_accumulate_adds_and_persists(self):
+        from core.llm import _accumulate_daily_cost, get_daily_cost_usd
+        total1 = _accumulate_daily_cost(1.50)
+        total2 = _accumulate_daily_cost(0.25)
+        assert total1 == pytest.approx(1.50)
+        assert total2 == pytest.approx(1.75)
+        assert get_daily_cost_usd() == pytest.approx(1.75)
+
+    def test_get_daily_cost_usd_resets_when_state_is_stale(self):
+        """A persisted total from a prior day must not leak into today's figure."""
+        import core.llm as llm
+        with open(llm.DAILY_COST_STATE_PATH, "w", encoding="utf-8") as f:
+            import json
+            json.dump({"date": "2020-01-01", "total_cost_usd": 999.0}, f)
+        assert llm.get_daily_cost_usd() == 0.0
+
+    def test_accumulate_discards_stale_total_on_new_day(self):
+        """A new day's accumulation starts from 0, not from yesterday's total."""
+        import core.llm as llm
+        import json
+        with open(llm.DAILY_COST_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"date": "2020-01-01", "total_cost_usd": 999.0}, f)
+        new_total = llm._accumulate_daily_cost(2.0)
+        assert new_total == pytest.approx(2.0)
+
+
+class TestCostCeilingCheck:
+    """_check_cost_ceiling: the pre-flight guard called by both API functions."""
+
+    def test_passes_silently_when_under_ceiling(self):
+        from core.llm import _check_cost_ceiling
+        _check_cost_ceiling({"llm": {"daily_cost_ceiling_usd": 5.0}})  # no raise
+
+    def test_raises_when_already_at_ceiling(self):
+        from core.llm import _check_cost_ceiling, _accumulate_daily_cost, LLMCostCeilingExceeded
+        _accumulate_daily_cost(5.0)
+        with pytest.raises(LLMCostCeilingExceeded):
+            _check_cost_ceiling({"llm": {"daily_cost_ceiling_usd": 5.0}})
+
+    def test_raises_when_over_ceiling(self):
+        from core.llm import _check_cost_ceiling, _accumulate_daily_cost, LLMCostCeilingExceeded
+        _accumulate_daily_cost(7.5)
+        with pytest.raises(LLMCostCeilingExceeded):
+            _check_cost_ceiling({"llm": {"daily_cost_ceiling_usd": 5.0}})
+
+    def test_uses_default_ceiling_when_not_configured(self):
+        """A config with no daily_cost_ceiling_usd falls back to DEFAULT_DAILY_COST_CEILING_USD."""
+        from core.llm import _check_cost_ceiling, _accumulate_daily_cost, DEFAULT_DAILY_COST_CEILING_USD
+        _accumulate_daily_cost(0.01)
+        assert DEFAULT_DAILY_COST_CEILING_USD > 0.01
+        _check_cost_ceiling({"llm": {}})  # no raise -- well under the default
+
+
+class TestCostCeilingIntegration:
+    """score_via_api/probe_via_api actually enforce and accumulate the ceiling."""
+
+    def test_score_via_api_blocked_when_ceiling_already_breached(self):
+        """No API call is attempted once the ceiling has already been reached."""
+        from core.llm import _accumulate_daily_cost, LLMCostCeilingExceeded, score_via_api
+        _accumulate_daily_cost(10.0)
+        config = _make_config()
+        config["llm"]["daily_cost_ceiling_usd"] = 5.0
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            with pytest.raises(LLMCostCeilingExceeded):
+                score_via_api("sys", "user", config)
+            mock_client.messages.create.assert_not_called()
+
+    def test_probe_via_api_blocked_when_ceiling_already_breached(self):
+        from core.llm import _accumulate_daily_cost, LLMCostCeilingExceeded, probe_via_api
+        _accumulate_daily_cost(10.0)
+        config = _make_config()
+        config["llm"]["daily_cost_ceiling_usd"] = 5.0
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            with pytest.raises(LLMCostCeilingExceeded):
+                probe_via_api("sys", "user", config)
+            mock_client.messages.create.assert_not_called()
+
+    def test_score_via_api_accumulates_cost_after_success(self):
+        """A successful call's cost is added to the running daily total."""
+        from core.llm import get_daily_cost_usd, score_via_api
+        score = _valid_score()
+        block = _make_tool_use_block("record_scores", {"scores": [score]})
+        resp  = _make_response([block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            assert get_daily_cost_usd() == 0.0
+            _, token_info = score_via_api("sys", "user", _make_config())
+
+        assert get_daily_cost_usd() == pytest.approx(token_info["cost_usd"])
+        assert get_daily_cost_usd() > 0.0
+
+    def test_token_info_includes_daily_total_usd(self):
+        """Returned token_info carries the running total, matching get_daily_cost_usd()."""
+        from core.llm import get_daily_cost_usd, score_via_api
+        score = _valid_score()
+        block = _make_tool_use_block("record_scores", {"scores": [score]})
+        resp  = _make_response([block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            _, token_info = score_via_api("sys", "user", _make_config())
+
+        assert "daily_total_usd" in token_info
+        assert token_info["daily_total_usd"] == pytest.approx(get_daily_cost_usd())
+
+    def test_second_call_accumulates_on_top_of_first(self):
+        """Two successful calls in the same day sum their costs."""
+        from core.llm import get_daily_cost_usd, score_via_api
+        score = _valid_score()
+        block = _make_tool_use_block("record_scores", {"scores": [score]})
+        resp  = _make_response([block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            _, info1 = score_via_api("sys", "user", _make_config())
+            _, info2 = score_via_api("sys", "user", _make_config())
+
+        assert info2["daily_total_usd"] == pytest.approx(info1["cost_usd"] + info2["cost_usd"])
 
 
 # ── backend="cli" regression pin ─────────────────────────────────────────────

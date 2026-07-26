@@ -95,7 +95,7 @@ def main(use_snapshot: bool = False):
     print(f"  Raw markets: {len(all_markets)}")
 
     filtered = scanner.filter_markets(all_markets, config)
-    scored   = scanner.score_markets(filtered, config)
+    scored, _hp_filtered = scanner.score_markets(filtered, config)
 
     if config.get("markets", {}).get("dedup_by_event", False):
         scored = scanner.dedup_by_event_scored(scored)

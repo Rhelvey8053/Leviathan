@@ -109,6 +109,48 @@ def test_whale_direction_no():
     assert result["whale_direction"] == "NO"
 
 
+def test_whale_direction_combines_large_and_block_trades_not_either_or():
+    """
+    Regression guard: whale_direction must vote over the UNION of
+    large_trades and block_trades, not "large_trades if any exist, else
+    block_trades" (a prior bug: `signal_trades = large_trades or
+    block_trades` silently dropped every block trade from the vote
+    whenever at least one large trade existed).
+
+    One 310-contract YES trade qualifies as "large" (threshold=300).
+    Two separate 290-contract NO block trades each fall just under that
+    threshold individually, so they'd never appear in large_trades, but
+    ARE flagged is_block_trade=True. Combined NO volume (580) exceeds the
+    lone YES trade's volume (310), so the correct direction is NO.
+    """
+    trades = [
+        _trade(310, side="yes", block=False),
+        _trade(290, side="no", block=True),
+        _trade(290, side="no", block=True),
+    ]
+    result = whales.detect_whale_activity(
+        "TEST", trades, _cfg(size_multiplier=0, min_whale_size=300),
+    )
+    assert len(result["large_trades"]) == 1
+    assert len(result["block_trades"]) == 2
+    assert result["whale_direction"] == "NO"
+
+
+def test_whale_direction_dedupes_a_trade_that_is_both_large_and_block():
+    """A trade satisfying both criteria must count once in the vote, not twice."""
+    trades = [
+        {**_trade(310, side="yes", block=True), "trade_id": "t1"},
+        _trade(290, side="no", block=True),
+        _trade(290, side="no", block=True),
+    ]
+    result = whales.detect_whale_activity(
+        "TEST", trades, _cfg(size_multiplier=0, min_whale_size=300),
+    )
+    # 310 (yes, counted once) vs 290+290=580 (no) -> NO still wins even
+    # though the yes trade appears in both large_trades and block_trades.
+    assert result["whale_direction"] == "NO"
+
+
 def test_whale_direction_none_when_no_large_trades():
     trades = [_trade(5)] * 5
     result = whales.detect_whale_activity("TEST", trades, _cfg(min_whale_size=100))

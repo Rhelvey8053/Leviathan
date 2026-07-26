@@ -118,8 +118,20 @@ def detect_whale_activity(ticker: str, trades: list[dict], config: dict) -> dict
     prior_hourly_avg = prior_vol / max(spike_hours * 23, 1)
     volume_spike = recent_vol > prior_hourly_avg * size_multiplier if prior_hourly_avg > 0 else False
 
-    # Whale direction: majority side of large + block trades
-    signal_trades = large_trades or block_trades
+    # Whale direction: majority side of large + block trades (the union of
+    # both sets, not "large if any exist, else block" -- a plain `or` here
+    # silently dropped every block trade from the vote whenever at least
+    # one large trade existed, even when the block trades' combined volume
+    # would have flipped the majority direction). Deduped by trade_id (or
+    # object identity as a fallback) since a trade can legitimately satisfy
+    # both the size and block-trade criteria and must only count once.
+    seen_ids: set = set()
+    signal_trades = []
+    for t in large_trades + block_trades:
+        key = t.get("trade_id") or id(t)
+        if key not in seen_ids:
+            seen_ids.add(key)
+            signal_trades.append(t)
     whale_direction = None
     if signal_trades:
         yes_vol = sum(_size(t) for t in signal_trades if (t.get("taker_side") or "").lower() == "yes")
