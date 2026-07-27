@@ -2,6 +2,126 @@
 
 ---
 
+## 2026-07-26 — Fix: BACKLOG.md corrupted on GitHub by a self-authored test
+
+User noticed the backlog on GitHub wasn't showing completed/future items —
+it showed exactly one fake item ("test-item") and zero Done/Locked/Blocked.
+
+**Root cause:** the `--email` persistence fix shipped earlier
+(`backlog/checker.py run()`) added `tests/test_backlog_checker.py::test_email_mode_persists_newly_unlocked_status_to_disk`,
+which runs the real `checker.py --email` via subprocess against a
+synthetic one-item backlog to verify the fix. `--file`/`--db` were
+correctly isolated to tmp paths, but `run()`'s call to `write_markdown(backlog, metrics)`
+had no destination argument at all, so it always targeted the hardcoded
+real repo-root `BACKLOG.md` (`write_markdown(..., dest=BACKLOG_MD)`)
+regardless of which backlog.json was actually being processed. Every
+local test-suite run silently overwrote the real `BACKLOG.md` with that
+synthetic test content, and the corrupted file was committed and pushed
+in the next batch without being noticed (pytest was green — the bug is
+invisible to a pass/fail check, only visible by reading the file's actual
+content, which nothing did).
+
+**The real `backlog/backlog.json` was never touched** — `save_backlog()`
+was already correctly parameterized on `backlog_path` from the earlier
+fix, so all 43 real items and their statuses were intact throughout. Only
+the rendered `BACKLOG.md` markdown was corrupted.
+
+**Shipped:**
+- `backlog/checker.py`: `run()` now takes a `markdown_path` parameter
+  (default: the real `BACKLOG.md`, so production/scheduled behavior is
+  unchanged) and passes it through to `write_markdown(..., dest=markdown_path)`.
+  Added a `--markdown` CLI flag so this is controllable from the command
+  line too.
+- Regenerated the real `BACKLOG.md` from the actual (never-corrupted)
+  `backlog.json` — 43 items, 26 done / 3 ready / 9 locked / 5 blocked,
+  correctly reflecting everything shipped this session.
+
+**Tests:** `tests/test_backlog_checker.py` — the two existing subprocess
+tests now pass `--markdown` pointed at a tmp path (closing the hole), plus
+a new direct regression guard,
+`test_email_mode_never_writes_real_repo_backlog_md`, that snapshots the
+real `BACKLOG.md`'s content before running the checker against a
+synthetic "canary" backlog and asserts it's byte-for-byte unchanged after
+— this is the test that would have caught the original bug immediately,
+and prevents this exact failure mode (a test with real subprocess/file-
+write side effects that aren't fully isolated) from recurring here again.
+Full suite: 1806 passed, 1 skipped, 0 failed.
+
+**Lesson repeated from this same session:** this is the second time a new
+test's real subprocess/file-write side effects weren't fully isolated
+from the actual repo (the first was `analysis/resolve_first.py`'s
+snapshot fallback, caught before it was pushed). This one shipped because
+verifying "does the intended file get written correctly" doesn't verify
+"does anything unintended also get written" — the latter needs an
+explicit before/after diff of files the test didn't mean to touch, not
+just asserting the intended output looks right.
+
+---
+
+## 2026-07-26 — Weekly digest HTML styling + whale activity section
+
+User-requested (not a backlog item): style the weekly digest email the
+same way the daily report already is, and surface whale-flagged markets
+with position/EV detail.
+
+**Real bug found and fixed along the way:** `core/logger.py log_pass()`
+hardcoded `whale_detected=0` and `whale_direction=None` on every PASS row
+regardless of the actual signal dict, even though the caller (`main.py`)
+always has the real values in scope at the call site. Since most
+whale-flagged markets end in a Claude PASS (no confident edge), this
+meant the large majority of whale flags silently never reached the
+database at all — `get_stats_by_confidence`'s whale/no_whale split
+(`core/logger.py:1567`) has been systematically wrong for every PASS row
+since this code was written. Fixed to read the real values from `signal`.
+
+**Shipped:**
+- `core/report.py render_weekly_html()` (new): renders the weekly digest
+  in the same visual system as the daily report's `render_html()` — dark
+  theme, IBM Plex Mono, 600px table-based container, same header banner
+  and color palette. Unlike the daily HTML (which intentionally drops the
+  Track Record section since Power BI covers that for daily use), the
+  weekly HTML keeps it — the weekly digest's whole purpose is a
+  track-record-style summary.
+- `core/report._week_whale_rows()` (new, shared by text + HTML): whale-
+  flagged markets this week, deduplicated by ticker. EV is computed
+  assuming the **whale's own direction**, not Claude's final call —
+  reusing the same real `market_price`/`our_estimate` already scored, just
+  with the direction assumption swapped, since computing EV from Claude's
+  direction would be empty for nearly every row (most end in PASS).
+  Position size (`whale_max_trade_size`, new column, threaded from
+  `main.py`'s existing `whale.get("max_trade_size")`) is `None` — not
+  fabricated as 0 — on any row logged before this fix.
+- `compile_weekly_digest()` (text): added a matching "WHALE ACTIVITY THIS
+  WEEK" section using the same `_week_whale_rows()` data.
+- `main.py`: weekly-digest send block now renders and sends both bodies
+  via `send_report(..., html_body=...)`, and now also passes
+  `lv_stats=logger.get_stats_by_leviathan_score()` (previously never fed,
+  so the digest's own LV-grade table silently never rendered even though
+  the code path for it already existed).
+
+**Known limitation, not fixed (can't be):** this week's actual whale
+flags (11 from the 2026-07-26 run, plus any earlier this week) were
+logged *before* the `log_pass()` fix, so their real `whale_detected`
+value was already discarded before reaching the DB — refiring the digest
+correctly shows "no whale-flagged markets this week" for that population,
+which is the honest answer, not a bug in the new code. Only whale-flagged
+markets that end up as actionable YES/NO signals (not PASS) were ever
+persisted correctly, since `log_signal()` didn't have this bug. Every
+future PASS row is unaffected going forward.
+
+**Tests:** `tests/test_weekly_html.py` (new, +17: whale-row filtering/
+dedup/sort, the whale-direction-not-Claude's-call EV design decision,
+position None-vs-fabricated-zero, HTML structure, empty-state messages,
+escaping), `tests/test_logger.py` (+1: `log_pass` whale persistence
+regression). Full suite: 1805 passed, 1 skipped, 0 failed.
+
+**Refired:** the weekly digest was resent directly (`compile_weekly_digest`
++ `render_weekly_html` + `send_report` against the real DB/config) rather
+than re-running the full pipeline — no new Kalshi/Claude calls, just a
+re-send with the new styling.
+
+---
+
 ## 2026-07-25 — Full codebase bug sweep: 11 HIGH-severity fixes
 
 User-requested full sweep ("leave nothing unturned"), not a backlog item.
