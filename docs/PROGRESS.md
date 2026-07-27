@@ -2,6 +2,40 @@
 
 ---
 
+## 2026-07-27 — Fix: `_score_via_cli` didn't retry on a hung CLI process
+
+A manually-triggered `python main.py` run (2026-07-27) completed end-to-end
+(exit 0, report email sent) but produced 0 signals: the Claude CLI scoring
+subprocess (10-market batch, web search) hit its 600s timeout and the run
+moved on gracefully, per `main.py`'s own try/except around step 6.
+
+**Root cause:** `subprocess.run(..., timeout=600)` raises `TimeoutExpired`
+directly — it isn't a nonzero return code, so the existing retry loop
+(`if result.returncode == 0: break`, else sleep and retry, `max_retries=2`)
+never saw it. A hang failed the whole batch on the very first attempt with
+2 unused retries sitting right there, unlike a bad exit code (which did
+retry correctly already).
+
+**Fix:** `core/scorer.py`'s `_score_via_cli()` now catches `TimeoutExpired`
+per attempt and retries it through the same `max_retries`/5s-backoff loop
+already used for nonzero exit codes, tracking a `timed_out` flag so the
+final error message is accurate (and so `result` — which stays `None` if
+every attempt times out — is never dereferenced). Worst case is now up to
+3 attempts × 600s (~30 min) for this one step alone if the CLI is
+genuinely stuck every time, versus failing outright on the first hang
+before; that tradeoff (a slower worst case in exchange for surviving a
+transient hang) wasn't tuned further since retrying a temporary problem is
+the actual point here.
+
+**Tests:** 3 new tests in `tests/test_scorer.py` — timeout-then-success
+retry, all-attempts-timeout raises a clear `RuntimeError` (not an
+`AttributeError` from a still-`None` result), and a mixed
+timeout-then-nonzero-exit-then-success case confirming the two failure
+modes share one retry budget without interfering. Full suite green (1849
+passed, 1 skipped).
+
+---
+
 ## 2026-07-26 — Partial verification: replay-instrument-validation (still `ready`)
 
 Continuing through the backlog: the only `ready` item left,

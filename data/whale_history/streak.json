@@ -6,52 +6,67 @@
   },
   "KXMLBDEBUT-KANDERSON-26NOV01": {
     "direction": "YES",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXFDAAPPROVE-MDMA-27JAN01": {
     "direction": "NO",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXRECOGSOMALI-29-27": {
     "direction": "NO",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXAGICO-COMP-26Q3": {
     "direction": "YES",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXTVSEASONANNOUNCEEUP-JAN-27": {
     "direction": "NO",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXNFLRETIRE-LJOHNSON65-2627": {
     "direction": "YES",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXTVSEASONRELEASETHELASTOFUS-27-JAN": {
     "direction": "NO",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXIMPEACHCABINET-27JAN01": {
     "direction": "NO",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXARTISTCOLLABTHUGANDGUNNA-30-2027": {
     "direction": "NO",
-    "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   },
   "KXALBUMRELEASEDATEBEY-NEW-JAN01-27": {
     "direction": "NO",
+    "streak": 4,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
+  },
+  "KXCABLEAVE-26MAY22-26SEP": {
+    "direction": "YES",
     "streak": 2,
-    "last_updated": "2026-07-26T16:16:49.118150+00:00"
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
+  },
+  "KXVETOOVERRIDE-29JAN20-27": {
+    "direction": "NO",
+    "streak": 2,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
+  },
+  "KXCHINAEUV-30-27JAN01": {
+    "direction": "NO",
+    "streak": 2,
+    "last_updated": "2026-07-27T15:08:52.444197+00:00"
   }
 }

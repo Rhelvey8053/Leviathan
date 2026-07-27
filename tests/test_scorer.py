@@ -1374,3 +1374,68 @@ def test_score_via_cli_accepts_valid_response(monkeypatch):
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
         scores = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
+
+
+# ─── _score_via_cli: timeout retry ────────────────────────────────────────────
+
+def test_score_via_cli_retries_after_timeout_then_succeeds(monkeypatch):
+    """
+    Regression guard: subprocess.run raising TimeoutExpired must be caught
+    and retried like a nonzero exit code, not skip the retry loop entirely
+    (observed live 2026-07-27: a hung CLI call burned the whole batch with
+    2 unused retries sitting right there).
+    """
+    import json as _json
+    from unittest.mock import patch
+    from subprocess import TimeoutExpired
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", side_effect=[
+             TimeoutExpired(cmd="claude", timeout=600),
+             _mock_cli_result(good_response),
+         ]) as mock_run, \
+         patch("time.sleep"):
+        scores = scorer._score_via_cli("sys", "user")
+    assert scores[0]["ticker"] == "KXTEST-01"
+    assert mock_run.call_count == 2
+
+
+def test_score_via_cli_raises_clear_error_when_every_attempt_times_out():
+    """All 3 attempts (2 retries) timing out must raise a clear RuntimeError,
+    not an AttributeError from dereferencing a still-None `result`."""
+    from unittest.mock import patch
+    from subprocess import TimeoutExpired
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", side_effect=TimeoutExpired(cmd="claude", timeout=600)) as mock_run, \
+         patch("time.sleep"):
+        with pytest.raises(RuntimeError, match="timed out after 600s"):
+            scorer._score_via_cli("sys", "user")
+    assert mock_run.call_count == 3
+
+
+def test_score_via_cli_recovers_from_mixed_timeout_and_nonzero_exit():
+    """A timeout on attempt 1 and a nonzero exit on attempt 2 must not stop
+    a successful attempt 3 from being reached -- the two failure modes
+    share one retry budget without interfering with each other."""
+    import json as _json
+    from unittest.mock import patch
+    from subprocess import TimeoutExpired
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", side_effect=[
+             TimeoutExpired(cmd="claude", timeout=600),
+             _mock_cli_result("", returncode=1),
+             _mock_cli_result(good_response),
+         ]) as mock_run, \
+         patch("time.sleep"):
+        scores = scorer._score_via_cli("sys", "user")
+    assert scores[0]["ticker"] == "KXTEST-01"
+    assert mock_run.call_count == 3
