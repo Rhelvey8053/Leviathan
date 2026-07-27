@@ -2694,3 +2694,71 @@ def test_log_pass_stores_tier23_fields_too(tmp_db):
     assert row["consensus_dir"] == "NO"
     assert row["smart_money_count"] == 1
     assert row["smart_money_dir"] == "NO"
+
+
+# ─── stake_size_hypothetical (confidence-weighted sizing, 2026-07-27) ─────────
+#
+# resolve_outcomes() now also persists stake_size_hypothetical via
+# core.sizing.compute_stake_size() -- a SEPARATE column, never used in
+# place of the existing flat-unit_size pnl_if_traded path. Mocking
+# core.sizing.compute_metrics (not core.logger) since that's where
+# resolve_outcomes' local `from core.sizing import compute_stake_size`
+# actually resolves eligibility from.
+
+def test_schema_includes_stake_size_hypothetical(tmp_db):
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "stake_size_hypothetical" in cols
+
+
+def test_resolve_outcomes_persists_flat_stake_when_ineligible(tmp_db):
+    """Default config (dynamic_sizing_enabled defaults False) -> flat unit_size."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
+        logger.resolve_outcomes({"betting": {"unit_size": 10}})
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT stake_size_hypothetical FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["stake_size_hypothetical"] == pytest.approx(10.0)
+
+
+def test_resolve_outcomes_persists_scaled_stake_when_eligible(tmp_db):
+    """When core.sizing reports eligible, the confidence-tier multiplier applies."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET confidence='HIGH' WHERE call_id=?", (cid,))
+    config = {"betting": {"unit_size": 10, "dynamic_sizing_enabled": True}}
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}), \
+         patch("core.sizing.compute_metrics", return_value={
+             "resolved_count": 30, "resolved_count_per_category_max": 15,
+         }):
+        logger.resolve_outcomes(config)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT stake_size_hypothetical FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["stake_size_hypothetical"] == pytest.approx(15.0)
+
+
+def test_resolve_outcomes_stake_does_not_affect_pnl_if_traded(tmp_db):
+    """Confirms the two columns are fully independent: pnl_if_traded stays the
+    per-$1 rate regardless of what stake_size_hypothetical computes to."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET confidence='HIGH' WHERE call_id=?", (cid,))
+    config = {"betting": {"unit_size": 10, "dynamic_sizing_enabled": True}}
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}), \
+         patch("core.sizing.compute_metrics", return_value={
+             "resolved_count": 30, "resolved_count_per_category_max": 15,
+         }):
+        logger.resolve_outcomes(config)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT pnl_if_traded, stake_size_hypothetical FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["pnl_if_traded"] == pytest.approx(0.70)  # YES at 0.30 resolves YES
+    assert row["stake_size_hypothetical"] == pytest.approx(15.0)
