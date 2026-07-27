@@ -74,8 +74,22 @@ def _init_db() -> None:
                 cost_usd           REAL,
                 runtime_ms         INTEGER
             );
+            CREATE TABLE IF NOT EXISTS blind_scores (
+                call_id             TEXT PRIMARY KEY,
+                timestamp           TEXT,
+                run_id              TEXT,
+                ticker              TEXT,
+                title               TEXT,
+                estimate            REAL,
+                confidence          TEXT,
+                reasoning           TEXT,
+                sources_checked     TEXT,
+                market_price_at_score REAL,
+                cost_usd            REAL
+            );
             CREATE INDEX IF NOT EXISTS idx_signals_ts     ON signals(timestamp);
             CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
+            CREATE INDEX IF NOT EXISTS idx_blind_scores_ticker ON blind_scores(ticker);
         """)
         # Additive schema migration — non-destructive, safe to run repeatedly.
         for col in [
@@ -307,6 +321,42 @@ def log_pass(signal: dict) -> None:
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")
+
+
+def log_blind_score(row: dict) -> None:
+    """
+    Persist one price-blind shadow score (backlog: price-blind-arm) to its
+    own table, never `signals` -- this keeps the blind arm structurally
+    unable to feed signal selection, not just unused by convention.
+
+    row keys: run_id, ticker, title, estimate, confidence, reasoning,
+    sources_checked (list), market_price_at_score (the anchored scorer's
+    market_price for this ticker/run, captured for later comparison only --
+    never shown to the blind prompt itself), cost_usd.
+    """
+    import json as _json
+    try:
+        with _db() as conn:
+            conn.execute("""
+                INSERT OR IGNORE INTO blind_scores
+                (call_id,timestamp,run_id,ticker,title,estimate,confidence,
+                 reasoning,sources_checked,market_price_at_score,cost_usd)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                str(uuid.uuid4())[:8],
+                datetime.now(timezone.utc).isoformat(),
+                row.get("run_id", ""),
+                row.get("ticker", ""),
+                row.get("title", ""),
+                _to_float(row.get("estimate")),
+                row.get("confidence", ""),
+                row.get("reasoning", ""),
+                _json.dumps(row.get("sources_checked") or []),
+                _to_float(row.get("market_price_at_score")),
+                _to_float(row.get("cost_usd")),
+            ))
+    except Exception as e:
+        print(f"  [logger] Failed to log blind score: {e}")
 
 
 def get_pass_tickers(days: int = 14) -> dict:

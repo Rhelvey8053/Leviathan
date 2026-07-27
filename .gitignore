@@ -10,6 +10,7 @@ data/winning_accounts.json
 data/watchlist_cache.json
 data/gate_state.json
 data/llm_daily_cost.json
+data/heartbeat_state.json
 data/leviathan.db
 data/leviathan.db.bak*
 data/db_backups/*

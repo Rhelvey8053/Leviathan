@@ -2,6 +2,175 @@
 
 ---
 
+## 2026-07-26 — Shipped: price-blind-arm (backlog item, done)
+
+Implemented the shadow-scoring counterfactual: does the anchored scorer
+(core/scorer.py) actually add information beyond the market price it's
+shown, or would a blind estimate do just as well?
+
+**Not just deleting the price line.** core/scorer.py's live prompt leaks
+price-derived information in several places beyond the literal "Current
+market price" line: FLAG REASON compares a heuristic base rate to the
+market price, SIGNAL QUALITY is the Leviathan Score grade (itself derived
+from net_edge), and the HEURISTIC/POLYMARKET/CONSENSUS conflict warnings
+are all keyed off `heuristic_direction`, which is computed by comparing
+`base_rate` to Kalshi's own `mid_price`. A blind mode that only hid the
+price line but kept these would still be indirectly anchored. `core/
+blind_scorer.py`'s `build_prompt_blind()` shows only ticker, title,
+horizon, close date, and WHALE ALERT (informed-trader positioning is
+independent evidence, not a price comparison) — everything else is
+omitted.
+
+**System prompt: an override layer, not a hand-copied duplicate.**
+`SYSTEM_PROMPT_BLIND` is `scorer.SYSTEM_PROMPT` plus an appended override
+block, not a rewritten copy of all ~47 calibration rules. Most rules are
+pure category base-rate/evidence-quality guidance that never mentions
+price and carry over unchanged — duplicating them would just create a
+second copy that silently drifts the next time someone edits a rule in
+the live prompt. Only the rules that are *structurally* about comparing
+to market price get a real, concrete, price-free replacement instruction
+in the override block (not just a "disregard the price part," which would
+leave nothing coherent behind for a rule like #1, whose entire content
+*is* "if price is below 15%..."):
+- Rule 1 (tail probability) → apply the same skepticism to your own
+  extreme estimates instead of the market's price.
+- Rule 11 (edge requirement) / Rule 30 (anchoring guard) → don't apply;
+  there's no price to compute an edge against. Report a raw estimate and
+  confidence only, no direction/edge field.
+- Rule 13 (price/level markets) → judge from the question wording alone
+  (default near 50% absent a specific unpriced catalyst).
+- Rule 28 (short-horizon decay) → weight only recent, dated evidence; no
+  edge threshold since there's no price to compare against.
+- Rule 29 (LV grade edge scaling) → doesn't apply; no SIGNAL QUALITY line
+  exists in this mode.
+- Rule 32 (sports) / Rule 35 (Fed rate decisions) → drop the "gap vs.
+  another platform/CME FedWatch vs. Kalshi" mechanic; for Rule 35,
+  report the FedWatch-implied probability directly instead.
+
+**Always metered, never CLI.** `core/llm.py` gained `RECORD_BLIND_SCORES_
+TOOL` (ticker/estimate/confidence/reasoning/sources_checked — no
+market_price/edge/direction, since there's nothing to diff against) and
+`score_blind_via_api()`, called unconditionally regardless of
+`config["llm"]["backend"]`. This shares `_check_cost_ceiling`/
+`_finalize_token_info` with `score_via_api`/`probe_via_api`, so blind-arm
+spend counts against the same `daily_cost_ceiling_usd` total, not a
+separate budget — verified with a test that runs one anchored and one
+blind call back-to-back and checks the accumulated total is their sum.
+
+**Structurally isolated from signal selection.** Results are logged to a
+new, separate `blind_scores` SQLite table (`core.logger.log_blind_score`)
+— never `signals` — so the shadow arm is architecturally unable to feed
+signal selection, not just unused by convention. `main.py` wires it in as
+a non-fatal step after `final_signals` is already decided:
+`_sample_for_blind_arm()` picks up to `config.blind_arm.sample_size`
+(default 3) markets — deterministic first-N in existing priority order,
+not random, so a run is reproducible if re-executed — from those the
+anchored scorer actually scored. Any failure is caught and printed, never
+raised; the main run's own signals are never at risk from this.
+
+**Off by default.** `config.blind_arm.enabled` defaults to `false` in both
+`config.json` and `config.example.json`. Unlike the main scan (Pro
+subscription, no per-token bill), every run this fires spends real
+metered API cost — it needs a deliberate opt-in, not silent activation as
+a side effect of shipping this item.
+
+**Verified:** `build_prompt_blind()` smoke-tested against real live Kalshi
+market dicts (KXCANADACUP-30, KXNFLENDSTREAK-40NYJ-3031/2930) — renders
+cleanly, no KeyErrors on real production field shapes. `score_blind_via_
+api()` itself cannot be validated end-to-end: the real Anthropic API key
+still returns `401 - authentication_error` on every live call, the same
+blocker as `replay-instrument-validation`. 18 new tests across `tests/
+test_blind_scorer.py`, `tests/test_llm.py`, `tests/test_blind_arm_main.py`,
+`tests/test_logger_blind_scores.py`, all passing. Full suite green (1844
+passed, 1 skipped). Marked `done` in the backlog per this session's
+`replay-runner` precedent: implemented and tested is `done`; a broken
+external API key blocks live execution, not shippability.
+
+The one remaining `ready` backlog item, `replay-instrument-validation`,
+needs the replay corpus at `n>=300` (currently 0 rows) and real
+`backend="api"` scoring calls — both blocked on the same key.
+
+**Post-review fixes:** a second pass caught two gaps before either could
+affect real data. (1) `_sample_for_blind_arm()` originally took the first
+N markets from `flagged_markets`, which is pre-sorted by pre-signal
+strength before scoring — always sampling the head would have meant the
+blind arm only ever saw the highest-conviction markets, exactly the slice
+where the anchored scorer's use of price is most likely already
+justified, defeating the point of a representativeness check. Changed to
+`random.Random(run_id).sample(...)` — still reproducible if a run is
+re-executed (same `run_id` → same sample), but not systematically biased
+toward one slice of the distribution. (2) The override block dropped Rule
+30 (anchoring guard) without giving Claude a landing spot for weak/
+ambiguous evidence in blind mode — every other rule either kept its own
+base rate or got a specific replacement, but the general "evidence is thin
+and none of the specific rules pin down a number" case had nothing to
+anchor to. Added: default to the category base rate stated in the
+applicable rule above, only move away from it on something concrete and
+specific. Both fixed in `core/blind_scorer.py`/`main.py`; tests updated
+accordingly. Full suite still green.
+
+---
+
+## 2026-07-26 — Shipped: unattended-ops (backlog item, done)
+
+User authorized working through remaining `ready` backlog items. This was
+the one with no unmet dependencies. Three pieces, per the item's action
+text:
+
+**1. Alert on absence.** `scripts/heartbeat_check.py` reads the most
+recent `core.logger` `runs` row and emails an alert if none exists within
+`max_silence_hours` (default 30.0) — or if the table is empty outright.
+Uses the same fire-once JSON state-file pattern as `scripts/gate_notifier.py`:
+state is keyed on the last-seen `run_id` and only persisted *after* a
+successful `send_report()` call, so a failed send doesn't get silently
+swallowed — the next check retries it. Composes its own subject/body and
+sends through the existing `send_report()` rather than new email plumbing,
+same as every other alerting mechanism in this codebase. Registered as its
+own Windows Task (`Leviathan-Heartbeat`, 2:00 PM and 8:00 PM daily) via
+`scripts/setup_heartbeat_scheduler.ps1` — deliberately *not* chained after
+the main run, since its entire job is noticing that the main run's own
+scheduler stopped firing. Smoke-tested against the real DB:
+`python scripts/heartbeat_check.py --dry-run` → `OK — last run 8.9h ago`.
+11 tests in `tests/test_heartbeat_check.py`.
+
+**2. Graceful degradation on API shape change.** `main.py` gained
+`_validate_market_shape(markets)`, checking every fetched market for the
+five fields the rest of the pipeline assumes exist
+(`ticker`, `close_time`, `yes_bid_dollars`, `yes_ask_dollars`, `title`).
+Wired into step 2 right after the existing fetch/fallback try/except: if
+at least `config.markets.shape_anomaly_min_sample` (default 20) markets
+were fetched and more than `shape_anomaly_threshold` (default 50%) of them
+are missing a required field, the run aborts *before scoring* and sends an
+ALERT email, instead of silently treating what's likely a Kalshi response
+shape change as normal (empty/garbage) data. This is the same failure
+class as the 2026-07-25 bug sweep (`fetch_orderbook`/`fetch_trades`
+assumed response shapes that turned out not to exist) — `docs/RUNBOOK.md`
+references that precedent directly. New config keys `shape_anomaly_threshold`
+/ `shape_anomaly_min_sample` added to `config.json` and `config.example.json`.
+6 tests in `tests/test_market_shape_validation.py`.
+
+**3. Runbook.** `docs/RUNBOOK.md` — diagnosing a failed/missing run
+without reloading full project context: the three things a heartbeat
+alert can't distinguish on its own (scheduler didn't fire / task fired but
+the run failed early, most commonly Kalshi auth / crashed uncaught
+mid-pipeline), the empty-runs-table case, and the shape-anomaly-abort
+case, plus a quick-reference command table.
+
+Full suite green after all three pieces: 1823 passed, 1 skipped. Backlog
+item marked `done`; see `backlog/backlog.json` for the full SHIPPED note.
+
+Both remaining `ready` items (`replay-instrument-validation`,
+`price-blind-arm`) are blocked by the same external factor, not by design
+or code: the real Anthropic API key still returns
+`401 - authentication_error: API key is invalid` on every live call
+(re-confirmed directly this session), and both items require real
+`backend="api"` scoring calls to produce anything to validate.
+`replay-instrument-validation` additionally needs the replay corpus at
+`n>=300` (currently 0 rows, itself blocked on the same key). Neither is
+something further code changes can route around.
+
+---
+
 ## 2026-07-26 — Fix: BACKLOG.md corrupted on GitHub by a self-authored test
 
 User noticed the backlog on GitHub wasn't showing completed/future items —

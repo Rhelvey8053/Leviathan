@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import random
 import sys
 import time
 import traceback
@@ -40,6 +41,62 @@ def estimate_cost(token_info: dict, model: str) -> float:
     if not input_tokens and not output_tokens:
         return 0.0
     return (input_tokens * 3.0 + output_tokens * 15.0) / 1_000_000
+
+
+_MARKET_SHAPE_REQUIRED_FIELDS = ["ticker", "close_time", "yes_bid_dollars", "yes_ask_dollars", "title"]
+
+
+def _validate_market_shape(markets: list[dict]) -> dict:
+    """
+    Checks fetched markets for the fields the rest of the pipeline assumes
+    exist on every real Kalshi market object (unattended-ops: graceful
+    degradation when an upstream API changes shape).
+
+    A high anomaly_rate signals Kalshi's response shape has actually
+    changed (fields renamed/dropped), not just "fewer markets today" --
+    something filter_markets()/score_market() would otherwise absorb
+    silently via their own `.get(x) or default` coercions, producing a
+    quietly-empty or garbage scan rather than surfacing the real problem.
+
+    Returns {"checked": N, "anomaly_rate": float, "missing_fields": {field: count}}.
+    """
+    missing_counts = {f: 0 for f in _MARKET_SHAPE_REQUIRED_FIELDS}
+    if not markets:
+        return {"checked": 0, "anomaly_rate": 1.0, "missing_fields": missing_counts}
+    for m in markets:
+        for f in _MARKET_SHAPE_REQUIRED_FIELDS:
+            if f not in m:
+                missing_counts[f] += 1
+    anomalous = sum(1 for m in markets if any(f not in m for f in _MARKET_SHAPE_REQUIRED_FIELDS))
+    return {"checked": len(markets), "anomaly_rate": anomalous / len(markets),
+            "missing_fields": missing_counts}
+
+
+def _sample_for_blind_arm(flagged_markets: list[dict], scored_by_ticker: dict,
+                           n: int, run_id: str = "") -> list[dict]:
+    """
+    Picks up to n markets, from those the anchored scorer actually produced
+    a score for, to run through the price-blind shadow scorer (backlog:
+    price-blind-arm). Uses a random.Random(run_id) sample rather than the
+    first n in flagged_markets' existing priority order -- that list is
+    pre-sorted by pre-signal strength before scoring, so taking the head
+    every time would systematically sample only the highest-conviction
+    markets (large edge, whale activity, drift), which is exactly the
+    slice where the anchored scorer is most likely to already be justified
+    in leaning on the price. The whole point of this experiment is whether
+    anchoring adds information on a REPRESENTATIVE sample of scored
+    markets, not just the easiest ones. Seeding on run_id keeps a given
+    run's sample reproducible if re-executed, without biasing which
+    markets get picked. Pure selection only -- callers are responsible for
+    making sure the result is never fed back into scored_by_ticker/
+    final_signals; this function has no way to enforce that.
+    """
+    if n <= 0:
+        return []
+    eligible = [m for m in flagged_markets if m.get("ticker", "") in scored_by_ticker]
+    if len(eligible) <= n:
+        return eligible
+    return random.Random(run_id).sample(eligible, n)
 
 
 def _extremize(p: float, alpha: float) -> float:
@@ -165,6 +222,29 @@ def main():
         except Exception as e2:
             print(f"      FAILED: {e2}")
             traceback.print_exc()
+
+    # Shape-anomaly check — abort before scoring garbage rather than let a
+    # Kalshi API shape change flow silently through filter/score's own
+    # `.get(x) or default` coercions (unattended-ops: graceful degradation).
+    _shape = _validate_market_shape(all_markets)
+    _shape_threshold = config.get("markets", {}).get("shape_anomaly_threshold", 0.5)
+    _shape_min_sample = config.get("markets", {}).get("shape_anomaly_min_sample", 20)
+    if _shape["checked"] >= _shape_min_sample and _shape["anomaly_rate"] > _shape_threshold:
+        print(f"      [ALERT] {_shape['anomaly_rate']:.0%} of {_shape['checked']} fetched markets "
+              f"missing expected fields {_shape['missing_fields']} — looks like a Kalshi API "
+              f"shape change, not normal variance. Aborting before scoring.")
+        try:
+            report.send_report(
+                f"{_shape['anomaly_rate']:.0%} of {_shape['checked']} markets fetched this run are "
+                f"missing expected fields: {_shape['missing_fields']}.\n\n"
+                "This run aborted before scoring to avoid processing garbage data as if it were "
+                "real. See docs/RUNBOOK.md — 'API shape anomaly detected'.",
+                [], 0, config,
+                subject_override="Leviathan ALERT — Kalshi API shape anomaly, run aborted",
+            )
+        except Exception as _e:
+            print(f"      [warn] Shape-anomaly alert email failed: {_e}")
+        return
 
     # Save fresh snapshot for smart money cross-reference and analysis scripts
     if all_markets:
@@ -810,6 +890,38 @@ def main():
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
+
+    # Price-blind shadow scoring (backlog: price-blind-arm) -- runs after
+    # signal selection above is already final; results are logged to their
+    # own DB table (core.logger.log_blind_score) and never read back into
+    # scored_by_ticker/final_signals. Off by default (config.blind_arm.enabled)
+    # since, unlike the main scan (Pro subscription, no per-token bill), this
+    # goes through the metered Anthropic API on every run it fires.
+    if config.get("blind_arm", {}).get("enabled", False) and claude_scores:
+        try:
+            from core import blind_scorer
+            sample_size = int(config.get("blind_arm", {}).get("sample_size", 3))
+            sampled = _sample_for_blind_arm(flagged_markets, scored_by_ticker, sample_size, run_id=run_id)
+            if sampled:
+                blind_results, blind_token_info = blind_scorer.score_blind(sampled, config)
+                for br in blind_results:
+                    ticker = br.get("ticker", "")
+                    cs = scored_by_ticker.get(ticker, {})
+                    logger.log_blind_score({
+                        "run_id":                run_id,
+                        "ticker":                ticker,
+                        "title":                 cs.get("title", ""),
+                        "estimate":              br.get("estimate"),
+                        "confidence":            br.get("confidence"),
+                        "reasoning":             br.get("reasoning"),
+                        "sources_checked":       br.get("sources_checked"),
+                        "market_price_at_score": cs.get("market_price"),
+                        "cost_usd":              blind_token_info.get("cost_usd"),
+                    })
+                print(f"      Blind-arm: scored {len(blind_results)} market(s), "
+                      f"cost {_fmt_usd(blind_token_info.get('cost_usd', 0))}")
+        except Exception as e:
+            print(f"      Blind-arm FAILED (non-fatal): {e}")
 
     try:
         from core.export_to_csv import export_csvs

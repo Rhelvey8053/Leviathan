@@ -482,6 +482,131 @@ class TestCostCeilingIntegration:
         assert info2["daily_total_usd"] == pytest.approx(info1["cost_usd"] + info2["cost_usd"])
 
 
+# ── score_blind_via_api tests (price-blind-arm) ──────────────────────────────
+
+def _valid_blind_score(**overrides):
+    base = {
+        "ticker":          "KXTEST-01",
+        "estimate":        0.55,
+        "confidence":      "MED",
+        "reasoning":       "Strong evidence.",
+        "sources_checked": ["reuters.com"],
+    }
+    base.update(overrides)
+    return base
+
+
+class TestScoreBlindViaApi:
+
+    def test_tool_schema_has_no_price_or_edge_fields(self):
+        from core.llm import RECORD_BLIND_SCORES_TOOL
+        props = RECORD_BLIND_SCORES_TOOL["input_schema"]["properties"]["scores"]["items"]["properties"]
+        assert "estimate" in props
+        assert "market_price" not in props
+        assert "edge" not in props
+        assert "direction" not in props
+
+    def test_happy_path_returns_scores(self):
+        score = _valid_blind_score()
+        block = _make_tool_use_block("record_blind_scores", {"scores": [score]})
+        resp  = _make_response([block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            from core.llm import score_blind_via_api
+            scores, token_info = score_blind_via_api("sys", "user", _make_config())
+
+        assert len(scores) == 1
+        assert scores[0]["ticker"] == "KXTEST-01"
+        assert "cost_usd" in token_info
+
+    def test_missing_required_field_raises(self):
+        bad = _valid_blind_score()
+        del bad["reasoning"]
+        block = _make_tool_use_block("record_blind_scores", {"scores": [bad]})
+        resp  = _make_response([block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            from core.llm import score_blind_via_api
+            with pytest.raises(ValueError, match="KXTEST-01"):
+                score_blind_via_api("sys", "user", _make_config())
+
+    def test_bad_confidence_enum_raises(self):
+        bad   = _valid_blind_score(confidence="SUPER_HIGH")
+        block = _make_tool_use_block("record_blind_scores", {"scores": [bad]})
+        resp  = _make_response([block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            from core.llm import score_blind_via_api
+            with pytest.raises(ValueError, match="KXTEST-01"):
+                score_blind_via_api("sys", "user", _make_config())
+
+    def test_force_tool_when_no_block_in_first_response(self):
+        score = _valid_blind_score()
+        text_block      = MagicMock()
+        text_block.type = "text"
+        text_block.name = None
+        first_resp = _make_response([text_block], stop_reason="end_turn")
+
+        forced_block = _make_tool_use_block("record_blind_scores", {"scores": [score]})
+        forced_resp  = _make_response([forced_block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.side_effect = [first_resp, forced_resp]
+
+            from core.llm import score_blind_via_api
+            scores, _ = score_blind_via_api("sys", "user", _make_config())
+
+        assert mock_client.messages.create.call_count == 2
+        assert scores[0]["ticker"] == "KXTEST-01"
+
+    def test_blocked_when_ceiling_already_breached(self):
+        """Same cost-ceiling gate as score_via_api/probe_via_api -- blind-arm
+        sampling must not be a way to bypass the daily spend cap."""
+        from core.llm import _accumulate_daily_cost, LLMCostCeilingExceeded, score_blind_via_api
+        _accumulate_daily_cost(10.0)
+        config = _make_config()
+        config["llm"]["daily_cost_ceiling_usd"] = 5.0
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            with pytest.raises(LLMCostCeilingExceeded):
+                score_blind_via_api("sys", "user", config)
+            mock_client.messages.create.assert_not_called()
+
+    def test_accumulates_into_the_same_daily_total_as_score_via_api(self):
+        """Blind-arm spend and main-scan-via-API spend share one ceiling, not two."""
+        from core.llm import get_daily_cost_usd, score_via_api, score_blind_via_api
+        anchored_block = _make_tool_use_block("record_scores", {"scores": [_valid_score()]})
+        anchored_resp  = _make_response([anchored_block])
+        blind_block = _make_tool_use_block("record_blind_scores", {"scores": [_valid_blind_score()]})
+        blind_resp  = _make_response([blind_block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.side_effect = [anchored_resp, blind_resp]
+
+            _, info1 = score_via_api("sys", "user", _make_config())
+            _, info2 = score_blind_via_api("sys", "user", _make_config())
+
+        assert get_daily_cost_usd() == pytest.approx(info1["cost_usd"] + info2["cost_usd"])
+
+
 # ── backend="cli" regression pin ─────────────────────────────────────────────
 
 class TestBackendCliRegression:
