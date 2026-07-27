@@ -2392,3 +2392,305 @@ def test_log_signal_series_ticker_defaults_empty_when_absent(tmp_db):
         ).fetchone()
     assert row is not None
     assert row["series_ticker"] == ""
+
+
+# ─── category capture (topical market breakdown, 2026-07-27) ─────────────────
+#
+# Kalshi's own event.category field (Politics, Sports, Entertainment, Climate
+# and Weather, Elections, Financials, etc.) is a different axis than
+# flag_path (why the scanner flagged a market) -- captured going forward only,
+# same "never backfill history that was never tagged" rule as series_ticker.
+# Threaded into both log_signal() and log_pass(), unlike series_ticker/
+# event_ticker, since PASS decisions are informative for a topical breakdown
+# too (arguably more so -- PASS rows vastly outnumber actionable signals).
+
+def test_schema_includes_category(tmp_db):
+    """category column exists in the signals table."""
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "category" in cols
+
+
+def test_migration_adds_category_without_corrupting_existing_rows(tmp_path):
+    """
+    Construct a DB with the OLD (pre-category) schema, insert a row, run the
+    migration (_init_db), and confirm the row survives with the new column
+    present and defaulted to ''.
+    """
+    import sqlite3
+    db_file = str(tmp_path / "old_schema3.db")
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, whale_detected INTEGER DEFAULT 0, whale_direction TEXT,
+            outcome TEXT, result TEXT, pnl_if_traded REAL, run_id TEXT,
+            event_ticker TEXT DEFAULT ''
+        );
+    """)
+    conn.execute("INSERT INTO signals (call_id, ticker, direction, event_ticker) "
+                 "VALUES ('old3', 'KXOLDROW3', 'YES', 'KXOLDROW3-EVT')")
+    conn.commit()
+    conn.close()
+
+    old_db_path = logger.DB_PATH
+    try:
+        logger.DB_PATH = db_file
+        logger._init_db()
+        with logger._db() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(signals)").fetchall()}
+            assert "category" in cols
+            row = c.execute(
+                "SELECT ticker, event_ticker, category FROM signals WHERE call_id='old3'"
+            ).fetchone()
+            assert row["ticker"] == "KXOLDROW3"
+            assert row["event_ticker"] == "KXOLDROW3-EVT"  # pre-existing column untouched
+            assert row["category"] == ""
+    finally:
+        logger.DB_PATH = old_db_path
+
+
+def test_log_signal_stores_category(tmp_db):
+    """category round-trips when provided in the signal dict."""
+    sig = {
+        "ticker": "KXCAT1", "category": "Politics",
+        "title": "Category test",
+        "market_price": 0.30, "our_estimate": 0.45, "edge": 0.15,
+        "direction": "YES", "confidence": "MED", "run_id": "test",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT category FROM signals WHERE ticker='KXCAT1'"
+        ).fetchone()
+    assert row is not None
+    assert row["category"] == "Politics"
+
+
+def test_log_signal_category_defaults_empty_when_absent(tmp_db):
+    """category defaults to '' (not NULL/crash) when not provided."""
+    sig = {
+        "ticker": "KXCAT2", "title": "No category",
+        "market_price": 0.25, "our_estimate": 0.40, "edge": 0.15,
+        "direction": "YES", "confidence": "MED", "run_id": "test",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT category FROM signals WHERE ticker='KXCAT2'"
+        ).fetchone()
+    assert row is not None
+    assert row["category"] == ""
+
+
+def test_log_pass_stores_category(tmp_db):
+    """category round-trips through log_pass() too, not just log_signal()."""
+    sig = {
+        "ticker": "KXCAT3", "category": "Climate and Weather",
+        "title": "Weather pass test",
+        "market_price": 0.20, "our_estimate": 0.22, "edge": 0.02,
+        "confidence": "LOW", "run_id": "test",
+    }
+    logger.log_pass(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT category, direction FROM signals WHERE ticker='KXCAT3'"
+        ).fetchone()
+    assert row is not None
+    assert row["category"] == "Climate and Weather"
+    assert row["direction"] == "PASS"
+
+
+# ─── Tier 2/3 CSV-tracking columns (2026-07-27) ───────────────────────────────
+#
+# Order-book/spread context, methodology flags (confidence_downgraded,
+# second_pass), the extremizing-transform output, and flattened cross-market/
+# smart-money evidence (poly_price, consensus_gap, smart_money_dir, etc.) --
+# all previously computed in main.py's signal dict for the prompt/report only
+# and discarded. Captured going forward so questions like "did Polymarket
+# confirmation predict outcomes" can eventually be answered.
+
+_NEW_TIER23_COLS = [
+    "ob_flag", "ob_imbalance", "ob_direction", "spread_wide", "spread_pct",
+    "confidence_downgraded", "second_pass",
+    "ext_estimate", "ext_edge", "ext_n_signals", "ext_alpha",
+    "poly_price", "poly_price_gap", "consensus_gap", "consensus_dir",
+    "smart_money_count", "smart_money_dir",
+]
+
+
+def test_schema_includes_tier23_columns(tmp_db):
+    """All 17 new columns exist on the signals table."""
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    for col in _NEW_TIER23_COLS:
+        assert col in cols, f"missing column: {col}"
+
+
+def test_migration_adds_tier23_columns_without_corrupting_existing_rows(tmp_path):
+    """
+    Construct a DB with the OLD (pre-Tier-2/3) schema, insert a row, run the
+    migration (_init_db), and confirm the row survives with all new columns
+    present and defaulted (0/''/NULL as appropriate).
+    """
+    import sqlite3
+    db_file = str(tmp_path / "old_schema4.db")
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, whale_detected INTEGER DEFAULT 0, whale_direction TEXT,
+            outcome TEXT, result TEXT, pnl_if_traded REAL, run_id TEXT,
+            event_ticker TEXT DEFAULT ''
+        );
+    """)
+    conn.execute("INSERT INTO signals (call_id, ticker, direction, event_ticker) "
+                 "VALUES ('old4', 'KXOLDROW4', 'YES', 'KXOLDROW4-EVT')")
+    conn.commit()
+    conn.close()
+
+    old_db_path = logger.DB_PATH
+    try:
+        logger.DB_PATH = db_file
+        logger._init_db()
+        with logger._db() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(signals)").fetchall()}
+            for col in _NEW_TIER23_COLS:
+                assert col in cols
+            row = c.execute(
+                "SELECT * FROM signals WHERE call_id='old4'"
+            ).fetchone()
+            assert row["ticker"] == "KXOLDROW4"
+            assert row["ob_flag"] == 0
+            assert row["spread_wide"] == 0
+            assert row["confidence_downgraded"] == 0
+            assert row["second_pass"] == 0
+            assert row["smart_money_count"] == 0
+            assert row["ob_imbalance"] is None
+            assert row["smart_money_dir"] is None
+    finally:
+        logger.DB_PATH = old_db_path
+
+
+def test_log_signal_stores_orderbook_and_spread_fields(tmp_db):
+    sig = {
+        "ticker": "KXOB1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "ob_flag": True, "ob_imbalance": 0.72, "ob_direction": "YES",
+        "spread_wide": True, "spread_pct": 0.08,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT ob_flag, ob_imbalance, ob_direction, spread_wide, spread_pct "
+            "FROM signals WHERE ticker='KXOB1'"
+        ).fetchone()
+    assert row["ob_flag"] == 1
+    assert row["ob_imbalance"] == pytest.approx(0.72)
+    assert row["ob_direction"] == "YES"
+    assert row["spread_wide"] == 1
+    assert row["spread_pct"] == pytest.approx(0.08)
+
+
+def test_log_signal_stores_methodology_flags(tmp_db):
+    """confidence_downgraded and second_pass round-trip as booleans."""
+    sig = {
+        "ticker": "KXMETH1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "confidence_downgraded": True, "second_pass": True,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT confidence_downgraded, second_pass FROM signals WHERE ticker='KXMETH1'"
+        ).fetchone()
+    assert row["confidence_downgraded"] == 1
+    assert row["second_pass"] == 1
+
+
+def test_log_signal_stores_extremizing_fields(tmp_db):
+    sig = {
+        "ticker": "KXEXT1", "direction": "YES", "confidence": "HIGH", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "ext_estimate": 0.58, "ext_edge": 0.28, "ext_n_signals": 3, "ext_alpha": 1.3,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT ext_estimate, ext_edge, ext_n_signals, ext_alpha "
+            "FROM signals WHERE ticker='KXEXT1'"
+        ).fetchone()
+    assert row["ext_estimate"] == pytest.approx(0.58)
+    assert row["ext_edge"] == pytest.approx(0.28)
+    assert row["ext_n_signals"] == 3
+    assert row["ext_alpha"] == pytest.approx(1.3)
+
+
+def test_log_signal_stores_cross_market_fields(tmp_db):
+    sig = {
+        "ticker": "KXXM1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "poly_price": 0.45, "poly_price_gap": 0.15,
+        "consensus_gap": 0.10, "consensus_dir": "YES",
+        "smart_money_count": 2, "smart_money_dir": "YES",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT poly_price, poly_price_gap, consensus_gap, consensus_dir, "
+            "smart_money_count, smart_money_dir FROM signals WHERE ticker='KXXM1'"
+        ).fetchone()
+    assert row["poly_price"] == pytest.approx(0.45)
+    assert row["poly_price_gap"] == pytest.approx(0.15)
+    assert row["consensus_gap"] == pytest.approx(0.10)
+    assert row["consensus_dir"] == "YES"
+    assert row["smart_money_count"] == 2
+    assert row["smart_money_dir"] == "YES"
+
+
+def test_log_signal_tier23_defaults_when_absent(tmp_db):
+    """No Tier-2/3 keys provided -- must default cleanly, not raise."""
+    sig = {
+        "ticker": "KXDEF1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT * FROM signals WHERE ticker='KXDEF1'"
+        ).fetchone()
+    assert row is not None
+    assert row["ob_flag"] == 0
+    assert row["confidence_downgraded"] == 0
+    assert row["second_pass"] == 0
+    assert row["smart_money_count"] == 0
+    assert row["ext_estimate"] is None
+    assert row["smart_money_dir"] is None
+
+
+def test_log_pass_stores_tier23_fields_too(tmp_db):
+    """Tier-2/3 fields round-trip through log_pass(), not just log_signal()."""
+    sig = {
+        "ticker": "KXPASS23", "confidence": "LOW", "run_id": "test",
+        "market_price": 0.2, "our_estimate": 0.22, "edge": 0.02,
+        "ob_flag": True, "ob_direction": "NO", "spread_wide": True,
+        "poly_price": 0.25, "consensus_dir": "NO",
+        "smart_money_count": 1, "smart_money_dir": "NO",
+    }
+    logger.log_pass(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT direction, ob_flag, ob_direction, spread_wide, poly_price, "
+            "consensus_dir, smart_money_count, smart_money_dir "
+            "FROM signals WHERE ticker='KXPASS23'"
+        ).fetchone()
+    assert row["direction"] == "PASS"
+    assert row["ob_flag"] == 1
+    assert row["ob_direction"] == "NO"
+    assert row["spread_wide"] == 1
+    assert row["poly_price"] == pytest.approx(0.25)
+    assert row["consensus_dir"] == "NO"
+    assert row["smart_money_count"] == 1
+    assert row["smart_money_dir"] == "NO"

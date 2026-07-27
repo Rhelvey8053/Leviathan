@@ -2,6 +2,73 @@
 
 ---
 
+## 2026-07-27 — Expanded signal-level tracking for future category/evidence analysis
+
+Prompted by "is it worth tracking which market categories we're most
+successful/unsuccessful in" and a follow-up "what else should we add to the
+CSV" — added three tiers of tracking, all pure instrumentation (no decision
+or output changes), going forward only (can't backfill history that was
+never tagged, same rule as `series_ticker`).
+
+**Tier 1 — already captured, silently dropped at CSV export:**
+`whale_direction`, `whale_max_trade_size`, `net_edge_after_fee`,
+`ev_after_fee_per_contract`, `heuristic_direction`, and `category` (new
+this session) were all in the DB already but excluded from `core/
+export_to_csv.py`'s `WHITELIST`, so none of them ever reached Power BI.
+
+**Tier 2 — computed in `main.py`'s signal dict every run, never persisted:**
+`ob_flag`/`ob_imbalance`/`ob_direction` (order-book pressure),
+`spread_wide`/`spread_pct` (liquidity cost), `confidence_downgraded`/
+`second_pass` (methodology flags — matter for calibration analysis since
+lumping these in with ordinary first-pass signals risks confounding
+results), and `ext_estimate`/`ext_edge`/`ext_n_signals`/`ext_alpha` (the
+extremizing-transform output, so a future analysis can check whether
+extremizing actually helped or hurt versus the raw estimate).
+
+**Tier 3 — the real gap:** Polymarket price/gap, external-consensus
+direction/gap, and smart-money wallet backing (`poly`, `ext_consensus`,
+`smart_money` on the signal dict) were computed fresh every run for the
+prompt/report and discarded — none of it reached the DB, meaning
+"did Polymarket confirmation predict outcomes" couldn't be answered even
+retroactively. Added a `_smart_money_majority_dir()` helper in `main.py`
+and flattened `poly_price`/`poly_price_gap`/`consensus_gap`/`consensus_dir`/
+`smart_money_count`/`smart_money_dir` onto both the first-pass and
+second-pass signal dicts.
+
+**Category tracking specifically:** Kalshi's own `event.category` field
+(Politics, Sports, Elections, Entertainment, Climate and Weather,
+Financials, Economics, Crypto, etc. — confirmed against the real
+`settled_markets` table: 4,936 Sports, 2,577 Elections, 413 Politics, only
+30 Climate and Weather) was already captured for the backtesting pipeline
+but never threaded into the live `signals` table. `main.py`'s event-fetch
+loop now merges `category` onto each market the same way `series_ticker`
+already was. This is a different axis from the existing `flag_path`
+tracking (`per-heuristic-scorecard`/`heuristic-sunsetting`, both locked on
+15 resolved per category) — `flag_path` is *why* the scanner flagged a
+market, `category` is *what kind* of real-world event it is.
+
+17 new `core/logger.py` columns total (Tier 2 + Tier 3), threaded through
+both `log_signal()` and `log_pass()` — PASS decisions get tagged too,
+since they vastly outnumber actionable signals and are informative for a
+topical/evidence breakdown. All new WHITELIST columns verified against the
+real DB (`export_csvs()` → 58 columns, up from 41, all new columns 100%
+blank on historical rows as expected — nothing to backfill).
+
+**Explicitly not done:** no analysis of any of this new data, and no
+change to signal selection or sizing. Same discipline as the position-
+sizing conversation earlier — `per-heuristic-scorecard` already sets the
+precedent that this kind of breakdown needs 15 resolved rows per slice
+before it's trusted, and no category or evidence-type has that yet.
+
+25 new tests across `tests/test_logger.py` (schema/migration/round-trip
+for all 17 new columns), `tests/test_export_to_csv.py` (new
+`TestTier23Columns` class + a regression-guard test on `whale_direction`/
+`heuristic_direction` no longer being dropped), and `tests/test_extremize.py`
+(`_smart_money_majority_dir` unit tests). Full suite green (1874 passed, 1
+skipped).
+
+---
+
 ## 2026-07-27 — Diagnosed a concurrent-run coincidence; enabled Task Scheduler event log
 
 A manual `python main.py` run and `Leviathan-DailyRun`'s own scheduled

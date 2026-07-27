@@ -23,6 +23,7 @@ _STRING_COLS = frozenset({
     "time_horizon", "heuristic_direction", "heuristic_label",
     "whale_direction", "ticker", "title", "run_id", "call_id",
     "close_time", "lv_band", "date", "timestamp",
+    "category", "ob_direction", "consensus_dir", "smart_money_dir",
 })
 
 # Sentinel strings that SQLite/Python can produce for missing data.
@@ -37,27 +38,44 @@ _COMPUTED_COLS = frozenset({
 # Analysis-relevant columns written to signals.csv, in display order.
 # Pipeline plumbing (from_signal, fill_count, fill_fee, outcome,
 # direction_aligned, entry_price, signal_call_id, logged_under,
-# resolution_date, whale_direction, heuristic_direction, etc.) are excluded.
-# our_estimate is kept (unlike the rest of that plumbing list) because Brier
-# is (outcome - probability)^2 and without it a dashboard would have to
-# derive probability as market_price + edge, which breaks wherever edge is
-# blank. brier_scorer/brier_market are computed here from our_estimate/
-# market_price via the same core.logger.brier_component() analysis/
-# calibration.py's aggregates call, so the export and the calibration script
-# can never report different numbers for the same row. run_id is kept as an
-# explicit foreign key into runs.csv (powerbi-schema-hardening) — blank only
-# for rows that never originated from a scan run (real_fill/research_probe),
-# never coerced or guessed via nearest-timestamp matching.
+# resolution_date) is still excluded. our_estimate is kept (unlike the rest
+# of that plumbing list) because Brier is (outcome - probability)^2 and
+# without it a dashboard would have to derive probability as
+# market_price + edge, which breaks wherever edge is blank. brier_scorer/
+# brier_market are computed here from our_estimate/market_price via the
+# same core.logger.brier_component() analysis/calibration.py's aggregates
+# call, so the export and the calibration script can never report different
+# numbers for the same row. run_id is kept as an explicit foreign key into
+# runs.csv (powerbi-schema-hardening) — blank only for rows that never
+# originated from a scan run (real_fill/research_probe), never coerced or
+# guessed via nearest-timestamp matching.
+#
+# whale_direction/whale_max_trade_size, net_edge_after_fee/
+# ev_after_fee_per_contract, heuristic_direction, and category were
+# previously captured in the DB but silently dropped at export -- added
+# here rather than left invisible to the dashboard. ob_flag/ob_imbalance/
+# ob_direction, spread_wide/spread_pct, confidence_downgraded/second_pass,
+# ext_estimate/ext_edge/ext_n_signals/ext_alpha, and poly_price/
+# poly_price_gap/consensus_gap/consensus_dir/smart_money_count/
+# smart_money_dir are new columns (2026-07-27) -- previously computed fresh
+# every run for the prompt/report and discarded, never persisted at all.
 WHITELIST = [
     "call_id", "run_id", "date", "timestamp", "ticker", "title",
     "source", "direction", "confidence", "confidence_rank",
-    "flag_path", "time_horizon", "horizon_rank",
+    "flag_path", "time_horizon", "horizon_rank", "category",
     "market_price", "our_estimate", "edge", "net_edge", "base_rate",
     "result", "is_resolved", "is_win", "pnl_if_traded", "pnl_scaled",
     "leviathan_score", "lv_band",
     "close_time", "sig_edge", "sig_drift", "sig_br_none",
-    "watchlist_signal", "whale_detected",
-    "heuristic_label", "short_horizon",
+    "watchlist_signal", "whale_detected", "whale_direction", "whale_max_trade_size",
+    "heuristic_label", "heuristic_direction", "short_horizon",
+    "net_edge_after_fee", "ev_after_fee_per_contract",
+    "ob_flag", "ob_imbalance", "ob_direction",
+    "spread_wide", "spread_pct",
+    "confidence_downgraded", "second_pass",
+    "ext_estimate", "ext_edge", "ext_n_signals", "ext_alpha",
+    "poly_price", "poly_price_gap", "consensus_gap", "consensus_dir",
+    "smart_money_count", "smart_money_dir",
     "brier_scorer", "brier_market",
 ]
 

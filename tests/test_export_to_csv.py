@@ -305,9 +305,13 @@ def _make_full_db(path: str) -> None:
 _DROPPED_COLS = [
     "from_signal", "fill_count", "fill_fee", "contract_type",
     "segment", "outcome", "direction_aligned", "entry_price",
-    "signal_call_id", "logged_under", "resolution_date", "whale_direction",
-    "heuristic_direction",
+    "signal_call_id", "logged_under", "resolution_date",
 ]
+# whale_direction/heuristic_direction were dropped before 2026-07-27 --
+# un-dropped and moved to WHITELIST (test_export_to_csv.py::TestTier23Columns
+# covers their round-trip). Listed here, not in _DROPPED_COLS, as a
+# regression guard against silently re-dropping them.
+_UNDROPPED_COLS = ["whale_direction", "heuristic_direction"]
 
 _COMPUTED_COLS_EXPECTED = [
     "is_win", "is_resolved", "lv_band", "pnl_scaled",
@@ -343,6 +347,20 @@ class TestWhitelistExport(unittest.TestCase):
                 headers = next(csv.reader(f))
             for col in _DROPPED_COLS:
                 self.assertNotIn(col, headers, f"Dropped column still present: {col}")
+
+    def test_previously_dropped_columns_now_present(self):
+        """whale_direction/heuristic_direction were dropped before 2026-07-27;
+        confirm they're not silently re-dropped in a future change."""
+        import csv
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "full.db")
+            out = os.path.join(tmpdir, "export")
+            _make_full_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                headers = next(csv.reader(f))
+            for col in _UNDROPPED_COLS:
+                self.assertIn(col, headers, f"Previously-dropped column missing again: {col}")
 
     def test_computed_columns_present(self):
         """All 7 computed columns must appear in signals.csv."""
@@ -789,6 +807,143 @@ class TestRunIdColumn(unittest.TestCase):
             with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
                 rows = {r["call_id"]: r for r in csv.DictReader(f)}
         self.assertIn(rows["rid_paper"]["run_id"], run_ids)
+
+
+def _make_tier23_db(path: str) -> None:
+    """
+    Full-ish schema including the 2026-07-27 additions (category, whale_
+    direction/whale_max_trade_size, net_edge_after_fee/ev_after_fee_per_
+    contract, heuristic_direction, and the Tier-2/3 columns) -- these were
+    previously computed in main.py's signal dict and either dropped at
+    export (Tier 1) or never persisted at all (Tier 2/3, new columns).
+    """
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, outcome TEXT, result TEXT,
+            category TEXT DEFAULT '', whale_direction TEXT, whale_max_trade_size REAL,
+            net_edge_after_fee REAL, ev_after_fee_per_contract REAL, heuristic_direction TEXT,
+            ob_flag INTEGER DEFAULT 0, ob_imbalance REAL, ob_direction TEXT,
+            spread_wide INTEGER DEFAULT 0, spread_pct REAL,
+            confidence_downgraded INTEGER DEFAULT 0, second_pass INTEGER DEFAULT 0,
+            ext_estimate REAL, ext_edge REAL, ext_n_signals INTEGER, ext_alpha REAL,
+            poly_price REAL, poly_price_gap REAL, consensus_gap REAL, consensus_dir TEXT,
+            smart_money_count INTEGER DEFAULT 0, smart_money_dir TEXT
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.execute("""
+        INSERT INTO signals VALUES (
+            'tier23_1','2026-07-27T00:00:00Z','KXTIER23','Tier 2/3 test market',
+            0.30,0.55,0.25,'YES','MED',NULL,NULL,
+            'Politics','YES',180.0,
+            1.85,2.10,'YES',
+            1,0.65,'YES',
+            1,0.09,
+            1,0,
+            0.60,0.30,3,1.3,
+            0.42,0.12,0.08,'YES',
+            2,'YES'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+class TestTier23Columns(unittest.TestCase):
+    """
+    2026-07-27 additions: order-book/spread context, methodology flags
+    (confidence_downgraded, second_pass), the extremizing transform output,
+    flattened cross-market/smart-money evidence, plus the Tier 1 columns
+    (whale_direction, whale_max_trade_size, net_edge_after_fee,
+    ev_after_fee_per_contract, heuristic_direction, category) that were
+    already in the DB but previously silently dropped at export.
+    """
+
+    def _row(self, tmpdir):
+        import csv
+        db  = os.path.join(tmpdir, "tier23.db")
+        out = os.path.join(tmpdir, "export")
+        _make_tier23_db(db)
+        export_csvs(db_path=db, export_dir=out)
+        with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+            rows = {r["call_id"]: r for r in csv.DictReader(f)}
+        return rows["tier23_1"]
+
+    def test_tier1_columns_no_longer_dropped(self):
+        """whale_direction/whale_max_trade_size/net_edge_after_fee/
+        ev_after_fee_per_contract/heuristic_direction/category were captured
+        in the DB but excluded from WHITELIST before 2026-07-27."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            row = self._row(tmpdir)
+        self.assertEqual(row["category"], "Politics")
+        self.assertEqual(row["whale_direction"], "YES")
+        self.assertEqual(row["whale_max_trade_size"], "180.0")
+        self.assertEqual(row["net_edge_after_fee"], "1.85")
+        self.assertEqual(row["ev_after_fee_per_contract"], "2.1")
+        self.assertEqual(row["heuristic_direction"], "YES")
+
+    def test_orderbook_and_spread_columns_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            row = self._row(tmpdir)
+        self.assertEqual(row["ob_flag"], "1")
+        self.assertEqual(row["ob_imbalance"], "0.65")
+        self.assertEqual(row["ob_direction"], "YES")
+        self.assertEqual(row["spread_wide"], "1")
+        self.assertEqual(row["spread_pct"], "0.09")
+
+    def test_methodology_flags_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            row = self._row(tmpdir)
+        self.assertEqual(row["confidence_downgraded"], "1")
+        self.assertEqual(row["second_pass"], "0")
+
+    def test_extremizing_columns_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            row = self._row(tmpdir)
+        self.assertEqual(row["ext_estimate"], "0.6")
+        self.assertEqual(row["ext_edge"], "0.3")
+        self.assertEqual(row["ext_n_signals"], "3")
+        self.assertEqual(row["ext_alpha"], "1.3")
+
+    def test_cross_market_and_smart_money_columns_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            row = self._row(tmpdir)
+        self.assertEqual(row["poly_price"], "0.42")
+        self.assertEqual(row["poly_price_gap"], "0.12")
+        self.assertEqual(row["consensus_gap"], "0.08")
+        self.assertEqual(row["consensus_dir"], "YES")
+        self.assertEqual(row["smart_money_count"], "2")
+        self.assertEqual(row["smart_money_dir"], "YES")
+
+    def test_blank_tier23_row_exports_empty_strings_not_none(self):
+        """A row that never had Tier-2/3 data (pre-2026-07-27) must export
+        blank strings for the new string columns, not the literal 'None'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "tier23_blank.db")
+            out = os.path.join(tmpdir, "export")
+            _make_tier23_db(db)
+            conn = sqlite3.connect(db)
+            conn.execute(
+                "INSERT INTO signals (call_id, ticker, direction) VALUES "
+                "('tier23_blank', 'KXBLANK', 'YES')"
+            )
+            conn.commit()
+            conn.close()
+            export_csvs(db_path=db, export_dir=out)
+            import csv
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                rows = {r["call_id"]: r for r in csv.DictReader(f)}
+        blank_row = rows["tier23_blank"]
+        self.assertEqual(blank_row["category"], "")
+        self.assertEqual(blank_row["ob_direction"], "")
+        self.assertEqual(blank_row["consensus_dir"], "")
+        self.assertEqual(blank_row["smart_money_dir"], "")
 
 
 if __name__ == "__main__":

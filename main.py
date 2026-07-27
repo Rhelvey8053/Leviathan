@@ -137,6 +137,20 @@ def _count_agreeing_signals(m: dict, direction: str) -> int:
     return count
 
 
+def _smart_money_majority_dir(smart_money: list) -> "str | None":
+    """
+    Majority direction among winning wallets tracked on this market, or None
+    if there's no directional majority (tied or no directional entries).
+    Flattened for persistence -- the raw smart_money list itself is never
+    stored on the signals row, only this summary plus the count.
+    """
+    yes_n = sum(1 for s in smart_money if s.get("direction") == "YES")
+    no_n  = sum(1 for s in smart_money if s.get("direction") == "NO")
+    if yes_n == no_n:
+        return None
+    return "YES" if yes_n > no_n else "NO"
+
+
 def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
@@ -199,17 +213,19 @@ def main():
             event_ticker = event.get("event_ticker") or event.get("ticker", "")
             if not event_ticker or "KXMVE" in event_ticker:
                 continue
-            # series_ticker lives on the EVENT object only (not the raw market
-            # object) — capture it here and attach it to each market so it's
-            # available downstream for kalshi_market_url(), the same way
+            # series_ticker and category live on the EVENT object only (not
+            # the raw market object) — capture them here and attach to each
+            # market so they're available downstream, the same way
             # event_ticker is already carried through.
             series_ticker = event.get("series_ticker", "")
+            category      = event.get("category", "")
             try:
                 for m in kalshi.fetch_event_markets(config, event_ticker):
                     t = m.get("ticker")
                     if t and t not in seen:
                         seen.add(t)
                         m["series_ticker"] = series_ticker
+                        m["category"]      = category
                         all_markets.append(m)
             except Exception as _e:
                 print(f"      [warn] fetch_event_markets({event_ticker}): {_e}")
@@ -729,6 +745,7 @@ def main():
             "title":           m.get("title", cs.get("title", "")),
             "event_ticker":    m.get("event_ticker", ""),
             "series_ticker":   m.get("series_ticker", ""),
+            "category":        m.get("category", ""),
             "whale_detected":  whale.get("whale_detected", False),
             "whale_direction": whale.get("whale_direction"),
             "whale_max_trade_size": whale.get("max_trade_size"),
@@ -745,6 +762,15 @@ def main():
             "ext_markets":     m.get("ext_markets", []),
             "ext_consensus":   m.get("ext_consensus", {}),
             "smart_money":     m.get("smart_money", []),
+            # Flattened for persistence -- the raw poly/ext_consensus/
+            # smart_money structures above are used for the prompt/report
+            # only and are never stored on the signals row.
+            "poly_price":        (m.get("poly") or {}).get("poly_price"),
+            "poly_price_gap":    (m.get("poly") or {}).get("price_gap"),
+            "consensus_gap":     (m.get("ext_consensus") or {}).get("consensus_gap"),
+            "consensus_dir":     (m.get("ext_consensus") or {}).get("consensus_dir"),
+            "smart_money_count": len(m.get("smart_money") or []),
+            "smart_money_dir":   _smart_money_majority_dir(m.get("smart_money") or []),
             "watchlist_signal": m.get("watchlist_signal", False),
             "flag_path":            m.get("flag_path"),
             "base_rate":            m.get("base_rate"),
@@ -834,6 +860,7 @@ def main():
                     "title":           m.get("title", cs.get("title", "")),
                     "event_ticker":    m.get("event_ticker", ""),
                     "series_ticker":   m.get("series_ticker", ""),
+                    "category":        m.get("category", ""),
                     "whale_detected":  whale.get("whale_detected", False),
                     "whale_direction": whale.get("whale_direction"),
                     "whale_reversal":  m.get("whale_reversal", False),
@@ -849,6 +876,12 @@ def main():
                     "ext_markets":     m.get("ext_markets", []),
                     "ext_consensus":   m.get("ext_consensus", {}),
                     "smart_money":     m.get("smart_money", []),
+                    "poly_price":        (m.get("poly") or {}).get("poly_price"),
+                    "poly_price_gap":    (m.get("poly") or {}).get("price_gap"),
+                    "consensus_gap":     (m.get("ext_consensus") or {}).get("consensus_gap"),
+                    "consensus_dir":     (m.get("ext_consensus") or {}).get("consensus_dir"),
+                    "smart_money_count": len(m.get("smart_money") or []),
+                    "smart_money_dir":   _smart_money_majority_dir(m.get("smart_money") or []),
                     "watchlist_signal":     m.get("watchlist_signal", False),
                     "flag_path":            m.get("flag_path"),
                     "base_rate":            m.get("base_rate"),

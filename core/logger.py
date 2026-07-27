@@ -127,6 +127,37 @@ def _init_db() -> None:
             "series_ticker         TEXT    DEFAULT ''",
             "market_baseline_brier REAL",
             "whale_max_trade_size  REAL",
+            "category              TEXT    DEFAULT ''",
+            # Order-book/spread signal-time context (computed in main.py's
+            # signal dict already, just never persisted before now).
+            "ob_flag               INTEGER DEFAULT 0",
+            "ob_imbalance          REAL",
+            "ob_direction          TEXT",
+            "spread_wide           INTEGER DEFAULT 0",
+            "spread_pct            REAL",
+            # Methodology flags -- both are set by main.py logic that changes
+            # how a signal was selected/graded, and lumping them in with
+            # ordinary signals without a marker risks confounding any later
+            # calibration analysis.
+            "confidence_downgraded INTEGER DEFAULT 0",
+            "second_pass           INTEGER DEFAULT 0",
+            # Extremizing transform output (Satopää et al. 2014) -- lets a
+            # future analysis check whether the extremized estimate actually
+            # performed better or worse than the raw our_estimate.
+            "ext_estimate          REAL",
+            "ext_edge              REAL",
+            "ext_n_signals         INTEGER",
+            "ext_alpha             REAL",
+            # Cross-market/smart-money evidence at signal time -- previously
+            # computed fresh every run for the prompt/report and discarded;
+            # without these, "did Polymarket/consensus/smart-money agreement
+            # predict outcomes" can never be answered even retroactively.
+            "poly_price            REAL",
+            "poly_price_gap        REAL",
+            "consensus_gap         REAL",
+            "consensus_dir         TEXT",
+            "smart_money_count     INTEGER DEFAULT 0",
+            "smart_money_dir       TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -228,8 +259,14 @@ def log_signal(signal: dict) -> None:
                  base_rate,net_edge,heuristic_direction,short_horizon,time_horizon,
                  close_time,leviathan_score,heuristic_label,
                  net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker,
-                 whale_max_trade_size)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 whale_max_trade_size,category,
+                 ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
+                 confidence_downgraded,second_pass,
+                 ext_estimate,ext_edge,ext_n_signals,ext_alpha,
+                 poly_price,poly_price_gap,consensus_gap,consensus_dir,
+                 smart_money_count,smart_money_dir)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -264,6 +301,24 @@ def log_signal(signal: dict) -> None:
                 signal.get("event_ticker", ""),
                 signal.get("series_ticker", ""),
                 _to_float(signal.get("whale_max_trade_size")),
+                signal.get("category", ""),
+                1 if signal.get("ob_flag") else 0,
+                _to_float(signal.get("ob_imbalance")),
+                signal.get("ob_direction"),
+                1 if signal.get("spread_wide") else 0,
+                _to_float(signal.get("spread_pct")),
+                1 if signal.get("confidence_downgraded") else 0,
+                1 if signal.get("second_pass") else 0,
+                _to_float(signal.get("ext_estimate")),
+                _to_float(signal.get("ext_edge")),
+                _to_int(signal.get("ext_n_signals")),
+                _to_float(signal.get("ext_alpha")),
+                _to_float(signal.get("poly_price")),
+                _to_float(signal.get("poly_price_gap")),
+                _to_float(signal.get("consensus_gap")),
+                signal.get("consensus_dir"),
+                _to_int(signal.get("smart_money_count")) or 0,
+                signal.get("smart_money_dir"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -284,8 +339,14 @@ def log_pass(signal: dict) -> None:
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,base_rate,net_edge,heuristic_direction,
                  short_horizon,time_horizon,close_time,leviathan_score,heuristic_label,
-                 whale_max_trade_size)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 whale_max_trade_size,category,
+                 ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
+                 confidence_downgraded,second_pass,
+                 ext_estimate,ext_edge,ext_n_signals,ext_alpha,
+                 poly_price,poly_price_gap,consensus_gap,consensus_dir,
+                 smart_money_count,smart_money_dir)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -318,6 +379,24 @@ def log_pass(signal: dict) -> None:
                 _to_int(signal.get("leviathan_score")),
                 signal.get("heuristic_label"),
                 _to_float(signal.get("whale_max_trade_size")),
+                signal.get("category", ""),
+                1 if signal.get("ob_flag") else 0,
+                _to_float(signal.get("ob_imbalance")),
+                signal.get("ob_direction"),
+                1 if signal.get("spread_wide") else 0,
+                _to_float(signal.get("spread_pct")),
+                1 if signal.get("confidence_downgraded") else 0,
+                1 if signal.get("second_pass") else 0,
+                _to_float(signal.get("ext_estimate")),
+                _to_float(signal.get("ext_edge")),
+                _to_int(signal.get("ext_n_signals")),
+                _to_float(signal.get("ext_alpha")),
+                _to_float(signal.get("poly_price")),
+                _to_float(signal.get("poly_price_gap")),
+                _to_float(signal.get("consensus_gap")),
+                signal.get("consensus_dir"),
+                _to_int(signal.get("smart_money_count")) or 0,
+                signal.get("smart_money_dir"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")
