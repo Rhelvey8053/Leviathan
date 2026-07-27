@@ -13,7 +13,7 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from main import _extremize, _count_agreeing_signals
+from main import _extremize, _count_agreeing_signals, _smart_money_majority_dir
 
 
 # ─── _extremize ───────────────────────────────────────────────────────────────
@@ -165,3 +165,30 @@ def test_count_mixed_sources():
     )
     assert _count_agreeing_signals(m, "YES") == 1
     assert _count_agreeing_signals(m, "NO")  == 1
+
+
+# ─── _smart_money_majority_dir ─────────────────────────────────────────────────
+
+def test_smart_money_majority_empty_is_none():
+    assert _smart_money_majority_dir([]) is None
+
+
+def test_smart_money_majority_yes():
+    sm = [{"direction": "YES"}, {"direction": "YES"}, {"direction": "NO"}]
+    assert _smart_money_majority_dir(sm) == "YES"
+
+
+def test_smart_money_majority_no():
+    sm = [{"direction": "NO"}, {"direction": "NO"}, {"direction": "YES"}]
+    assert _smart_money_majority_dir(sm) == "NO"
+
+
+def test_smart_money_majority_tied_is_none():
+    """A tied count has no majority -- must not arbitrarily pick a side."""
+    sm = [{"direction": "YES"}, {"direction": "NO"}]
+    assert _smart_money_majority_dir(sm) is None
+
+
+def test_smart_money_majority_ignores_entries_without_a_direction():
+    sm = [{"direction": "YES"}, {"other_key": "x"}]
+    assert _smart_money_majority_dir(sm) == "YES"
