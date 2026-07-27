@@ -2,6 +2,54 @@
 
 ---
 
+## 2026-07-26 — Partial verification: replay-instrument-validation (still `ready`)
+
+Continuing through the backlog: the only `ready` item left,
+`replay-instrument-validation`, needs the replay corpus at `n>=300`
+(currently 0 rows in `replay_signals`) to validate Brier computation and
+the `resolved_count>=10` threshold — both genuinely blocked on the broken
+Anthropic API key (`401 - authentication_error`, re-confirmed live this
+session). But the item's other clause — "grading handles early closes,
+voided markets and multi-outcome events" — is checkable right now against
+real data already sitting in `leviathan.db`, without any live API call.
+Did that instead of waiting idle on the blocker.
+
+**Voided markets:** already correctly filtered. `settled_fetcher.
+_row_from_market()` returns `None` for any result not in `(YES, NO)`,
+confirmed by an existing test (`test_skips_unresolved_markets_within_a_
+settled_event`) — voided markets never reach `settled_markets`.
+
+**Multi-outcome events:** queried the real table (12,600 rows) and found
+both patterns genuinely present — mutually-exclusive events (e.g.
+`KXLIUSACOUPLE-26AUG31`, 182 sibling tickers, exactly 1 YES) and
+legitimately non-exclusive ones (e.g. `KXPGATOP10-THOC26`, 156 tickers, 13
+YES — "will player X finish top 10" isn't mutually exclusive). `replay_
+runner._row_from_scored()` grades strictly per-ticker with no event-level
+aggregation anywhere in the code, so both are handled correctly by
+construction, not by luck — already covered by existing tests, none of
+which reference sibling tickers at all (there's nothing for them to
+reference).
+
+**Early closes:** this one started as a real hypothesis, not a checkbox.
+If Kalshi's `close_time` field for an early-closed market retained the
+*originally scheduled* deadline rather than the actual closure moment,
+the as-of reconstruction's lookback windows (`close_time - 30/14/7/3/1
+days`) could land AFTER the market had already resolved — leaking
+look-ahead price data into what's supposed to be a pre-resolution
+snapshot, which would be a worse contamination than the already-documented
+training-data kind. Checked it against all 12,600 real rows:
+`settlement_ts` never precedes `close_time` (min gap +22s, max +3.4 days,
+zero negative gaps) — `close_time` already reflects the real closure in
+every observed case. The risk doesn't materialize in this data.
+
+No code changes: no bug found, and (1)/(2) already have regression tests
+in place — adding more would have duplicated existing coverage. Backlog
+item stays `ready` (only the grading-edge-cases clause is resolved; the
+Brier/threshold clauses still need the live corpus). Addendum recorded in
+`backlog/backlog.json`.
+
+---
+
 ## 2026-07-26 — Shipped: price-blind-arm (backlog item, done)
 
 Implemented the shadow-scoring counterfactual: does the anchored scorer
