@@ -256,10 +256,11 @@ def test_execute_action_stubs_return_true_and_print(backlog_data, capsys):
 # --email integration against real DB
 # ---------------------------------------------------------------------------
 
-def test_email_mode_exits_zero(tmp_backlog, tmp_db):
+def test_email_mode_exits_zero(tmp_backlog, tmp_db, tmp_path):
+    tmp_markdown = tmp_path / "BACKLOG.md"
     result = subprocess.run(
         [sys.executable, str(BACKLOG_CHECKER_PY), "--email",
-         "--file", str(tmp_backlog), "--db", str(tmp_db)],
+         "--file", str(tmp_backlog), "--db", str(tmp_db), "--markdown", str(tmp_markdown)],
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
@@ -280,6 +281,14 @@ def test_email_mode_persists_newly_unlocked_status_to_disk(tmp_path, tmp_db):
     4 resolved signals, and asserts the on-disk file actually flips to
     "ready" after a single --email run -- and stays "ready" (not
     re-reported) on a second run.
+
+    --markdown is pinned to a tmp path -- omitting it here is exactly what
+    let an earlier version of this test silently overwrite the REAL repo
+    BACKLOG.md with this synthetic one-item backlog on every test-suite
+    run (write_markdown() used to have no destination parameter at all,
+    always targeting the hardcoded real path regardless of --file). That
+    corrupted file was committed and pushed before it was caught by a user
+    noticing the real backlog looked wrong on GitHub.
     """
     synthetic = {
         "version": "1.0",
@@ -294,22 +303,60 @@ def test_email_mode_persists_newly_unlocked_status_to_disk(tmp_path, tmp_db):
     }
     backlog_path = tmp_path / "backlog.json"
     backlog_path.write_text(json.dumps(synthetic), encoding="utf-8")
+    tmp_markdown = tmp_path / "BACKLOG.md"
 
     run1 = subprocess.run(
         [sys.executable, str(BACKLOG_CHECKER_PY), "--email",
-         "--file", str(backlog_path), "--db", str(tmp_db)],
+         "--file", str(backlog_path), "--db", str(tmp_db), "--markdown", str(tmp_markdown)],
         capture_output=True, text=True,
     )
     assert run1.returncode == 0, run1.stderr
     assert "test-item" in run1.stdout
+    assert tmp_markdown.exists()  # rendered to the isolated path, not the real repo file
 
     on_disk = json.loads(backlog_path.read_text(encoding="utf-8"))
     assert on_disk["items"][0]["status"] == "ready"
 
     run2 = subprocess.run(
         [sys.executable, str(BACKLOG_CHECKER_PY), "--email",
-         "--file", str(backlog_path), "--db", str(tmp_db)],
+         "--file", str(backlog_path), "--db", str(tmp_db), "--markdown", str(tmp_markdown)],
         capture_output=True, text=True,
     )
     assert run2.returncode == 0, run2.stderr
     assert "Newly Unlocked: 0" in run2.stdout
+
+
+def test_email_mode_never_writes_real_repo_backlog_md(tmp_path, tmp_db):
+    """
+    Regression guard, direct: running the real checker.py --email against
+    a synthetic backlog must never touch the actual repo's BACKLOG.md,
+    regardless of --file. Captures the real file's content before the run
+    and asserts it is byte-for-byte unchanged after.
+    """
+    real_backlog_md = ROOT / "BACKLOG.md"
+    before = real_backlog_md.read_text(encoding="utf-8")
+
+    synthetic = {
+        "version": "1.0", "updated": "2026-01-01",
+        "metrics_glossary": {"resolved_count": "total resolved signals in DB"},
+        "items": [{
+            "id": "canary-item", "title": "Canary", "area": "validation",
+            "priority": 1, "status": "locked",
+            "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 1}]},
+            "depends_on": [], "action": "Canary action.", "notes": "",
+        }],
+    }
+    backlog_path = tmp_path / "backlog.json"
+    backlog_path.write_text(json.dumps(synthetic), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(BACKLOG_CHECKER_PY), "--email",
+         "--file", str(backlog_path), "--db", str(tmp_db),
+         "--markdown", str(tmp_path / "BACKLOG.md")],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+    after = real_backlog_md.read_text(encoding="utf-8")
+    assert after == before
+    assert "canary-item" not in after

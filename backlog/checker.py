@@ -357,7 +357,8 @@ def _prompt_item(item: dict, metrics: dict, backlog: dict, backlog_path: Path) -
 # Main
 # ---------------------------------------------------------------------------
 
-def run(backlog_path=DEFAULT_BACKLOG, db_path=DEFAULT_DB, email_mode=False):
+def run(backlog_path=DEFAULT_BACKLOG, db_path=DEFAULT_DB, email_mode=False,
+        markdown_path=BACKLOG_MD):
     backlog = load_backlog(backlog_path)
     metrics = compute_metrics(db_path)
     trigger_results = evaluate_triggers(backlog, metrics)
@@ -379,7 +380,18 @@ def run(backlog_path=DEFAULT_BACKLOG, db_path=DEFAULT_DB, email_mode=False):
     if newly_unlocked:
         save_backlog(backlog_path, backlog)
 
-    write_markdown(backlog, metrics)
+    # markdown_path defaults to the real project BACKLOG.md but is a real
+    # parameter (not hardcoded) precisely so a caller pointed at a
+    # different backlog_path (an alternate/test backlog.json) doesn't
+    # silently overwrite the real repo's BACKLOG.md with unrelated
+    # content -- a prior version called write_markdown(backlog, metrics)
+    # with no destination at all, so it always targeted BACKLOG_MD
+    # regardless of backlog_path. A test that ran the real checker.py
+    # against a synthetic one-item backlog (to verify the --email
+    # persistence fix above) clobbered the actual repo's BACKLOG.md with
+    # that synthetic content on every test-suite run, and the corrupted
+    # file was committed and pushed before this was caught.
+    write_markdown(backlog, metrics, dest=markdown_path)
 
     if email_mode:
         block = format_email_block(backlog, metrics, newly_unlocked)
@@ -404,9 +416,12 @@ def main():
                         help="Email block mode: print summary, skip CLI prompts")
     parser.add_argument("--file", default=str(DEFAULT_BACKLOG), metavar="PATH")
     parser.add_argument("--db", default=str(DEFAULT_DB), metavar="PATH")
+    parser.add_argument("--markdown", default=str(BACKLOG_MD), metavar="PATH",
+                        help="Where to write the rendered BACKLOG.md (default: repo root)")
     args = parser.parse_args()
 
-    run(backlog_path=Path(args.file), db_path=Path(args.db), email_mode=args.email)
+    run(backlog_path=Path(args.file), db_path=Path(args.db), email_mode=args.email,
+        markdown_path=Path(args.markdown))
     return 0
 
 

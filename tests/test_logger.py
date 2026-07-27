@@ -1314,6 +1314,30 @@ def test_log_pass_stores_direction_pass(tmp_db):
     assert row["source"] == "paper"
 
 
+def test_log_pass_persists_real_whale_detection(tmp_db):
+    """
+    Regression guard: log_pass() previously hardcoded whale_detected=0 and
+    whale_direction=None regardless of the actual signal dict, even though
+    main.py always has the real values in scope at the call site. Every
+    whale-flagged market that resulted in a PASS (the majority of them, in
+    practice) silently lost its whale flag the moment it hit the DB.
+    """
+    logger.log_pass({
+        "ticker": "KXWHALEPASS", "title": "T", "market_price": 0.45,
+        "our_estimate": 0.50, "edge": 0.05, "confidence": "LOW",
+        "run_id": "rwhalepass", "whale_detected": True,
+        "whale_direction": "YES", "whale_max_trade_size": 850.0,
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT whale_detected, whale_direction, whale_max_trade_size "
+            "FROM signals WHERE ticker='KXWHALEPASS'"
+        ).fetchone()
+    assert row["whale_detected"] == 1
+    assert row["whale_direction"] == "YES"
+    assert row["whale_max_trade_size"] == 850.0
+
+
 def test_log_pass_does_not_appear_in_get_stats(tmp_db):
     """PASS rows must be excluded from win-rate stats."""
     logger.log_pass({

@@ -651,6 +651,7 @@ def main():
             "series_ticker":   m.get("series_ticker", ""),
             "whale_detected":  whale.get("whale_detected", False),
             "whale_direction": whale.get("whale_direction"),
+            "whale_max_trade_size": whale.get("max_trade_size"),
             "whale_reversal":  m.get("whale_reversal", False),
             "drift_flag":      m.get("drift_flag", False),
             "price_drift":     m.get("price_drift"),
@@ -823,11 +824,25 @@ def main():
         try:
             week_sigs = logger.get_week_signals(days=7)
             if week_sigs:
-                weekly_body = report.compile_weekly_digest(week_sigs, logger.get_stats(), config,
-                                                          flag_path_stats=logger.get_stats_by_flag_path(),
-                                                          brier=logger.get_brier_score())
+                _weekly_stats    = logger.get_stats()
+                _weekly_flag_cal = logger.get_stats_by_flag_path()
+                _weekly_brier    = logger.get_brier_score()
+                _weekly_lv       = logger.get_stats_by_leviathan_score()
+                weekly_body = report.compile_weekly_digest(week_sigs, _weekly_stats, config,
+                                                          flag_path_stats=_weekly_flag_cal,
+                                                          brier=_weekly_brier,
+                                                          lv_stats=_weekly_lv)
+                weekly_html = None
+                try:
+                    weekly_html = report.render_weekly_html(week_sigs, _weekly_stats, config,
+                                                            flag_path_stats=_weekly_flag_cal,
+                                                            brier=_weekly_brier,
+                                                            lv_stats=_weekly_lv)
+                except Exception as e:
+                    print(f"      [warn] Weekly HTML render failed, sending text-only: {e}")
                 report.send_report(weekly_body, [], 0, config,
-                                   subject_override=f"Leviathan Weekly — {now_local.strftime('%b %d, %Y')}")
+                                   subject_override=f"Leviathan Weekly — {now_local.strftime('%b %d, %Y')}",
+                                   html_body=weekly_html)
                 print("      Weekly digest sent")
         except Exception as e:
             print(f"      Weekly digest failed: {e}")

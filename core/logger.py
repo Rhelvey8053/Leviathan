@@ -112,6 +112,7 @@ def _init_db() -> None:
             "event_ticker          TEXT    DEFAULT ''",
             "series_ticker         TEXT    DEFAULT ''",
             "market_baseline_brier REAL",
+            "whale_max_trade_size  REAL",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -212,8 +213,9 @@ def log_signal(signal: dict) -> None:
                  flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
                  base_rate,net_edge,heuristic_direction,short_horizon,time_horizon,
                  close_time,leviathan_score,heuristic_label,
-                 net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker,
+                 whale_max_trade_size)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -247,6 +249,7 @@ def log_signal(signal: dict) -> None:
                 _to_float(signal.get("ev_after_fee_per_contract")),
                 signal.get("event_ticker", ""),
                 signal.get("series_ticker", ""),
+                _to_float(signal.get("whale_max_trade_size")),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -266,8 +269,9 @@ def log_pass(signal: dict) -> None:
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
                  flag_path,base_rate,net_edge,heuristic_direction,
-                 short_horizon,time_horizon,close_time,leviathan_score,heuristic_label)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 short_horizon,time_horizon,close_time,leviathan_score,heuristic_label,
+                 whale_max_trade_size)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -278,8 +282,14 @@ def log_pass(signal: dict) -> None:
                 _to_float(signal.get("edge")),
                 "PASS",
                 signal.get("confidence", ""),
-                0,
-                None,
+                # Previously hardcoded to 0/None regardless of the real
+                # value, even though the caller (main.py) already has
+                # whale_detected/whale_direction on `signal` at this point
+                # -- every whale-flagged market that resulted in a PASS
+                # (the majority of them, in practice) silently lost its
+                # whale flag the moment it hit the DB.
+                1 if signal.get("whale_detected") else 0,
+                signal.get("whale_direction"),
                 "", "",  # outcome, result — never filled for PASSes
                 None,
                 signal.get("run_id", ""),
@@ -293,6 +303,7 @@ def log_pass(signal: dict) -> None:
                 signal.get("close_time"),
                 _to_int(signal.get("leviathan_score")),
                 signal.get("heuristic_label"),
+                _to_float(signal.get("whale_max_trade_size")),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")
