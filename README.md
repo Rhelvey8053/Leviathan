@@ -1,4 +1,4 @@
-<!-- Last narrative update: 2026-07-02 — reorganized for dual technical/portfolio audience; no code or data claims changed -->
+<!-- Last narrative update: 2026-07-27 — unattended-ops hardening, price-blind shadow scoring, and the settled-market replay pipeline added; test count and calibration rule count corrected to current figures -->
 
 # LEVIATHAN // PREDICTION MARKET INTELLIGENCE
 
@@ -8,10 +8,10 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 ## System Status
 
-- **Phase:** Data accumulation — 8 resolved paper signals as of 2026-07-14 (next gate: n=20 before calibration analysis is meaningful)
+- **Phase:** Data accumulation — 8 resolved paper signals confirmed current as of 2026-07-27 (next gate: n=20 before calibration analysis is meaningful)
 - **Mode:** Read-only — no trade execution. All signals are paper.
-- **Test suite:** 1617 tests, 0 failures
-- **Verified track record (2026-07-14):** win rate 38%, Brier score 0.0578 (EXCELLENT), hypothetical P&L -$1.66 at $10/contract. PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=8 is far below the n=20 gate, so read them as an integrity checkpoint, not a performance claim.
+- **Test suite:** 1,850 tests, 0 failures (1 skipped — requires `--network`)
+- **Verified track record (2026-07-14, re-confirmed unchanged 2026-07-27):** win rate 38%, Brier score 0.0578 (EXCELLENT), hypothetical P&L -$1.66 at $10/contract. PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=8 is far below the n=20 gate, so read them as an integrity checkpoint, not a performance claim.
 
 ### Validation approach
 
@@ -30,17 +30,21 @@ Each daily run executes an 8-step pipeline:
 | 3 | Filter | Drops liquid, efficiently-priced, and structurally uninteresting markets; deduplicates by event; tags any market where a tracked smart-money trader holds a position |
 | 4 | Cross-reference | Finds the same question on Polymarket, Manifold, PredictIt, Metaculus, and The Odds API — price gaps between platforms are a primary signal input |
 | 5 | Whale detection | Flags unusually large individual trades and order-book imbalances that may indicate informed positioning |
-| 6 | Score | Scores flagged markets using Claude with live web search, anchored by 11 calibration rules that ground estimates in base rates and cross-market evidence |
+| 6 | Score | Scores flagged markets using Claude with live web search, anchored by 47 calibration rules that ground estimates in category base rates and cross-market evidence |
 | 7 | Log + Smart money | Persists signals to SQLite; runs the watchlist scan (fetches open positions for 20 tracked traders, cross-references to Kalshi markets by title similarity) |
-| 8 | Report | Compiles and emails the daily plain-text report |
+| 8 | Report | Compiles and emails the daily plain-text report (plus an HTML weekly digest, sent automatically on Sundays, with its own whale-activity section) |
 
 **Watchlist markets** (confirmed smart money positions) bypass the normal flag requirement — they reach Claude scoring even if no drift or heuristic edge fired, with a `WATCHLIST` flag path.
+
+**Unattended operation:** step 2 aborts the run before scoring and sends an alert if the fetched markets are missing fields the pipeline assumes exist (`config.markets.shape_anomaly_threshold`/`shape_anomaly_min_sample`) — treating a genuine Kalshi API shape change as real data would otherwise silently corrupt every downstream step. Separately, `scripts/heartbeat_check.py` alerts if no run has completed successfully within a configurable window, catching the case where the scheduled task itself stops firing. See `docs/RUNBOOK.md` for diagnosing either alert without reloading full project context.
+
+**Price-blind shadow arm:** `core/blind_scorer.py` can score a sampled subset of markets with no market price shown and none of the price-anchoring calibration rules, as a counterfactual for whether the anchored scorer's use of price adds real signal over the price itself. Off by default (`config.blind_arm.enabled`) since every run it fires spends real metered API cost, unlike the main scan's CLI/Pro-subscription path.
 
 ---
 
 ## What This Demonstrates
 
-Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across six external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,490-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
+Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across six external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,850-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
 
 The design reflects a deliberate choice to build measurement infrastructure before claiming results. The calibration script (`analysis/calibration.py`) computes Brier scores and win rates broken down by flag path, time horizon, confidence tier, and cross-market alignment. The backlog is explicitly structured around data conditions: several planned features are blocked until the resolved-signal count clears n=20, because prior to that threshold any accuracy metric is too noisy to act on. This is an easy discipline to skip when you're the only one checking.
 
@@ -57,13 +61,13 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `core/` | The pipeline engine — auth, scanning, scoring, logging, reporting. Everything `main.py` orchestrates lives here. |
 | `sources/` | External market API clients — Polymarket, Manifold/PredictIt/Metaculus/OddsAPI, and winning-wallet discovery. |
 | `analysis/` | Read-only diagnostic and calibration scripts that run against `data/leviathan.db`. Nothing here is part of the daily pipeline. |
-| `backtesting/` | Offline, CSV-based backtest harness (including walk-forward validation) and the empirical base-rate scaffold. Doesn't touch the live DB. |
+| `backtesting/` | Offline, CSV-based backtest harness (including walk-forward validation), the empirical base-rate scaffold, and the settled-market replay pipeline (`settled_fetcher.py` pulls Kalshi's historical settled markets, `asof_reconstruction.py` rebuilds a market's state as of a past date from snapshots/candlesticks, `replay_runner.py` scores the reconstruction and grades it against the now-known outcome). Doesn't touch the live DB. |
 | `backlog/` | The backlog engine (`engine.py`) and weekly gate checker (`checker.py`) that maintain `backlog/backlog.json` and regenerate `BACKLOG.md`. |
 | `mcp_server/` | MCP server exposing the signal log, resolved track record, and market-data lookup as tools — reads `data/leviathan.db` directly, live. |
-| `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, Task Scheduler registration. |
-| `tests/` | The full offline test suite (1,617 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
+| `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, gate-unlock and no-run-completed alerting, Task Scheduler registration. |
+| `tests/` | The full offline test suite (1,850 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), PowerBI exports, market snapshots, smart-money/whale caches, and the dashboard `.pbix`. |
-| `docs/` | Progress log (`PROGRESS.md`) and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
+| `docs/` | Progress log (`PROGRESS.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
 ---
@@ -79,7 +83,8 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `core/scanner.py` | Market filter, edge scoring, drift detection, watchlist tagging |
 | `core/whales.py` | Large trade detection |
 | `core/scorer.py` | Batched market scoring — local Claude CLI (default) or Anthropic Messages API via `core/llm.py` |
-| `core/llm.py` | Anthropic Messages API client — forced tool_choice structured output, server-side web search, prompt caching |
+| `core/blind_scorer.py` | Price-blind shadow scoring mode — same calibration rules minus price-anchoring, forced through the metered API path, logged to its own `blind_scores` table, never fed into signal selection |
+| `core/llm.py` | Anthropic Messages API client — forced tool_choice structured output, server-side web search, prompt caching, daily cost ceiling shared by the main scorer, replay-runner, and the blind arm |
 | `core/logger.py` | SQLite persistence — signals, runs, fills, probes |
 | `core/report.py` | Report compiler and email sender |
 | `core/subscribers.py` | Newsletter subscriber management |
@@ -105,12 +110,19 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `analysis/eval_rescore.py` | Separate re-score harness proving the scoring pipeline is reproducible — not part of the default eval run |
 | `backtesting/harness.py` | CSV-based backtest harness, including rolling walk-forward validation |
 | `backtesting/base_rates.py` | Empirical base-rate scaffold (fed by the backtest harness) |
+| `backtesting/settled_fetcher.py` | Pulls Kalshi's settled-market history into a dedicated `settled_markets` table, separate from `signals`/`runs` |
+| `backtesting/asof_reconstruction.py` | Reconstructs a ticker's market state as of a past date (exact snapshot or daily-candlestick tier) and scores it through the live `scanner.score_market()` |
+| `backtesting/replay_runner.py` | Drives real (metered) Claude scoring over the settled-market corpus and grades each replay against the now-known outcome — schema-separated from live signals to prevent look-ahead-contaminated data from being pooled with them |
 | `backlog/engine.py` | Backlog CLI — status summary, validated item add |
 | `backlog/checker.py` | Weekly gate checker — evaluates locked-item triggers against live DB metrics |
 | `scripts/daily_smart_money.py` | Scheduled daily watchlist scan runner |
 | `scripts/setup_scheduler.ps1` | Registers daily Task Scheduler jobs |
 | `scripts/daily_resolve_first.py` | Scheduled daily near-dated-market selector — accelerates n toward the n=20 gate |
 | `scripts/setup_resolve_first_scheduler.ps1` | Registers the daily resolve-first Task Scheduler job |
+| `scripts/gate_notifier.py` | Emails once when a locked backlog item's gate condition transitions to unlocked — forms no opinions, changes no thresholds |
+| `scripts/setup_gate_notifier_scheduler.ps1` | Registers the daily gate-notifier Task Scheduler job |
+| `scripts/heartbeat_check.py` | Alerts if no run has completed successfully within a configurable window — catches the scheduled task itself silently failing to fire |
+| `scripts/setup_heartbeat_scheduler.ps1` | Registers the heartbeat-check Task Scheduler job (runs independently of the main pipeline's own schedule) |
 
 ---
 
@@ -181,7 +193,16 @@ Run once as Administrator:
 .\scripts\schedule_setup.ps1
 ```
 
-Registers a Task Scheduler job that fires every day at 7:00 AM. Two more scheduled jobs run separately: the smart money watchlist scan (`scripts/setup_scheduler.ps1`, 8:07 AM) and the resolve-first near-dated selector (`scripts/setup_resolve_first_scheduler.ps1`, 8:30 AM — after both prior jobs have refreshed the market snapshot).
+Registers a Task Scheduler job that fires every day at 7:00 AM. Four more scheduled jobs run independently:
+
+| Job | Time | Script |
+|---|---|---|
+| Smart money watchlist scan | 8:07 AM | `scripts/setup_scheduler.ps1` |
+| Resolve-first near-dated selector | 8:30 AM | `scripts/setup_resolve_first_scheduler.ps1` |
+| Gate-unlock notifier | 8:45 AM | `scripts/setup_gate_notifier_scheduler.ps1` |
+| No-run-completed heartbeat | 2:00 PM and 8:00 PM | `scripts/setup_heartbeat_scheduler.ps1` |
+
+The heartbeat check is deliberately scheduled independently of the main run rather than chained after it — its entire purpose is detecting that the main run's own schedule stopped firing, so it can't depend on that schedule to trigger it.
 
 ---
 
@@ -202,6 +223,9 @@ Registers a Task Scheduler job that fires every day at 7:00 AM. Two more schedul
 | `analysis/snapshot_markets.py` | Fetches and saves full Kalshi market catalog snapshot | `python analysis/snapshot_markets.py` |
 | `analysis/eval.py` | Eval harness — three-way Brier comparison (scorer/market/constant), calibration by decile, free/instant | `python analysis/eval.py` |
 | `analysis/eval_rescore.py` | Separate re-score reproducibility check — costs real API/CLI usage, not part of the default eval run | `python analysis/eval_rescore.py --check` |
+| `backtesting/settled_fetcher.py` | Fetches and persists Kalshi's settled-market history | `python -m backtesting.settled_fetcher [--max-events N]` |
+| `backtesting/asof_reconstruction.py` | Reconstructs and scores one ticker's market state as of a past date | `python -m backtesting.asof_reconstruction TICKER 2026-06-20` |
+| `backtesting/replay_runner.py` | Scores new settled tickers via the real API backend and grades against outcome — costs real API usage, capped by `daily_cost_ceiling_usd` | `python -m backtesting.replay_runner [--max-markets N]` |
 | `scripts/daily_smart_money.py` | Runs watchlist scan, saves report, commits and pushes | Scheduled via Task Scheduler |
 | `scripts/daily_resolve_first.py` | Selects near-dated (≤14d), two-sided-book markets spread across price bands and logs them so they resolve fast | Scheduled via Task Scheduler |
 
@@ -286,7 +310,7 @@ Each subscriber receives the report with a unique unsubscribe token in the foote
 python -m pytest -q
 ```
 
-1617 tests, all offline — no network calls, no Claude CLI invocations. SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test.
+1,850 tests, almost all offline — no network calls, no Claude CLI invocations (one test is explicitly `--network`-gated and skipped by default). SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test. Live API calls (`core/llm.py`, `core/blind_scorer.py`) are tested against a mocked Anthropic client, never a real key.
 
 | Test file | What it covers |
 |---|---|
@@ -294,17 +318,23 @@ python -m pytest -q
 | `tests/test_scanner.py` | Filter gates, flag modes, drift thresholds, watchlist tagging, heuristic base rates |
 | `tests/test_whales.py` | Whale detection logic, scan_all_markets |
 | `tests/test_scorer.py` | build_prompt() signals, flag reasons, calibration rules, cross-market/poly/whale/OB/spread |
-| `tests/test_report.py` | Signal block, _qualifying, compile_report, compile_weekly_digest, flag path labels |
+| `tests/test_report.py` | Signal block, _qualifying, compile_report, compile_weekly_digest, render_weekly_html, flag path labels |
 | `tests/test_research_probe.py` | Stratified sampling, probe logging, forward scoring |
 | `tests/test_smart_money.py` | Binary position filter, sports title filter, keyword gate, match scoring |
 | `tests/test_polymarket.py` | _yes_price, build_index, find_match, match_markets, fetch_and_build_index, cross-market promotion |
+| `tests/test_llm.py` | score_via_api/probe_via_api/score_blind_via_api against a mocked Anthropic client, daily cost ceiling enforcement |
+| `tests/test_blind_scorer.py` | Price-blind prompt omits price/flag/LV-derived content, system prompt override, forced metered API path |
+| `tests/test_replay_runner.py` / `tests/test_settled_fetcher.py` | Settled-market ingestion, as-of reconstruction lookback, replay grading (hit/miss/pass) |
+| `tests/test_heartbeat_check.py` / `tests/test_market_shape_validation.py` | No-run-completed alerting, API shape-anomaly abort gate |
 
 ---
 
 ## Notes
 
 - **Read-only in v1** — no order placement, amendment, or cancellation. Only GET endpoints are called.
-- **Scoring backend is configurable** (`llm.backend` in `config.json`) — `cli` (default) runs the local Claude CLI with `ANTHROPIC_API_KEY` stripped from its environment, using your Pro OAuth session with no per-token billing. `api` calls the Anthropic Messages API directly via `core/llm.py` — forced tool_choice structured output, server-side web search, and prompt caching, at real per-token cost.
+- **Scoring backend is configurable** (`llm.backend` in `config.json`) — `cli` (default) runs the local Claude CLI with `ANTHROPIC_API_KEY` stripped from its environment, using your Pro OAuth session with no per-token billing. `api` calls the Anthropic Messages API directly via `core/llm.py` — forced tool_choice structured output, server-side web search, and prompt caching, at real per-token cost. A shared `daily_cost_ceiling_usd` (`config.llm`) caps real metered spend across every API-backend caller — the replay pipeline and the price-blind arm both go through it, regardless of what `llm.backend` is set to for the main scan.
 - **`data/leviathan.db`** stores all signals, runs, fills, and probe rows locally. Not committed to git.
 - **Win rate and P&L** are hypothetical — no real money is traded by the system. Real fills from your own Kalshi account can be pulled in via `logger.pull_real_fills()`.
 - **Smart money cache** (`data/smart_money/latest_signals.json`) is committed to git so the watchlist boost persists across machines without re-running the scan.
+- **Price-blind shadow arm is off by default** (`config.blind_arm.enabled = false`) — every run it fires spends real metered Anthropic API cost, so it needs a deliberate opt-in rather than activating silently.
+- **Unattended-operation troubleshooting** lives in `docs/RUNBOOK.md` — what to check when the heartbeat alert fires, when no run has ever been recorded, or when a run aborts on an API shape anomaly.
