@@ -101,6 +101,49 @@ own alert if this keeps happening.
 
 ---
 
+## Two `runs` rows recorded close together (concurrent/duplicate-looking run)
+
+This means two `main.py` processes ran at nearly the same time, both
+scanning the same markets. It looks alarming but has a mundane cause every
+time it's been seen so far (2026-07-27): `Leviathan-DailyRun`'s trigger is
+set for a fixed local time, but its Settings also have `StartWhenAvailable:
+True` and `DisallowStartIfOnBatteries: True`. If the machine was on
+battery power (or otherwise unavailable) at the scheduled time, Task
+Scheduler skips that slot and catches up later once conditions allow —
+which can land within a couple of minutes of someone separately running
+`python main.py` by hand, producing two `runs` rows close together purely
+by coincidence.
+
+`MultipleInstances: IgnoreNew` on the task does NOT protect against this:
+it only stops Task Scheduler from launching a second instance of *its own*
+registered task while one is already running. A manually-invoked
+`python main.py` bypasses Task Scheduler entirely, so there's no mechanism
+that prevents it from overlapping with a Task-Scheduler-launched instance.
+
+**To diagnose (requires the Task Scheduler Operational event log to be
+enabled — see Quick reference below to check/enable it):**
+```powershell
+Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" |
+  Where-Object { $_.Message -like "*Leviathan-DailyRun*" } |
+  Select-Object TimeCreated, Id, Message
+```
+This shows whether a given launch came from the task's own trigger firing
+(on schedule, or a delayed catch-up) versus a manual `Start-ScheduledTask`/
+`schtasks /run` invocation. Cross-reference the timestamps against
+`Get-ScheduledTaskInfo -TaskName Leviathan-DailyRun`'s `LastRunTime` and
+the `runs` table's own `timestamp` column (UTC — convert to local via
+`Get-TimeZone` before comparing against `LastRunTime`, which is local).
+
+**If this becomes a recurring problem** rather than a one-off coincidence,
+the fix is changing the task's settings, not the code: either disable
+`DisallowStartIfOnBatteries` for this task (if it's expected to run
+unattended regardless of power state) or accept the occasional overlap —
+two concurrent scans against the same SQLite DB haven't been observed to
+corrupt anything (SQLite's own locking handles concurrent writes), just to
+waste one run's worth of Kalshi/Claude calls.
+
+---
+
 ## Quick reference
 
 | Task | Command |
@@ -113,3 +156,6 @@ own alert if this keeps happening.
 | Check today's LLM daily spend (metered API only) | `python -c "from core.llm import get_daily_cost_usd; print(get_daily_cost_usd())"` |
 | Check DB location | `python -c "from core import logger; print(logger.DB_PATH)"` |
 | Full test suite | `python -m pytest -q` |
+| Check Task Scheduler event log is enabled | `Get-WinEvent -ListLog "Microsoft-Windows-TaskScheduler/Operational" \| Select IsEnabled` |
+| Enable it if not (requires Administrator) | `wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true` — from Git Bash, prefix with `MSYS_NO_PATHCONV=1` or its automatic POSIX-path conversion mangles the `/e:true` argument |
+| View recent scheduled-task activity | `Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" -MaxEvents 50` |
