@@ -1010,27 +1010,48 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
     score_markets() back to main.py, where the ticker-keyed dict
     comprehension building scored_by_ticker has no exception handler
     around it and would crash the entire scheduled run on a KeyError.
+
+    A hung CLI process (subprocess.run's timeout=600 expiring) previously
+    skipped the retry loop entirely: TimeoutExpired is raised BY
+    subprocess.run itself, not returned as a nonzero exit code, so the
+    existing `if result.returncode == 0` retry logic never saw it -- one
+    slow web-search-heavy batch failed the whole run on the first hang
+    with 2 unused retries sitting right there (observed live 2026-07-27:
+    a 10-market batch timed out and produced 0 signals for the run).
+    TimeoutExpired is now caught per-attempt and retried the same as a
+    nonzero exit code, sharing the same max_retries/backoff.
     """
     import os as _os, time as _time
     claude_cmd = _find_claude()
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
     _sp_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
     _sp_file.write(sys_prompt); _sp_file.close(); _sp_path = _sp_file.name
-    max_retries = 2; result = None
+    max_retries = 2; result = None; timed_out = False
     try:
         for attempt in range(max_retries + 1):
-            result = subprocess.run(
-                [claude_cmd, "--print", "--system-prompt-file", _sp_path,
-                 "--allowedTools", "WebSearch", "--output-format", "text"],
-                input=user_prompt, capture_output=True, text=True, timeout=600,
-                encoding="utf-8", errors="replace", env=clean_env,
-            )
+            timed_out = False
+            try:
+                result = subprocess.run(
+                    [claude_cmd, "--print", "--system-prompt-file", _sp_path,
+                     "--allowedTools", "WebSearch", "--output-format", "text"],
+                    input=user_prompt, capture_output=True, text=True, timeout=600,
+                    encoding="utf-8", errors="replace", env=clean_env,
+                )
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                if attempt < max_retries:
+                    _time.sleep(5)
+                continue
             if result.returncode == 0:
                 break
             if attempt < max_retries:
                 _time.sleep(5)
     finally:
         _os.unlink(_sp_path)
+    if timed_out:
+        raise RuntimeError(
+            f"scorer.py: claude CLI timed out after 600s on all {max_retries + 1} attempt(s)"
+        )
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(
