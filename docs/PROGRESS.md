@@ -2,6 +2,62 @@
 
 ---
 
+## 2026-07-27 — Built confidence-weighted stake-sizing infrastructure (self-gated off)
+
+Follow-up to "is there another way to recalibrate hypothetical P&L so we'd
+see more upside, e.g. betting more on markets we score higher" — the
+answer at the time was no, don't act on it yet: a real counterfactual on
+the 8 resolved paper signals showed edge-magnitude sizing would have made
+P&L ~4x worse (the single largest-edge call, the Cabinet-departure market
+at 54.5pp edge, was also the single worst miss), and confidence-tier
+sizing only looked better because n=2 HIGH-confidence signals both
+happened to win — not a real sample. `auto-calibration-loop` already sets
+the precedent that this class of change needs `resolved_count>=30` and
+`resolved_count_per_category_max>=15` before it's safe. User asked to
+build the infrastructure now anyway, gated off until that clears.
+
+**`core/sizing.py` (new):** `is_dynamic_sizing_eligible()` requires BOTH a
+human opt-in (`config.betting.dynamic_sizing_enabled`, defaults `false`)
+AND live DB metrics clearing the identical `auto-calibration-loop`
+threshold (`MIN_RESOLVED_COUNT`/`MIN_RESOLVED_PER_CATEGORY` mirror it
+exactly — a test asserts they stay in sync with `backlog.json`). Re-reads
+the DB on every call, never cached, so eligibility can't go stale or be
+jumped early. `compute_stake_multiplier()` is a config-driven table
+(`confidence_stake_multipliers`, default `{HIGH: 1.5, MED: 1.0, LOW:
+0.5}`) — a defensible starting point, deliberately NOT reverse-engineered
+to fit the current n=8 sample, since the entire point is validating it
+later against real data, not making today's numbers look nicer.
+
+**Wired into `core/logger.py`'s `resolve_outcomes()`:** persists the
+result to a new, separate `stake_size_hypothetical` column — never used
+in place of the existing `pnl_if_traded`/flat-`unit_size` calculation
+anywhere. Verified end-to-end with a mocked eligible/ineligible gate: flat
+$10 when ineligible (the real current state), scales to $15 for HIGH
+confidence when the gate is mocked as cleared.
+
+**`analysis/dynamic_sizing_preview.py` (new):** compares the flat-
+`$unit_size` headline P&L against what it would be under
+`stake_size_hypothetical`, kept deliberately separate from
+`analysis/calibration.py` and the README's headline figures (same
+never-pool-a-different-measurement discipline as `replay_signals` vs.
+`signals`, `blind_scores` vs. `signals`). Run against the real DB: both
+totals are `-$1.66`, delta `$0.00` — confirms nothing has silently
+activated, exactly as designed, since real `resolved_count` (8) is nowhere
+near the gate (30).
+
+**Also documented in README:** new `core/sizing.py` and `analysis/
+dynamic_sizing_preview.py` entries, plus a Notes bullet explaining the
+gate.
+
+25 new tests across `tests/test_sizing.py` (eligibility gating, multiplier
+table, `compute_stake_size` end-to-end), `tests/test_logger.py`
+(`resolve_outcomes` persists the new column correctly in both states, and
+confirms `pnl_if_traded` is unaffected), and `tests/
+test_dynamic_sizing_preview.py` (pure-function tests for the comparison
+math). Full suite green (1899 passed, 1 skipped).
+
+---
+
 ## 2026-07-27 — Expanded signal-level tracking for future category/evidence analysis
 
 Prompted by "is it worth tracking which market categories we're most

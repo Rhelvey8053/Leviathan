@@ -158,6 +158,12 @@ def _init_db() -> None:
             "consensus_dir         TEXT",
             "smart_money_count     INTEGER DEFAULT 0",
             "smart_money_dir       TEXT",
+            # Hypothetical stake under confidence-weighted sizing (core.
+            # sizing.compute_stake_size) -- a SEPARATE column from the
+            # existing flat-unit_size P&L path, never used in place of it.
+            # Equals config.betting.unit_size (the existing flat figure)
+            # until is_dynamic_sizing_eligible() clears its own gate.
+            "stake_size_hypothetical REAL",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -815,12 +821,13 @@ def resolve_outcomes(config: dict) -> int:
     Returns count of newly resolved calls.
     """
     from core import kalshi as _kalshi
+    from core.sizing import compute_stake_size
     import time as _time
 
     try:
         with _db() as conn:
             rows = conn.execute(
-                "SELECT call_id, ticker, direction, market_price, "
+                "SELECT call_id, ticker, direction, market_price, confidence, "
                 "entry_price, fill_count, fill_fee, source "
                 "FROM signals WHERE outcome IS NULL OR outcome = ''"
             ).fetchall()
@@ -879,12 +886,13 @@ def resolve_outcomes(config: dict) -> int:
                 pnl = 0.0
 
             baseline_brier = _market_baseline_brier(row["market_price"], direction, outcome)
+            stake_size = compute_stake_size({"confidence": row["confidence"]}, config)
 
             with _db() as conn:
                 conn.execute(
                     "UPDATE signals SET outcome=?, result=?, pnl_if_traded=?, "
-                    "market_baseline_brier=? WHERE call_id=?",
-                    (outcome, "WIN" if win else "LOSS", pnl, baseline_brier, row["call_id"])
+                    "market_baseline_brier=?, stake_size_hypothetical=? WHERE call_id=?",
+                    (outcome, "WIN" if win else "LOSS", pnl, baseline_brier, stake_size, row["call_id"])
                 )
             resolved_count += 1
         except Exception as e:

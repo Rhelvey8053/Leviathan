@@ -90,6 +90,7 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `core/subscribers.py` | Newsletter subscriber management |
 | `core/export_to_csv.py` | Exports `data/leviathan.db` tables to `data/powerbi_export/` |
 | `core/fees.py` | Kalshi fee schedule and net-of-fee edge math |
+| `core/sizing.py` | Confidence-weighted hypothetical stake sizing — self-gated on live resolved-signal counts, fully inert until the same threshold as `auto-calibration-loop` clears |
 | `sources/polymarket.py` | Polymarket Gamma API price cross-reference |
 | `sources/external_markets.py` | Manifold + PredictIt + Metaculus + OddsAPI aggregator |
 | `sources/metaculus.py` | Metaculus question search and probability fetch |
@@ -226,6 +227,7 @@ The heartbeat check is deliberately scheduled independently of the main run rath
 | `backtesting/settled_fetcher.py` | Fetches and persists Kalshi's settled-market history | `python -m backtesting.settled_fetcher [--max-events N]` |
 | `backtesting/asof_reconstruction.py` | Reconstructs and scores one ticker's market state as of a past date | `python -m backtesting.asof_reconstruction TICKER 2026-06-20` |
 | `backtesting/replay_runner.py` | Scores new settled tickers via the real API backend and grades against outcome — costs real API usage, capped by `daily_cost_ceiling_usd` | `python -m backtesting.replay_runner [--max-markets N]` |
+| `analysis/dynamic_sizing_preview.py` | Compares flat-`$unit_size` P&L against confidence-weighted sizing — identical totals until `core.sizing`'s live-data gate clears, by design | `python analysis/dynamic_sizing_preview.py` |
 | `scripts/daily_smart_money.py` | Runs watchlist scan, saves report, commits and pushes | Scheduled via Task Scheduler |
 | `scripts/daily_resolve_first.py` | Selects near-dated (≤14d), two-sided-book markets spread across price bands and logs them so they resolve fast | Scheduled via Task Scheduler |
 
@@ -337,4 +339,5 @@ python -m pytest -q
 - **Win rate and P&L** are hypothetical — no real money is traded by the system. Real fills from your own Kalshi account can be pulled in via `logger.pull_real_fills()`.
 - **Smart money cache** (`data/smart_money/latest_signals.json`) is committed to git so the watchlist boost persists across machines without re-running the scan.
 - **Price-blind shadow arm is off by default** (`config.blind_arm.enabled = false`) — every run it fires spends real metered Anthropic API cost, so it needs a deliberate opt-in rather than activating silently.
+- **Confidence-weighted stake sizing is built but self-gated off** (`core/sizing.py`) — `config.betting.dynamic_sizing_enabled` is a human opt-in, but stays fully inert regardless until live DB metrics clear the same threshold as the `auto-calibration-loop` backlog item (`resolved_count>=30` and `resolved_count_per_category_max>=15`), re-checked on every `resolve_outcomes()` call. A real counterfactual on the 8 resolved signals showed edge-magnitude sizing would have made P&L ~4x worse — see `docs/PROGRESS.md` 2026-07-27.
 - **Unattended-operation troubleshooting** lives in `docs/RUNBOOK.md` — what to check when the heartbeat alert fires, when no run has ever been recorded, or when a run aborts on an API shape anomaly.
