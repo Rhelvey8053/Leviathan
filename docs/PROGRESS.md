@@ -2,6 +2,34 @@
 
 ---
 
+## 2026-07-27 — Diagnosed a concurrent-run coincidence; enabled Task Scheduler event log
+
+A manual `python main.py` run and `Leviathan-DailyRun`'s own scheduled
+fire landed less than 2 minutes apart, producing two `runs` rows scanning
+the same 2,476 markets. Root-caused via `Get-ScheduledTaskInfo`'s
+`LastRunTime` (9:49:49 AM local) matching one run's timestamp almost
+exactly (converting its UTC `runs.timestamp` via the machine's actual
+current offset, CDT/UTC-5): `Leviathan-DailyRun` has `StartWhenAvailable:
+True` and `DisallowStartIfOnBatteries: True` set, and the machine has a
+battery — consistent with the 6:00 AM slot being skipped (on battery) and
+caught up later, coincidentally close to a separate manual invocation.
+`MultipleInstances: IgnoreNew` doesn't prevent this: it only stops Task
+Scheduler from double-launching *its own* task, not a manually-invoked
+process from overlapping with a Task-Scheduler-launched one.
+
+Couldn't get a fully authoritative confirmation at the time because the
+Task Scheduler Operational event log (`Microsoft-Windows-TaskScheduler/
+Operational`) was disabled on this machine — the timestamp match was
+circumstantial, not a logged trigger record. Enabled it (`wevtutil sl
+Microsoft-Windows-TaskScheduler/Operational /e:true`, run elevated via
+Git Bash with `MSYS_NO_PATHCONV=1` — its default POSIX-path conversion
+mangles `/e:true` otherwise) so future occurrences can be root-caused
+directly via `Get-WinEvent` instead of by timestamp inference. Documented
+both the incident and the new diagnostic path in `docs/RUNBOOK.md`
+("Two `runs` rows recorded close together").
+
+---
+
 ## 2026-07-27 — Fix: `_score_via_cli` didn't retry on a hung CLI process
 
 A manually-triggered `python main.py` run (2026-07-27) completed end-to-end
