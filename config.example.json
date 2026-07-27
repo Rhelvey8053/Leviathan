@@ -3,6 +3,9 @@
   "markets": {
     "max_fetch": 1000,
     "max_events": 400,
+    "shape_anomaly_threshold": 0.5,
+    "shape_anomaly_min_sample": 20,
+    "_shape_anomaly_notes": "unattended-ops: if >=shape_anomaly_min_sample markets were fetched and more than shape_anomaly_threshold of them are missing a required field, main.py aborts before scoring and alerts rather than processing what's likely a Kalshi API shape change as if it were real data.",
     "edge_threshold": 0.08,
     "short_horizon_edge_threshold": 0.15,
     "drift_min_abs": 0.03,
@@ -128,6 +131,11 @@
     "cross_market_min_gap": 0.15,
     "cross_market_min_match_score": 0.65,
     "cross_market_max_candidates": 50
+  },
+  "blind_arm": {
+    "enabled": false,
+    "sample_size": 3,
+    "_blind_arm_notes": "price-blind-arm: when enabled, samples up to sample_size markets per run (from those the anchored scorer already scored) and re-scores them with no market price shown and no price-anchoring instructions, via the metered Anthropic API (core.llm.score_blind_via_api, counts against llm.daily_cost_ceiling_usd). Results are logged to their own blind_scores DB table and never feed signal selection. Off by default because this spends real metered API cost on every run it fires, unlike the main scan (Pro subscription, no per-token bill) -- enable deliberately, not as a default-on side effect of an unrelated config change."
   },
   "betting": {
     "unit_size": 10,

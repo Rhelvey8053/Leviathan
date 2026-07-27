@@ -1,12 +1,10 @@
 # Leviathan Backlog
 Last updated: 2026-07-26 | Metrics: resolved=11, fills=7
 
-## Ready (3)
+## Ready (1)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price range; the resolved_count >= 10 smart-money wallet threshold is empirically defensible. | validation |
-| 4 | price-blind-arm | Add a scoring mode that omits the Current market price line and all market-anchoring instructions. Run it on a sampled subset of scored markets daily and log to a separate column. Do not feed it into signal selection. | validation |
-| 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. Add graceful degradation when an upstream API changes shape, and a runbook in docs/ for diagnosing a failed run without reloading full project context. | infra |
 
 ## Locked (9)
 | Priority | ID | Gate | Area |
@@ -30,7 +28,7 @@ Last updated: 2026-07-26 | Metrics: resolved=11, fills=7
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 
-## Done (26)
+## Done (28)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | market-baseline-brier | For every resolved signal, compute and persist the Brier score of the market price at scan time alongside the existing scorer Brier. Expose our_estimate, brier_scorer and brier_market as explicit columns in data/powerbi_export/signals.csv, and surface both Brier figures in analysis/calibration.py output. | validation |
@@ -55,6 +53,8 @@ Last updated: 2026-07-26 | Metrics: resolved=11, fills=7
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |
 | 4 | position-reconciliation-job | Automate daily reconciliation of open paper signals against the Kalshi position API. | execution |
+| 4 | price-blind-arm | Add a scoring mode that omits the Current market price line and all market-anchoring instructions. Run it on a sampled subset of scored markets daily and log to a separate column. Do not feed it into signal selection. | validation |
+| 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. Add graceful degradation when an upstream API changes shape, and a runbook in docs/ for diagnosing a failed run without reloading full project context. | infra |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |

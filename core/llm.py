@@ -195,6 +195,42 @@ _SCORE_REQUIRED = frozenset({
 _VALID_DIRECTION  = frozenset({"YES", "NO", "PASS"})
 _VALID_CONFIDENCE = frozenset({"HIGH", "MED", "LOW"})
 
+RECORD_BLIND_SCORES_TOOL: dict[str, Any] = {
+    "name": "record_blind_scores",
+    "description": (
+        "Record your probability estimates for all scored markets. "
+        "Call this once with all markets after completing your research."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "scores": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "ticker":          {"type": "string"},
+                        "estimate":        {"type": "number"},
+                        "confidence":      {"type": "string", "enum": ["HIGH", "MED", "LOW"]},
+                        "reasoning":       {"type": "string"},
+                        "sources_checked": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": [
+                        "ticker", "estimate", "confidence", "reasoning", "sources_checked",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["scores"],
+        "additionalProperties": False,
+    },
+}
+
+_BLIND_SCORE_REQUIRED = frozenset({
+    "ticker", "estimate", "confidence", "reasoning", "sources_checked",
+})
+
 # ── CLI binary finder (canonical — imported by scorer.py and research_probe.py) ─
 
 def _find_claude() -> str:
@@ -301,6 +337,20 @@ def _validate_scores(scores: list[dict]) -> None:
         if s["confidence"] not in _VALID_CONFIDENCE:
             raise ValueError(
                 f"record_scores: ticker={s['ticker']} bad confidence={s['confidence']!r}"
+            )
+
+
+def _validate_blind_scores(scores: list[dict]) -> None:
+    """Raise ValueError if any blind score dict is missing a required field or has a bad enum value."""
+    for s in scores:
+        missing = _BLIND_SCORE_REQUIRED - set(s.keys())
+        if missing:
+            raise ValueError(
+                f"record_blind_scores: ticker={s.get('ticker', '?')} missing fields: {missing}"
+            )
+        if s["confidence"] not in _VALID_CONFIDENCE:
+            raise ValueError(
+                f"record_blind_scores: ticker={s['ticker']} bad confidence={s['confidence']!r}"
             )
 
 
@@ -426,6 +476,81 @@ def score_via_api(
             ) from e
 
     raise RuntimeError(f"score_via_api: failed after 3 attempts: {last_exc}")
+
+
+def score_blind_via_api(
+    system_prompt: str,
+    user_prompt: str,
+    config: dict,
+    temperature: float | None = None,
+) -> tuple[list[dict], dict]:
+    """
+    Price-blind counterpart to score_via_api() -- forces record_blind_scores
+    (ticker/estimate/confidence/reasoning/sources_checked, no market_price/
+    edge/direction) instead of record_scores. Goes through the same
+    _check_cost_ceiling / _finalize_token_info path as every other metered
+    call in this module, so blind-arm sampling counts against the same
+    daily_cost_ceiling_usd as the main scan and replay-runner.
+    """
+    _check_cost_ceiling(config)
+
+    llm_cfg      = config.get("llm", {})
+    model        = llm_cfg.get("model", "claude-sonnet-4-6")
+    max_searches = int(llm_cfg.get("max_web_searches", 8))
+
+    tools: list[dict] = [
+        {"type": "web_search_20250305", "name": "web_search", "max_uses": max_searches},
+        RECORD_BLIND_SCORES_TOOL,
+    ]
+    system   = _system_block(system_prompt)
+    messages = [{"role": "user", "content": user_prompt}]
+    client   = _make_client()
+    last_exc: Exception | None = None
+    extra_kwargs: dict = {} if temperature is None else {"temperature": temperature}
+
+    for attempt in range(3):
+        try:
+            response = client.messages.create(
+                model=model,
+                system=system,
+                messages=messages,
+                tools=tools,
+                tool_choice={"type": "any"},
+                max_tokens=4096,
+                extra_headers={
+                    "anthropic-beta": "web-search-2025-03-05,prompt-caching-2024-07-31",
+                },
+                **extra_kwargs,
+            )
+
+            block = _find_tool_use(response, "record_blind_scores")
+            if block is not None:
+                scores = block.input["scores"]
+                _validate_blind_scores(scores)
+                return scores, _finalize_token_info(response, model=model)
+
+            forced = _force_tool(
+                client, model, system, messages,
+                response.content, RECORD_BLIND_SCORES_TOOL, "record_blind_scores",
+                temperature=temperature,
+            )
+            block = _find_tool_use(forced, "record_blind_scores")
+            if block is None:
+                raise RuntimeError("score_blind_via_api: forced record_blind_scores returned no tool_use block")
+            scores = block.input["scores"]
+            _validate_blind_scores(scores)
+            return scores, _finalize_token_info(response, forced, model=model)
+
+        except (anthropic.APIError, anthropic.APITimeoutError) as e:
+            last_exc = e
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+                continue
+            raise RuntimeError(
+                f"score_blind_via_api: API error after 3 attempts: {e}"
+            ) from e
+
+    raise RuntimeError(f"score_blind_via_api: failed after 3 attempts: {last_exc}")
 
 
 def probe_via_api(
