@@ -197,7 +197,11 @@ def fetch_watchlist_positions(config: dict, force: bool = False) -> dict[str, li
         verified, fail_reason, stats, all_positions = _verify_watchlist_trader(addr, config)
 
         if not verified:
-            print(f"  EXCLUDED  {name:<18}  reason: {fail_reason}")
+            # Not printed here -- run_smart_money_scan() (this function's only
+            # caller) reports every excluded trader from `result` right after
+            # this returns. Printing it in both places produced the exact
+            # same exclusion list twice, once per format, every time the
+            # cache was stale (observed live 2026-07-29).
             result[name] = {
                 "address":     addr,
                 "monthly_pnl": monthly,
