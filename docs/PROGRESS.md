@@ -2,6 +2,58 @@
 
 ---
 
+## 2026-07-29 — Bug sweep: one real fix, two confirmed non-bugs (with evidence)
+
+Triggered by the smart-money watchlist scan printing its exclusion list
+twice in the 2026-07-29 run (didn't happen 2026-07-28). Root-caused and
+fixed, then swept two other things that looked suspicious rather than
+assuming either was fine.
+
+**Fixed: duplicate exclusion-list printing (`analysis/smart_money_scan.py`).**
+`fetch_watchlist_positions()` printed its own `EXCLUDED` line per trader
+while verifying them; its only caller, `run_smart_money_scan()`, printed
+the exact same information again moments later in its own reporting loop.
+Both only fire when the watchlist cache is stale (`_cache_fresh()` returns
+False) — on 07-28 the cache was fresh, so only the second print ran; on
+07-29 it had expired, so both ran, producing the duplicate list. Removed
+the redundant print in `fetch_watchlist_positions()` (verified it has
+exactly one caller, so nothing else depended on it).
+
+**Investigated, NOT a bug: `ext_estimate`/`ext_edge`/`ext_n_signals`/
+`ext_alpha` still 100% blank on fresh signals.** Pulled the two real
+YES/NO signals logged since 2026-07-25 directly and recomputed
+`_count_agreeing_signals()` by hand against their stored `heuristic_
+direction`/`poly_price_gap`/`whale_direction`/`ob_flag`/`watchlist_signal`
+columns: both have exactly 1 agreeing source (the heuristic only), and
+extremizing correctly requires `n>=2`. The "100% blank" reflects that no
+signal so far has had both a real direction AND 2+ independently-agreeing
+sources at the same time — a real, if unfortunate, property of the
+current sparse-evidence environment, not a logic error.
+
+**Investigated, NOT a bug: every watchlist wallet clearing `resolved_
+count>=10` has exactly 0.0% win rate.** This looked too extreme to be
+real (0% across 161 resolved positions for one wallet, `wan123`) to
+accept without checking. Fetched that wallet's real positions directly
+from Polymarket's `/positions` endpoint: **every position with
+`percentPnl > 0` has `redeemable=False`** (still open) and **every
+`redeemable=True` (settled) position sits at essentially -100%** —
+e.g. a live +221% unrealized gain on an unresolved Fed rate-hike bet,
+next to 216 settled long-shot bets (US-Iran peace deal, Strait of Hormuz
+traffic, Colombia winning the World Cup) that all resolved as total
+losses, sized in the hundreds of thousands to low millions of shares
+each. `sources/accounts.py`'s win-rate math (`wins = sum(1 for p in
+resolved_pct_pnls if p > 0)`) is computing correctly against real data —
+this wallet's public "$1.37M/month" leaderboard figure is being driven
+entirely by unrealized paper gains on still-open long-shot positions, not
+realized skill. This sharpens (with hard evidence, not speculation) the
+prior session's "long-shot-betting subpopulation" hypothesis: the
+watchlist's core sourcing method (rank by raw monthly PnL) systematically
+selects for wallets like this, not necessarily skilled forecasters.
+
+Full suite green after the fix (1899 passed, 1 skipped).
+
+---
+
 ## 2026-07-27 — Built confidence-weighted stake-sizing infrastructure (self-gated off)
 
 Follow-up to "is there another way to recalibrate hypothetical P&L so we'd
