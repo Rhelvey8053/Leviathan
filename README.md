@@ -1,8 +1,10 @@
-<!-- Last narrative update: 2026-07-27 — unattended-ops hardening, price-blind shadow scoring, and the settled-market replay pipeline added; test count and calibration rule count corrected to current figures -->
+<!-- Last narrative update: 2026-07-30 — added docs/STORY.md, a plain-language project narrative for non-technical readers, linked at the top -->
 
 # LEVIATHAN // PREDICTION MARKET INTELLIGENCE
 
 Leviathan is an automated signal detection system for [Kalshi](https://kalshi.com), a regulated US exchange where traders buy and sell contracts on the probability of real-world events — elections, economic reports, sports outcomes, and more. Each day it scans thousands of open contracts, cross-references the same events on five external platforms, tracks the open positions of the highest-PnL traders in the space, and scores candidate markets using a combination of heuristics and LLM-based probability estimation. The output is a structured daily email report and a persistent record of every signal — market price at the time of the call, our probability estimate, and eventual outcome — with the long-term goal of determining whether systematic edge is real, where it comes from, and whether it holds under live conditions.
+
+**Not a developer?** [`docs/STORY.md`](docs/STORY.md) tells the same project as a plain-language narrative — no code required.
 
 ---
 
@@ -67,7 +69,7 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, gate-unlock and no-run-completed alerting, Task Scheduler registration. |
 | `tests/` | The full offline test suite (1,850 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), PowerBI exports, market snapshots, smart-money/whale caches, and the dashboard `.pbix`. |
-| `docs/` | Progress log (`PROGRESS.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
+| `docs/` | Progress log (`PROGRESS.md`), a plain-language project narrative for non-technical readers (`STORY.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
 ---
