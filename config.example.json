@@ -99,6 +99,7 @@
     "max_wallets_per_scan": 20,
     "cache_ttl_hours": 24,
     "discovery_sample_size": 1000,
+    "watchlist_note": "monthly_pnl values below are for human reference only (why each address was added). They are never used as a basis for signal decisions; all promotion requires passing _is_winner() against resolved positions.",
     "watchlist": [],
     "watchlist_min_position_value": 1000,
     "watchlist_cache_ttl_hours": 4
