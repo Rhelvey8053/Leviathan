@@ -149,7 +149,9 @@
     "email_to": "your@email.com",
     "email_from": "",
     "smtp_host": "smtp.gmail.com",
-    "smtp_port": 587
+    "smtp_port": 587,
+    "base_url": "",
+    "_base_url_notes": "GOAL_phase2-6_decisions.md Decision 3: the single hosting switch for every cross-page link the subscriber digest emits (currently just the Track Record link). Empty string (default) keeps the current relative-path behavior for local preview (harness writes both HTML files to the same folder). Once real hosting/email delivery exists, set this to that host's base URL (e.g. \"https://leviathan.example.com\") and every such link becomes absolute -- one config change, no code change."
   },
   "llm": {
     "backend": "cli",

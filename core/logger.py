@@ -5,6 +5,7 @@ Auto-migrates calls.csv / runs.csv to the database on first import.
 """
 
 import csv
+import json
 import os
 import sqlite3
 import uuid
@@ -164,6 +165,26 @@ def _init_db() -> None:
             # Equals config.betting.unit_size (the existing flat figure)
             # until is_dynamic_sizing_eligible() clears its own gate.
             "stake_size_hypothetical REAL",
+            # GOAL_subscriber_report.md Phase 3: Claude's own narrative
+            # (already in the live in-memory signal dict since before this
+            # migration existed) and the structured web-search sources
+            # captured by core/llm.py's _extract_web_search_sources (Phase
+            # 2), persisted so past picks/the track record/the digest can
+            # show them, not just the run that produced them. sources is
+            # stored as a JSON-encoded string (TEXT column) -- readers must
+            # go through report._coerce_sources, never assume it's already
+            # a list. Captured going forward only -- old rows read back NULL
+            # and render the existing graceful fallback, never backfilled.
+            "reasoning              TEXT",
+            "sources                TEXT",
+            # GOAL_subscriber_report.md Phase 4: CLV-style edge metric --
+            # did the market drift toward our estimate before it resolved,
+            # independent of whether the coin-flip outcome landed our way.
+            # Computed in resolve_outcomes() from the same market object
+            # already fetched there (last_price_dollars) -- zero extra API
+            # calls. Signed toward the flagged direction: positive means
+            # the market moved our way. See get_market_drift_stats().
+            "market_drift_pp       REAL",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -270,9 +291,9 @@ def log_signal(signal: dict) -> None:
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
-                 smart_money_count,smart_money_dir)
+                 smart_money_count,smart_money_dir,reasoning,sources)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -325,6 +346,8 @@ def log_signal(signal: dict) -> None:
                 signal.get("consensus_dir"),
                 _to_int(signal.get("smart_money_count")) or 0,
                 signal.get("smart_money_dir"),
+                signal.get("reasoning") or "",
+                json.dumps(signal.get("sources") or []),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -350,9 +373,9 @@ def log_pass(signal: dict) -> None:
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
-                 smart_money_count,smart_money_dir)
+                 smart_money_count,smart_money_dir,reasoning,sources)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -403,6 +426,8 @@ def log_pass(signal: dict) -> None:
                 signal.get("consensus_dir"),
                 _to_int(signal.get("smart_money_count")) or 0,
                 signal.get("smart_money_dir"),
+                signal.get("reasoning") or "",
+                json.dumps(signal.get("sources") or []),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")
@@ -686,6 +711,37 @@ def _market_baseline_brier(market_price, direction: str, outcome: str) -> float 
     return round((float(market_price) - outcome_binary) ** 2, 4)
 
 
+def _market_drift_pp(late_price, market_price_at_flag, direction: str) -> float | None:
+    """
+    CLV-style edge metric (GOAL_subscriber_report.md Phase 4): did the market
+    drift toward our flagged direction before it resolved, independent of
+    whether the coin-flip outcome landed our way? This is the fix for the
+    known problem that outcome/Brier scoring alone is unreliable on a small,
+    price-anchored sample -- a call can be "right" on a 55/45 coin flip that
+    tells you little, but a market that moved 20 points toward your number
+    before resolving is a real, price-anchored signal.
+
+    Raw (late_price - market_price_at_flag) is signed for a YES call already
+    (price rising toward 1 = toward YES); a NO call needs the sign flipped
+    (price FALLING toward 0 is what moves toward NO), so "positive" always
+    means "the market moved our way" regardless of which side we called --
+    the same per-direction branching resolve_outcomes()'s pnl calc already
+    uses, just for drift instead of payoff.
+
+    Returns None (never 0) when either price is missing or direction isn't
+    YES/NO -- same "never fabricate a number with no real basis" discipline
+    as _market_baseline_brier.
+    """
+    if late_price is None or market_price_at_flag is None:
+        return None
+    raw_diff = float(late_price) - float(market_price_at_flag)
+    if direction == "YES":
+        return round(raw_diff * 100, 2)
+    elif direction == "NO":
+        return round(-raw_diff * 100, 2)
+    return None
+
+
 def backfill_market_baseline_brier() -> int:
     """
     One-off backfill for resolved rows written before market_baseline_brier
@@ -887,12 +943,20 @@ def resolve_outcomes(config: dict) -> int:
 
             baseline_brier = _market_baseline_brier(row["market_price"], direction, outcome)
             stake_size = compute_stake_size({"confidence": row["confidence"]}, config)
+            # last_price_dollars is the same field settled_fetcher.py persists
+            # as settled_markets.last_price -- the market's final traded price
+            # before settlement. Read here from the same fetch_market() call
+            # already made above, zero extra API cost.
+            late_price = _to_float(market.get("last_price_dollars"))
+            drift_pp   = _market_drift_pp(late_price, row["market_price"], direction)
 
             with _db() as conn:
                 conn.execute(
                     "UPDATE signals SET outcome=?, result=?, pnl_if_traded=?, "
-                    "market_baseline_brier=?, stake_size_hypothetical=? WHERE call_id=?",
-                    (outcome, "WIN" if win else "LOSS", pnl, baseline_brier, stake_size, row["call_id"])
+                    "market_baseline_brier=?, stake_size_hypothetical=?, market_drift_pp=? "
+                    "WHERE call_id=?",
+                    (outcome, "WIN" if win else "LOSS", pnl, baseline_brier, stake_size,
+                     drift_pp, row["call_id"])
                 )
             resolved_count += 1
         except Exception as e:
@@ -939,19 +1003,29 @@ def get_signal_log(limit: int = 50, resolved_only: bool = False,
         return []
 
 
-def get_resolved_track_record() -> list[dict]:
+def get_resolved_track_record(days: int | None = None) -> list[dict]:
     """
     Every resolved paper signal (non-PASS) with its score and actual outcome.
 
     Uses the identical filter as get_stats()/get_brier_score() so the count
     always matches the headline "n resolved" figure reported elsewhere.
+
+    days (GOAL_subscriber_report.md Phase 5): when given, restricts to
+    signals logged in the last N days -- e.g. days=7 for the subscriber
+    digest's "how last week's calls landed" recap. None (default) preserves
+    the original all-time behavior for existing callers.
     """
+    where  = [_NO_PASS, "outcome != ''", "outcome IS NOT NULL"]
+    params: list = []
+    if days is not None:
+        where.append("timestamp >= ?")
+        params.append((datetime.now(timezone.utc) - timedelta(days=days)).isoformat())
     try:
         with _db() as conn:
             rows = conn.execute(
-                f"SELECT * FROM signals WHERE {_NO_PASS} "
-                f"AND outcome != '' AND outcome IS NOT NULL "
-                f"ORDER BY timestamp DESC"
+                f"SELECT * FROM signals WHERE {' AND '.join(where)} "
+                f"ORDER BY timestamp DESC",
+                params,
             ).fetchall()
         return [dict(r) for r in rows]
     except Exception:
@@ -1368,6 +1442,262 @@ def get_market_baseline_brier_score() -> dict:
         label = "POOR"
 
     return {"brier_score": round(brier, 4), "n": len(rows), "label": label}
+
+
+def get_market_drift_stats() -> dict:
+    """
+    Aggregate CLV-style drift stats (GOAL_subscriber_report.md Phase 4) over
+    every resolved paper signal that has a market_drift_pp value -- always
+    paired with its sample size `n`, per the doc's explicit guardrail: never
+    print an accuracy/win-rate/drift number without its N beside it. Callers
+    (the digest, the Track Record page) must render both together, never
+    avg_drift_pp alone.
+
+    n is deliberately independent of get_stats()'s `resolved` count: not
+    every resolved row has a drift value yet (existing rows before Phase 4
+    landed are NULL until backfill_market_drift() runs; PASS/undirected rows
+    never get one). Returns n=0/None fields, never a fabricated 0.0, when no
+    row has a drift value yet.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT market_drift_pp FROM signals
+                WHERE ({_PAPER}) AND market_drift_pp IS NOT NULL
+                """
+            ).fetchall()
+    except Exception:
+        return {"avg_drift_pp": None, "pct_positive_drift": None, "n": 0}
+
+    if not rows:
+        return {"avg_drift_pp": None, "pct_positive_drift": None, "n": 0}
+
+    drifts = [r["market_drift_pp"] for r in rows]
+    n = len(drifts)
+    positive = sum(1 for d in drifts if d > 0)
+
+    return {
+        "avg_drift_pp":        round(sum(drifts) / n, 2),
+        "pct_positive_drift":  round(positive / n * 100, 1),
+        "n":                   n,
+    }
+
+
+def backfill_market_drift(config: dict, limit: int | None = None, dry_run: bool = False) -> dict:
+    """
+    One-off backfill (GOAL_subscriber_report.md Phase 4) for resolved rows
+    written before market_drift_pp existed. Idempotent -- only touches rows
+    where the column is still NULL, safe to run repeatedly.
+
+    Unlike backfill_market_baseline_brier (pure arithmetic over columns
+    already on the row), this needs a genuinely new number -- the market's
+    late/settlement price -- that was never captured for these older rows.
+    Checked in order, cheapest first:
+      1. settled_markets.last_price (already fetched by settled_fetcher.py,
+         zero API cost) via a ticker join.
+      2. A live Kalshi fetch_market() call, same retry/backoff precedent as
+         resolve_outcomes(), for rows settled_markets doesn't have yet.
+    Rows where neither source has a usable price are left NULL, never
+    coerced to a guess -- same "don't fabricate a relationship that doesn't
+    exist in the data" discipline as every other backfill in this module.
+
+    GOAL_phase2-6_decisions.md Decision 2 preflight support:
+      limit: process at most this many eligible rows this call -- lets a
+        caller dry-run (or live-run) a small batch (e.g. 5) before
+        committing to the full remaining population.
+      dry_run: compute everything (including the live Kalshi fetch) but
+        never write to the DB. Every candidate row's computed values are
+        returned in "rows" -- {ticker, market_price_at_flag, late_price,
+        market_drift_pp, direction} -- so a human can eyeball the sign
+        convention before any write happens. "backfilled" stays 0 in this
+        mode; a row that WOULD have been written is instead counted in
+        "would_backfill".
+
+    Every ticker actually fetched (live or from settled_markets) is
+    printed as it's processed, so a partial run's progress is visible --
+    idempotency (the NULL-only WHERE clause) already makes re-running safe,
+    this is purely for operator visibility into a long-running batch.
+
+    Returns {"backfilled": n, "would_backfill": n, "from_settled_markets": n,
+    "from_live_fetch": n, "unrecoverable": n, "rows": [...] (dry_run only)}.
+    """
+    from core import kalshi as _kalshi
+    import time as _time
+
+    with _db() as conn:
+        query = (
+            "SELECT call_id, ticker, direction, market_price FROM signals "
+            f"WHERE ({_PAPER}) AND result IN ('WIN','LOSS') "
+            "AND market_drift_pp IS NULL AND ticker != '' "
+            "ORDER BY timestamp ASC"
+        )
+        if limit is not None:
+            query += " LIMIT ?"
+            rows = conn.execute(query, (limit,)).fetchall()
+        else:
+            rows = conn.execute(query).fetchall()
+
+    empty_result = {
+        "backfilled": 0, "would_backfill": 0, "from_settled_markets": 0,
+        "from_live_fetch": 0, "unrecoverable": 0, "rows": [],
+    }
+    if not rows:
+        return empty_result
+
+    try:
+        with _db() as conn:
+            settled = {
+                r["ticker"]: r["last_price"]
+                for r in conn.execute(
+                    "SELECT ticker, last_price FROM settled_markets"
+                ).fetchall()
+            }
+    except sqlite3.OperationalError:
+        # settled_markets is created by backtesting/settled_fetcher.py, not
+        # core/logger.py's own _init_db() -- may not exist in every DB.
+        settled = {}
+
+    backfilled = would_backfill = from_settled = from_live = unrecoverable = 0
+    dry_run_rows: list = []
+    for i, row in enumerate(rows):
+        ticker = row["ticker"]
+        late_price = settled.get(ticker)
+        source = "settled_markets" if late_price is not None else None
+
+        if late_price is None:
+            if i > 0:
+                _time.sleep(0.3)  # ~3 req/s, matches resolve_outcomes()'s rate-limit courtesy
+            market = None
+            for attempt in range(3):
+                try:
+                    market = _kalshi.fetch_market(config, ticker)
+                    break
+                except Exception as e:
+                    is_rate_limited = "429" in str(e)
+                    if attempt < 2:
+                        # Longer, more deliberate backoff specifically for a
+                        # rate-limit response -- don't hammer Kalshi with the
+                        # same short retry cadence as a generic transient error.
+                        backoff = (5.0 * (attempt + 1)) if is_rate_limited else (1.5 * (2 ** attempt))
+                        _time.sleep(backoff)
+                    else:
+                        print(f"  [logger] backfill_market_drift: failed on {ticker} after 3 attempts: {e}")
+            if market is not None:
+                late_price = _to_float(market.get("last_price_dollars"))
+                if late_price is not None:
+                    source = "live_fetch"
+
+        print(f"  [logger] backfill_market_drift: {ticker} -- "
+              f"source={source or 'unavailable'}, late_price={late_price}")
+
+        if late_price is None:
+            unrecoverable += 1
+            continue
+
+        drift_pp = _market_drift_pp(late_price, row["market_price"], row["direction"] or "")
+        if drift_pp is None:
+            unrecoverable += 1
+            continue
+
+        if dry_run:
+            would_backfill += 1
+            dry_run_rows.append({
+                "ticker":               ticker,
+                "market_price_at_flag": row["market_price"],
+                "late_price":           late_price,
+                "market_drift_pp":      drift_pp,
+                "direction":            row["direction"],
+            })
+            continue
+
+        with _db() as conn:
+            conn.execute(
+                "UPDATE signals SET market_drift_pp=? WHERE call_id=?",
+                (drift_pp, row["call_id"]),
+            )
+        backfilled += 1
+        if source == "settled_markets":
+            from_settled += 1
+        else:
+            from_live += 1
+
+    return {
+        "backfilled":           backfilled,
+        "would_backfill":       would_backfill,
+        "from_settled_markets": from_settled,
+        "from_live_fetch":      from_live,
+        "unrecoverable":        unrecoverable,
+        "rows":                 dry_run_rows,
+    }
+
+
+def get_equity_curve_data() -> dict:
+    """
+    Cumulative equity curve (GOAL_subscriber_report.md Phase 6): "from real
+    $1 Kalshi bets + logged signals" -- a real fill's actual realized
+    pnl_if_traded takes priority over the paper/hypothetical $1 figure for
+    the same signal wherever one exists (matched via signal_call_id), since
+    that's the truer number; the hypothetical paper figure fills in every
+    signal that was never actually traded for real money. One point per
+    resolved paper signal (non-PASS), in chronological order.
+
+    If a signal has more than one matched real fill, the most recently
+    resolved one wins -- a real, if imperfect, choice among genuine data,
+    never a fabricated blend.
+
+    A curve that silently mixes real and hypothetical dollars is the exact
+    "asterisk" move this project is trying to beat competitors on
+    (GOAL_phase2-6_decisions.md Choice B) -- so every point is also tagged
+    "real" or "paper" in `is_real`, and the two populations are counted
+    separately, never just folded into one undifferentiated N.
+
+    Returns {"points": [cumulative pnl, ...], "is_real": [bool, ...] (same
+    length/order as points), "n": len(points), "real_n": count of real-fill
+    points, "paper_n": count of paper points, "final": last cumulative value
+    or None}.
+    """
+    try:
+        with _db() as conn:
+            paper_rows = conn.execute(
+                f"SELECT call_id, timestamp, pnl_if_traded FROM signals "
+                f"WHERE ({_NO_PASS}) AND result IN ('WIN','LOSS') "
+                f"AND pnl_if_traded IS NOT NULL"
+            ).fetchall()
+            real_rows = conn.execute(
+                "SELECT signal_call_id, pnl_if_traded FROM signals "
+                "WHERE source='real_fill' AND signal_call_id IS NOT NULL "
+                "AND result IN ('WIN','LOSS') AND pnl_if_traded IS NOT NULL"
+            ).fetchall()
+    except Exception:
+        return {"points": [], "is_real": [], "n": 0, "real_n": 0, "paper_n": 0, "final": None}
+
+    real_pnl_by_call = {r["signal_call_id"]: r["pnl_if_traded"] for r in real_rows}
+
+    ordered = sorted(paper_rows, key=lambda r: r["timestamp"] or "")
+    running = 0.0
+    points: list = []
+    is_real: list = []
+    real_n = paper_n = 0
+    for r in ordered:
+        is_real_point = r["call_id"] in real_pnl_by_call
+        pnl = real_pnl_by_call.get(r["call_id"], r["pnl_if_traded"])
+        running += float(pnl)
+        points.append(round(running, 4))
+        is_real.append(is_real_point)
+        if is_real_point:
+            real_n += 1
+        else:
+            paper_n += 1
+
+    return {
+        "points":  points,
+        "is_real": is_real,
+        "n":       len(points),
+        "real_n":  real_n,
+        "paper_n": paper_n,
+        "final":   points[-1] if points else None,
+    }
 
 
 def get_stats_by_time_horizon() -> dict:

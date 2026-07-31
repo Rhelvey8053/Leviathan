@@ -2,6 +2,471 @@
 
 ---
 
+## 2026-07-31 — Decision 1 follow-up: stop re-scoring repeat signals that never get logged
+
+Found during a post-implementation self-review of the Decision 1 wiring
+(below): `_rescore_shortlist_for_clean_sources()` originally ran on
+`final_signals` *before* the repeat/new split. `logger.log_signal()` in
+Step 7 only ever logs `new_signals` (the existing dedup design — a repeat
+ticker doesn't get a fresh DB row). So a repeat ticker landing in the
+published shortlist would burn a real API call re-scoring it, mutate
+`sig["sources"]` in memory, and then that signal would end up in
+`repeat_signals` and never get persisted — the improved sources vanished at
+the end of the run, having cost real money for zero durable benefit.
+
+Fixed by moving the re-score call to after the repeat-tagging block and
+scoping it to `new_signals` only, so every API call spent here is on a
+signal that Step 7 will actually write to the DB. Not currently visible in
+any live output either way — `main.py` still renders via `render_html`, not
+`render_subscriber_html` — but it was already spending real API cost with
+no possible payoff for repeats, which is worth closing regardless of the
+render-path switch's timing. No test changes needed:
+`_rescore_shortlist_for_clean_sources()` itself is unchanged and its tests
+in `test_rescore_shortlist.py` pass arbitrary lists directly, independent of
+which list main.py's orchestration happens to pass in. Full suite re-run
+clean (2021 passed, 1 skipped, 13 subtests passed) both before and after
+this change.
+
+## 2026-07-31 — GOAL_phase2-6_decisions.md: all five review decisions implemented
+
+External handoff doc (`C:\Users\Administrator\Downloads\GOAL_phase2-6_decisions.md`)
+resolving the three open calls + two flagged choices from the previous
+Phase 2-6 audit. All five landed; full suite green throughout (2021+ passed,
+0 regressions at every checkpoint).
+
+**Decision 1 — single-market re-scoring for the published shortlist.**
+Batch `score_via_api` calls share one `sources` list across every market in
+the batch (Phase 2's known limitation); rendering that as "the sources
+behind THIS pick" is a real misattribution. Built the primary fix, not the
+stopgap label:
+- `core/scorer.py::rescore_single_market(market, config, ...)` — scores
+  exactly one market via its own API call, so its `web_search_tool_result`
+  set is genuinely its own. Deliberately skips `score_markets()`'s
+  `min_pre_lv` pre-filter and `max_markets_per_run` slice -- a market
+  already in the published shortlist cleared whatever gate got it there;
+  re-filtering here would be nonsensical.
+- `core/report.py::determine_subscriber_shortlist(signals, config, n=3)` —
+  extracted the calls-filter into a shared `_split_calls_watch()` helper
+  used by both this function and `render_subscriber_html`, so "what counts
+  as a published call" has exactly one definition. Returns the *original*
+  signal dicts (not the rendered view-model), so main.py can mutate
+  `sig["sources"]` in place before logging.
+- `main.py::_rescore_shortlist_for_clean_sources()` — new extracted helper
+  (same testability precedent as `_sample_for_blind_arm`), wired in after
+  the second-pass block: determines the shortlist, re-scores each pick
+  individually, folds the extra tokens/cost into `run_meta` so the run's
+  reported spend isn't silently understated. Gated to `backend == "api"`
+  only (CLI backend never has real structured sources regardless). Cost:
+  ~N_published extra API calls per run, not O(flagged_markets).
+- 21 new tests across `test_scorer.py`, `test_subscriber_html.py`,
+  and a new `test_rescore_shortlist.py`.
+- Live-network limitation unchanged from Phase 2: the Anthropic key is
+  still broken, so this is verified against mocks only, not a real call.
+
+**Decision 2 — drift backfill preflight, then run for real.** Added
+`limit`/`dry_run` params to `backfill_market_drift()`, oldest-first
+deterministic ordering, per-ticker print logging (idempotency already makes
+a partial run resumable; the logging is for operator visibility into that),
+and a longer, distinct backoff specifically for HTTP 429 responses (vs.
+generic transient errors). Then followed the doc's preflight against the
+real production DB, in order:
+1. Backed up `data/leviathan.db` -- moved into the existing gitignored
+   `data/db_backups/` convention (`leviathan.db.bak_drift-backfill_2026-07-31`)
+   rather than leaving a loose file in `data/` that `.gitignore` doesn't
+   actually cover (checked: only `leviathan.db.bak*` is ignored, not a
+   `leviathan.backup.*.db` name -- avoided a near-miss of an ungitignored
+   5MB+ binary sitting in the tree).
+2. Dry-ran on the 5 oldest eligible rows against the real DB and real
+   Kalshi API (this endpoint has been working fine all along -- the broken
+   key this whole project has run into is Anthropic's, not Kalshi's).
+3. Manually verified all 5 signs myself first (NO calls with price falling
+   toward 0 → positive; YES calls with price falling away from 1 →
+   negative; NO call with price rising away from 0 → negative -- all 5
+   matched), then presented the same table to the user for the sign-off the
+   doc explicitly requires by name ("verified by Reed") rather than
+   self-certifying it. Confirmed correct.
+4. Ran the identical 5 tickers live, re-queried, confirmed all 5 persisted
+   values matched the dry-run numbers exactly.
+5. Ran the full backfill over the remaining rows: 3 more backfilled (all
+   from `settled_markets`, zero live API calls), 0 unrecoverable.
+6. Confirmed idempotent: a second full run touched 0 rows.
+
+Real result on the live DB: `get_market_drift_stats()` now returns
+`{"avg_drift_pp": -1.48, "pct_positive_drift": 25.0, "n": 8}` -- 8 real
+resolved signals, no longer the n=0 placeholder from before this ran.
+
+**Decision 3 — BASE_URL config, hardcoded path removed.** Added
+`report.base_url` to both `config.json` and `config.example.json` (empty
+string default = today's relative-path behavior). New
+`report._track_record_href(config)` computes the digest footer's link;
+empty base_url keeps `track_record.html`, a set value produces an absolute
+URL with the trailing slash stripped so it never double-slashes. Flagged in
+the doc as the third thing now wanting a real URL (alongside source links
+and delivery) -- still just the one config switch, no delivery built.
+
+**Choice A — drift is the hero metric, ROI demoted.** Split the Track
+Record page's four cards into a full-width hero row (market drift --
+larger serif value, accent left border, tinted background) and a secondary
+row of three; ROI specifically gets an `.mcard-secondary` treatment (small
+value text, reduced opacity) so it visually reads as supplementary, never
+competing with drift for attention, while still always showing its N.
+
+**Choice B — real vs. paper equity points visually and textually
+distinguished.** `logger.get_equity_curve_data()` now tags every point
+`is_real` and returns separate `real_n`/`paper_n` counts (a real fill's pnl
+already took priority per Phase 6's original design -- this makes that
+choice visible instead of silent). The sparkline draws a solid dark marker
+on every real-money point; a footnote beneath it always states the exact
+counts ("N real-money points (solid marker), M paper (hypothetical)") --
+both the visual and textual half of the guardrail, never one without the
+other.
+
+Full suite: all green at every checkpoint (2016 → 2021 → clean after the
+final Decision 2 code changes, live backfill run separately verified
+against production data). 21 (Decision 1) + a handful more per Decision
+2/Choice A/B changes -- see individual test files
+(`test_scorer.py`, `test_rescore_shortlist.py`, `test_subscriber_html.py`,
+`test_track_record_html.py`, `test_logger.py`) for the itemized counts.
+
+`main.py` still calls `render_html`/`compile_report` -- the subscriber
+render-path switch remains a deliberate, separate step per the standing
+guardrail, untouched by any of this work.
+
+## 2026-07-30 — GOAL_subscriber_report.md: Phase 5 (digest sections) + Phase 6 (Track Record page)
+
+All six phases of the GOAL doc are now implemented (Phase 0 rebuild through
+Phase 6). `main.py` still calls `render_html`/`compile_report` — untouched,
+per the doc's own guardrail — the subscriber path is additive only.
+
+**Phase 5 — new digest sections**, all in `render_subscriber_html`:
+- *Resolved-picks recap* ("How last week's calls landed"): new optional
+  `resolved_recap` param (a list from `logger.get_resolved_track_record(days=7)`,
+  which the doc's Phase 5 spec needed — added a `days: int | None = None`
+  filter to that existing all-time function, additive/backward-compatible).
+  Kept `render_subscriber_html` a pure function of its inputs rather than
+  having it reach into the DB itself — the caller queries, same division of
+  responsibility Phase 1 already established. Shows WIN and LOSS rows
+  identically (no cherry-picking), plus `market_drift_pp` when a row has one.
+  Collapses to "No calls settled in the last 7 days." when empty, same
+  placeholder-not-omission pattern as calls/watch.
+- *Market movers*: reuses the scanner's existing `drift_flag`/`spread_wide`/
+  `ob_flag` fields (no new detector) to surface non-call markets showing a
+  structural anomaly, sorted by magnitude, capped at 3, explicitly excluding
+  any ticker already shown as a call. Plain-English reasons ("Price moved
+  15% up recently", "order book leaning 72% toward YES", "unusually wide
+  spread (9%)").
+- *Methodology footer*: static copy naming every external source cross-
+  referenced (Kalshi order book, Polymarket, tracked smart-money wallets,
+  live web search) — always rendered, no empty state needed since it's not
+  data-driven.
+
+**Phase 6 — Track Record page**: new `render_track_record_html()` in
+`core/report.py`, a standing page (unlike the digest, this one queries the
+DB directly itself — same precedent as `_betting_queue_data` — since every
+number on it is always DB-derived, never tied to one run). Four-up in the
+doc's specified order of prominence, each paired with its sample size (the
+guardrail is structural, not just a comment — every metric card's helper
+takes `n` as a required argument):
+1. Market drift toward estimate (`logger.get_market_drift_stats()`)
+2. Edge realized / ROI per $1 (computed from `logger.get_stats()`'s existing
+   `total_hypothetical_pnl`/`resolved` — no new aggregate needed)
+3. Hit rate (`stats['win_rate']`)
+4. Equity curve — new `logger.get_equity_curve_data()`: cumulative
+   `pnl_if_traded` over every resolved paper signal in chronological order,
+   EXCEPT that a matched real Kalshi fill's actual pnl (`signal_call_id`
+   join) overrides the paper hypothetical wherever one exists, per the doc's
+   "from real $1 Kalshi bets + logged signals" phrasing. Rendered as a small
+   hand-rolled inline SVG polyline (no charting library — this is static
+   server-rendered HTML) that's simply omitted (not a broken empty chart)
+   when there are fewer than 2 points.
+
+Below the four cards: the full resolved signal log, every row, wins and
+losses together — the doc's explicit "publish the full log, not curated
+highlights" framing, not a top-N or wins-only view. A `.process-note`
+states plainly that drift is a process signal, not a guarantee.
+
+Added a "Full track record" link to the subscriber digest's footer
+(`href="track_record.html"`) to satisfy the Phase 6 acceptance line "links
+from the digest footer resolve" — the footer had no such link at all until
+now. Since neither page is served by a real webserver yet, made this
+concrete rather than aspirational: `scripts/render_subscriber_preview.py`'s
+`main()` now writes `track_record.html` alongside `subscriber_preview.html`
+in the same `data/powerbi_export/` directory, so the relative link
+genuinely resolves when both files are opened from that folder. Verified by
+actually running the harness and confirming both files land side by side.
+
+Caveat worth flagging explicitly: this link only resolves in that local-file
+context. The stated end goal is an emailed digest, and a relative link has
+no "same folder" to resolve against once this HTML leaves
+`data/powerbi_export/` for an email body — nothing in this codebase sends
+email yet, so there's no way to test that path today. Once delivery exists,
+this needs to become an absolute/hosted URL, not a relative sibling path.
+
+Ran the harness against the real DB for both new pages: resolved-recap
+correctly showed its placeholder (0 rows in the last 7 days on the live
+DB right now), movers showed 3 real flagged markets with correct plain-
+English reasons, methodology footer present, Track Record page rendered
+real (if currently un-backfilled — market drift shows n=0 until
+`backfill_market_drift()` is run) hit-rate/ROI/equity numbers. Confirmed
+well-formed HTML (tag-balance checker) on both real renders, not just the
+unit-test fixtures.
+
+36 new tests: `tests/test_subscriber_html.py` (recap/movers/methodology/
+track-record-link) and a new `tests/test_track_record_html.py` (12 tests —
+empty-DB honesty, every-card-has-its-N, drift/ROI/hit-rate math, equity
+curve chronological ordering and real-fill override, full log includes
+losses, excludes unresolved/PASS rows, HTML escaping, well-formedness).
+Full suite: 1990 passed, 1 skipped, 13 subtests passed (up from 1959 after
+Phase 3+4).
+
+**Not yet done, flagged for the end-of-project audit** (per "go ahead and
+work through, then we can audit at the end"):
+- `backfill_market_drift()` has never been run against the real DB — it's a
+  live-network operation (Kalshi API calls per unresolved-drift ticker),
+  deliberately held for the audit rather than run mid-implementation.
+- `main.py` has not been switched to call `render_subscriber_html` — still
+  pending explicit go-ahead per the doc's own guardrail.
+- The batch-attribution judgment call from Phase 2 (shared `sources` list
+  across every score in one API call) was accepted implicitly by "go ahead
+  and work through" rather than an explicit answer — worth confirming at
+  the audit.
+- The "edge realized (ROI per $1)" metric and the equity-curve's real-fill-
+  priority blend are both reasonable but unspecified-by-the-doc design
+  choices (the doc doesn't define exact blending rules) — worth a second
+  look before this is called done.
+
+## 2026-07-30 — GOAL_subscriber_report.md: Phase 3 (persistence) + Phase 4 (CLV drift)
+
+User switched pacing mid-project ("go ahead and work through then we can audit
+at the end") — proceeding through Phases 3-6 without a check-in after each,
+full audit planned once all phases land.
+
+**Phase 3 — persist reasoning/sources per signal.** Added `reasoning TEXT` and
+`sources TEXT` (JSON-encoded) columns to `signals` via the existing idempotent
+`_add_col`/`PRAGMA table_info` migration pattern. Both `log_signal()` and
+`log_pass()` now write them — PASS rows get the same treatment as calls since
+`main.py` builds one shared `signal` dict passed to both (same precedent as
+`category`). Captured going forward only; old rows read back NULL, never
+backfilled, matching every other column in this table's history
+(market_baseline_brier, run_id).
+
+Found and fixed a real bug this would otherwise have shipped with: `sources`
+round-trips through SQLite as a JSON string, but a *live* in-memory signal
+dict (mid-run, before it's ever touched the DB) already has `sources` as a
+real list of dicts. `_rank_top_picks` was doing `s.get("sources") or []`,
+which would have handed a raw JSON string straight to
+`_render_subscriber_pick`'s `for s in sources[:4] if s.get("url")` —
+iterating a string yields characters, and `.get()` on a `str` raises. Added
+`core/report._coerce_sources()`: accepts either a list (live run) or a JSON
+string (DB read-back), always returns a real list. This is why the harness
+needed zero changes for Phase 3 — the coercion lives once, centrally, in
+`_rank_top_picks`.
+
+**Phase 4 — CLV-style market-drift edge metric.** New `market_drift_pp REAL`
+column: does the market move toward our flagged direction before it
+resolves, independent of whether the coin-flip outcome landed our way (the
+known problem with Brier/win-rate alone on a small, price-anchored sample).
+`_market_drift_pp(late_price, market_price_at_flag, direction)`: raw
+`(late - flag) * 100` is already signed correctly for YES (price rising
+toward 1 = good); NO needs the sign flipped (price *falling* toward 0 is
+what moves our way) — same per-direction branching `resolve_outcomes()`'s
+existing payoff calc already uses, just for drift instead of P&L.
+
+The GOAL doc suggested sourcing the late price from `data/snapshots/` or
+`settled_markets`. Went with something better than either: `resolve_outcomes()`
+already calls `_kalshi.fetch_market(ticker)` for every row it resolves —
+that response already carries `last_price_dollars` (the same field
+`backtesting/settled_fetcher.py` persists as `settled_markets.last_price`).
+Reading it there costs zero extra API calls and needs no dependency on a
+separate scheduled job having already backfilled that ticker into
+`settled_markets`. `market_drift_pp` is now computed and stored in the same
+`UPDATE` as `outcome`/`result`/`pnl_if_traded` for every future resolution.
+
+For the ~248 already-resolved rows written before this landed: added
+`backfill_market_drift(config)`, a one-off (checks `settled_markets` first —
+free, already-cached — then falls back to a live `fetch_market()` call with
+the same retry/backoff precedent as `resolve_outcomes()`). Idempotent, only
+touches rows where `market_drift_pp IS NULL`; rows where neither source has
+a price are left NULL, never guessed. Not yet run against the real DB —
+this is a live-network operation, holding it for the end-of-project audit
+rather than running it mid-implementation.
+
+Added `get_market_drift_stats()`: `{avg_drift_pp, pct_positive_drift, n}`,
+always together — the GOAL doc's guardrail ("never print an accuracy/
+win-rate/drift number without its N") is enforced by the return shape
+itself, not just a comment.
+
+Also added `market_drift_pp` to `core/export_to_csv.py`'s `WHITELIST` (same
+pattern as every other analytics column) so it reaches the PowerBI export.
+Deliberately did NOT whitelist `reasoning`/`sources` there — free-text
+narrative and a JSON blob don't fit a numeric analytics row; they're read
+directly from the DB by the subscriber renderer instead.
+
+53 new tests across `tests/test_logger.py` and `tests/test_subscriber_html.py`
+(schema/migration idempotency, drift sign math for both directions, DB
+round-trips for reasoning/sources, the JSON-string-vs-list coercion bug
+above with its own regression tests, backfill's three paths — settled_markets
+hit / live-fetch fallback / unrecoverable — and idempotency). Full suite:
+1959 passed, 1 skipped, 13 subtests passed (up from 1930 after Phase 2).
+
+## 2026-07-30 — GOAL_subscriber_report.md: Phase 2 (real web-search sources)
+
+Continuation of the subscriber-report project (previous entry below), user
+gave explicit go-ahead ("lets go ahead") to proceed straight after Phase 1.
+
+Added `core.llm._extract_web_search_sources(*responses)`: walks a response's
+`content` blocks for `web_search_tool_result` (Anthropic's server-side
+`web_search_20250305` tool), pulling real result items into structured
+`{"url", "title", "age"}` dicts (`age` from the SDK's `page_age` field).
+De-dupes by URL preserving first-seen order, caps at `MAX_SOURCES_PER_SIGNAL`
+(4). Error-shaped result blocks (`web_search_tool_result_error`, e.g.
+`max_uses_exceeded`) are skipped, not raised — a failed search shouldn't fail
+the whole scoring call. When `_force_tool()` fires a second billed call,
+both responses are walked and merged, same reasoning `_finalize_token_info`
+already uses for combined cost accounting.
+
+Wired into all three scoring entry points, each attaching the extracted
+`sources` list onto its returned dict(s) rather than changing return
+signatures (still `(scores, token_info)` / `(probe_input, token_info)`,
+unchanged for every existing caller):
+  - `score_via_api` / `score_blind_via_api`: one API call can batch-score
+    several markets, and web search results aren't tagged per-market in the
+    response — so the same shared `sources` list is attached to every score
+    dict in the batch. Documented as a deliberate simplification, not a bug:
+    it's the best attribution the API's actual shape supports.
+  - `probe_via_api`: scores exactly one market per call, so attribution is
+    unambiguous — `sources` goes straight onto the single `probe_input` dict.
+
+No changes needed in `core/scorer.py`, `core/blind_scorer.py`, or `main.py`:
+`score_markets()` already returns `_score_via_api`'s tuple untouched, and
+`main.py`'s `signal = {**cs, ...}` merge (main.py:743) already spreads every
+key from the Claude score dict first — `sources` (and `reasoning`, already
+flowing since Phase 1) land on the signal dict for free. `core/logger.py`'s
+`log_signal()` does explicit named-column inserts, so the new key is
+harmlessly ignored until Phase 3 adds a `sources` column.
+
+Since `core/report.py`'s `_render_subscriber_pick()` was already built
+(Phase 1) to read `p.get("sources")` for real `{url, title}` entries and
+fall back to a placeholder otherwise, Phase 2 required zero renderer
+changes — the placeholder copy did need a wording fix though: it read "Real
+source links land after the web-search capture fix (GOAL Phase 2)", which
+would've been stale/confusing internal-ticket language once this shipped,
+for signals where a search just didn't return results (not because the fix
+was pending). Changed to the evergreen "No sources cited for this call."
+(`core/report.py`, `_render_subscriber_pick`), test assertions in
+`tests/test_subscriber_html.py` updated to match.
+
+**Honest limitation**: the Anthropic API key has been broken (401
+authentication_error) for weeks, so this could not be verified against a
+real live scoring call. It was not left as a memory-based guess about the
+response shape, though: read the actual installed SDK's generated type
+stubs (`anthropic==0.104.1`, `anthropic/types/web_search_result_block.py`
+and `web_search_tool_result_block_content.py`) to confirm field names before
+writing the extraction code — `WebSearchResultBlock.page_age`/`.title`/`.url`
+and `WebSearchToolResultBlockContent = Union[WebSearchToolResultError,
+List[WebSearchResultBlock]]` (so checking `isinstance(content, list)` is
+the correct, SDK-confirmed way to distinguish a successful search from an
+error result) all match exactly what's implemented in
+`_extract_web_search_sources`. 24 new tests in `tests/test_llm.py` (a
+dedicated `TestExtractWebSearchSources` class plus integration tests on all
+three scoring functions) cover extraction, dedup, capping, error-block
+skipping, cross-call merging, and per-batch attachment against mocks built
+to that confirmed shape. What remains genuinely unverified is only the
+live *behavior* — whether Claude actually invokes web search and returns
+results for real scoring prompts — not the parsing logic's shape
+assumptions. A quick smoke-test scoring run once the key is fixed would
+close that last gap.
+
+**Judgment call worth flagging**: for `score_via_api`/`score_blind_via_api`,
+one API call can batch-score several markets (`max_markets_per_run`), and
+Anthropic's response doesn't tag which search result was "about" which
+market — so every score in a batch gets the *same* shared `sources` list.
+The GOAL doc's Phase 2 spec says "attach to the matching score" (singular),
+which may have assumed one market per call; this is a reasonable reading
+given what the API actually returns, but it's a design choice, not the only
+possible one, and worth the user's explicit sign-off rather than treating
+as settled.
+
+Full suite: 1930 passed, 1 skipped, 13 subtests passed (up from 1918 — no
+regressions). Stopped here per the user's chosen pacing — Phase 3 (persist
+`reasoning`/`sources` columns on the `signals` table via idempotent
+migration) is next, pending go-ahead.
+
+---
+
+## 2026-07-30 — GOAL_subscriber_report.md: Phase 0 + Phase 1 (subscriber HTML renderer)
+
+External handoff doc (`C:\Users\Administrator\Downloads\GOAL_subscriber_report.md`),
+6 phases, user chose to pace it one phase at a time. Phase 0's claim ("DONE,
+verify it runs on your machine") didn't hold up: `scripts/render_subscriber_
+preview.py` didn't exist in this repo, a separate local clone the doc assumed
+as its root (`Leviathan - Copy (2)`), or that clone's own zip backup —
+checked all three before concluding it was never actually built. Independently
+re-verified every other "ground truth" claim in the doc against the real
+codebase first (function line numbers in `core/report.py`/`core/llm.py`,
+`signals`/`blind_scores` table/column state, row counts) — all accurate,
+just Phase 0's specific deliverable wasn't. User chose to rebuild it from the
+spec rather than search further.
+
+**Lucky find:** `subscriber_preview.html` — clearly the actual rendered
+output from the missing harness, dated within the window the deleted clone
+existed — was sitting directly in `Downloads/`. Reverse-engineered the exact
+v2 design (CSS, layout, copy) from this real reference instead of designing
+from the text description alone: warm-paper editorial aesthetic (Newsreader
+serif headlines, IBM Plex Mono labels, Inter body), Pick → edge meter → Why
+flagged → Analysis → Sources → Trade CTA per call, "On the watch" section for
+PASS/sub-threshold signals.
+
+**Phase 0 (`scripts/render_subscriber_preview.py`):** queries the latest
+`signals` row per still-open ticker (repeats are never re-logged, so the most
+recent row already represents "the current call" for that market — the same
+dedup design the live pipeline already relies on), and renders to `data/
+powerbi_export/subscriber_preview.html`. Verified against the real DB: 3
+real calls + 3 real watch items, a genuine `kalshi_market_url()` link on the
+one pick with `series_ticker` populated, `#` fallback on the others, well-formed
+HTML (checked with `html.parser`, no unclosed/mismatched tags), zero jargon
+tokens (`Kelly`, `EV/ct`, `flag_path`) in the output. No browser extension
+available in this environment to screenshot it directly.
+
+**Phase 1 (`core/report.py render_subscriber_html()`):** ported the harness's
+render logic into a first-class function — the harness is now a thin wrapper
+that queries the DB and calls it, so there is exactly one implementation of
+the subscriber layout, matching the file's existing single-source-of-truth
+discipline (`_rank_top_picks`, `_betting_queue_data`, `_header_data`). Splits
+`signals` into calls (`direction in (YES, NO)` AND at/above `config.scoring.
+confidence_threshold`) and watch (`PASS`, or below that threshold — not just
+literal `PASS`, per the doc's own spec) — the confidence-threshold half of
+that split is easy to get wrong by only checking direction, so it has its own
+test. `_rank_top_picks` extended to carry `reasoning` and `sources` through
+(additive fields, nothing existing removed) — `reasoning` is already on a
+live run's in-memory signal dict today (Claude's own response schema
+includes it), so a real run through this renderer shows real analysis
+immediately, before Phase 3 ever persists it; `sources` defaults to empty
+until Phase 2 populates real structured `{url, title}` entries. `render_html`/
+`compile_report` untouched; `main.py` not switched — both guardrails from the
+doc.
+
+**Guardrails enforced, not just stated:** `sources_checked` (freeform,
+model self-report) is never rendered as an `<a href>` under any input,
+verified with a test that feeds a real-looking URL through `sources_checked`
+and confirms it never appears as a link; only structured `sources` entries
+(Phase 2, not shipped yet) ever become a real href, verified with its own
+test once populated.
+
+19 new tests (`tests/test_subscriber_html.py`): calls/watch split including
+the confidence-threshold case, watch capped at 3 and sorted, empty/no-calls
+placeholders, no-jargon assertion, gap math (rounded-then-subtracted, matching
+the recovered reference's 22%/96% → 74-point example exactly), why-flagged
+mapping and its fallback, reasoning-present vs. placeholder, both source
+guardrail cases, title HTML-escaping, real vs. absent Kalshi link, and a
+well-formed-HTML check. Full suite green (1918 passed, 1 skipped).
+
+Stopped here per the user's chosen pacing (one phase at a time, check in
+after each) — Phase 2 (capturing real `web_search_tool_result` URLs in
+`core/llm.py`) is next, pending go-ahead.
+
+---
+
 ## 2026-07-29 — Bug sweep: one real fix, two confirmed non-bugs (with evidence)
 
 Triggered by the smart-money watchlist scan printing its exclusion list

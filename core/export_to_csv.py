@@ -77,6 +77,12 @@ WHITELIST = [
     "poly_price", "poly_price_gap", "consensus_gap", "consensus_dir",
     "smart_money_count", "smart_money_dir",
     "brier_scorer", "brier_market",
+    # GOAL_subscriber_report.md Phase 4: CLV-style drift metric. reasoning/
+    # sources (Phase 3) are deliberately NOT whitelisted here -- free-text
+    # narrative and a JSON blob don't fit a numeric analytics row the same
+    # way every other whitelisted column does; they're read directly from
+    # the DB by core/report.py's subscriber renderer instead.
+    "market_drift_pp",
 ]
 
 _CONF_RANK    = {"HIGH": 0, "MED": 1, "LOW": 2}

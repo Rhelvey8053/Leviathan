@@ -8,7 +8,7 @@ Network and subprocess boundaries are mocked — no Kalshi calls, no email.
 import uuid
 import pytest
 from unittest.mock import patch, call
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from core import logger
 
@@ -1221,6 +1221,28 @@ def test_get_resolved_track_record_has_score_and_outcome(tmp_db):
     assert row["result"] == "WIN"
 
 
+def test_get_resolved_track_record_days_filters_by_recency(tmp_db):
+    """GOAL_subscriber_report.md Phase 5: days=N restricts to recent rows,
+    None (default) preserves the original all-time behavior."""
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,confidence,"
+            "market_price,our_estimate,edge,outcome,result,run_id) "
+            "VALUES ('old1',?,'KXOLDRES','YES','MED',0.40,0.40,0.10,'yes','WIN','test')",
+            (old_ts,),
+        )
+    _insert("s11", "KXRECENT", "YES", 0.40, outcome="yes", result="WIN", pnl=0.60)
+
+    all_rows = logger.get_resolved_track_record()
+    recent_rows = logger.get_resolved_track_record(days=7)
+
+    assert any(r["ticker"] == "KXOLDRES" for r in all_rows)
+    assert any(r["ticker"] == "KXRECENT" for r in all_rows)
+    assert not any(r["ticker"] == "KXOLDRES" for r in recent_rows)
+    assert any(r["ticker"] == "KXRECENT" for r in recent_rows)
+
+
 def test_get_market_data_by_ticker_partial_match(tmp_db):
     _insert("s11", "KXCABLEAVE-26MAY22", "YES", 0.40)
     rows = logger.get_market_data(ticker="CABLEAVE")
@@ -1662,6 +1684,441 @@ def test_resolve_outcomes_leaves_market_baseline_brier_null_when_price_missing(t
             "SELECT market_baseline_brier FROM signals WHERE call_id=?", (cid,)
         ).fetchone()
     assert row["market_baseline_brier"] is None
+
+
+# ─── market_drift_pp: CLV-style edge metric (GOAL_subscriber_report.md Phase 4) ─
+
+def test_market_drift_pp_yes_call_positive_when_price_rises():
+    """YES call, market rises toward 1 -> positive drift (moved our way)."""
+    assert logger._market_drift_pp(0.50, 0.30, "YES") == pytest.approx(20.0)
+
+
+def test_market_drift_pp_yes_call_negative_when_price_falls():
+    assert logger._market_drift_pp(0.20, 0.30, "YES") == pytest.approx(-10.0)
+
+
+def test_market_drift_pp_no_call_positive_when_price_falls():
+    """NO call, market falls toward 0 -> positive drift (sign flipped vs YES)."""
+    assert logger._market_drift_pp(0.10, 0.30, "NO") == pytest.approx(20.0)
+
+
+def test_market_drift_pp_no_call_negative_when_price_rises():
+    assert logger._market_drift_pp(0.50, 0.30, "NO") == pytest.approx(-20.0)
+
+
+def test_market_drift_pp_none_when_late_price_missing():
+    assert logger._market_drift_pp(None, 0.30, "YES") is None
+
+
+def test_market_drift_pp_none_when_market_price_at_flag_missing():
+    assert logger._market_drift_pp(0.50, None, "YES") is None
+
+
+def test_market_drift_pp_none_when_direction_not_yes_no():
+    assert logger._market_drift_pp(0.50, 0.30, "PASS") is None
+
+
+def test_schema_includes_market_drift_pp(tmp_db):
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "market_drift_pp" in cols
+
+
+def test_resolve_outcomes_persists_market_drift_pp(tmp_db):
+    """resolve_outcomes() computes and stores drift from the same market
+    object already fetched for outcome/result -- zero extra API calls."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+
+    with patch("core.kalshi.fetch_market",
+               return_value={"result": "yes", "last_price_dollars": 0.55}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT market_drift_pp FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["market_drift_pp"] == pytest.approx(25.0)
+
+
+def test_resolve_outcomes_leaves_market_drift_pp_null_when_late_price_missing(tmp_db):
+    """Market object with no last_price_dollars field -> stays NULL, not 0."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT market_drift_pp FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["market_drift_pp"] is None
+
+
+def test_get_market_drift_stats_empty_db_returns_none_not_zero(tmp_db):
+    stats = logger.get_market_drift_stats()
+    assert stats == {"avg_drift_pp": None, "pct_positive_drift": None, "n": 0}
+
+
+def test_get_market_drift_stats_aggregates_with_sample_size(tmp_db):
+    """Guardrail: n must always accompany the aggregate numbers."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,market_drift_pp) "
+            "VALUES ('d1',datetime('now'),'KXD1','YES','WIN','YES','paper',20.0)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,market_drift_pp) "
+            "VALUES ('d2',datetime('now'),'KXD2','YES','LOSS','NO','paper',-10.0)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,market_drift_pp) "
+            "VALUES ('d3',datetime('now'),'KXD3','YES','WIN','YES','paper',5.0)"
+        )
+    stats = logger.get_market_drift_stats()
+    assert stats["n"] == 3
+    assert stats["avg_drift_pp"] == pytest.approx((20.0 - 10.0 + 5.0) / 3, abs=0.01)
+    assert stats["pct_positive_drift"] == pytest.approx(2 / 3 * 100, abs=0.1)
+
+
+def test_get_market_drift_stats_excludes_null_and_non_paper_rows(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,market_drift_pp) "
+            "VALUES ('d4',datetime('now'),'KXD4','YES','WIN','YES','paper',NULL)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,market_drift_pp) "
+            "VALUES ('d5',datetime('now'),'KXD5','YES','WIN','YES','real_fill',30.0)"
+        )
+    stats = logger.get_market_drift_stats()
+    assert stats["n"] == 0
+
+
+# ─── get_equity_curve_data (GOAL_subscriber_report.md Phase 6) ───────────────
+
+def test_equity_curve_empty_db_returns_no_points(tmp_db):
+    data = logger.get_equity_curve_data()
+    assert data == {"points": [], "is_real": [], "n": 0, "real_n": 0, "paper_n": 0, "final": None}
+
+
+def test_equity_curve_cumulative_from_paper_signals_in_chronological_order(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e1','2026-01-02T00:00:00Z','KXE1','YES','WIN','YES','paper',0.50)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e2','2026-01-01T00:00:00Z','KXE2','NO','LOSS','YES','paper',-0.30)"
+        )
+    data = logger.get_equity_curve_data()
+    # e2 (Jan 1) comes first chronologically, then e1 (Jan 2)
+    assert data["points"] == [-0.30, 0.20]
+    assert data["n"] == 2
+    assert data["final"] == pytest.approx(0.20)
+    assert data["is_real"] == [False, False]
+    assert data["real_n"] == 0
+    assert data["paper_n"] == 2
+
+
+def test_equity_curve_real_fill_overrides_paper_pnl_for_matched_signal(tmp_db):
+    """A real fill's actual pnl replaces the paper hypothetical for the same
+    signal -- 'from real $1 Kalshi bets + logged signals' per the doc. That
+    point must also be tagged real, not paper (GOAL_phase2-6_decisions.md
+    Choice B: never silently blend without disclosure)."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e3','2026-01-01T00:00:00Z','KXE3','YES','WIN','YES','paper',0.50)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,"
+            "signal_call_id,pnl_if_traded) "
+            "VALUES ('e3-fill','2026-01-01T01:00:00Z','KXE3','YES','WIN','YES','real_fill','e3',0.72)"
+        )
+    data = logger.get_equity_curve_data()
+    assert data["points"] == [0.72]
+    assert data["n"] == 1
+    assert data["is_real"] == [True]
+    assert data["real_n"] == 1
+    assert data["paper_n"] == 0
+
+
+def test_equity_curve_mixed_real_and_paper_counts(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e6','2026-01-01T00:00:00Z','KXE6','YES','WIN','YES','paper',0.50)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e7','2026-01-02T00:00:00Z','KXE7','YES','WIN','YES','paper',0.40)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,"
+            "signal_call_id,pnl_if_traded) "
+            "VALUES ('e7-fill','2026-01-02T01:00:00Z','KXE7','YES','WIN','YES','real_fill','e7',0.65)"
+        )
+    data = logger.get_equity_curve_data()
+    assert data["n"] == 2
+    assert data["real_n"] == 1
+    assert data["paper_n"] == 1
+    assert data["is_real"] == [False, True]
+
+
+def test_equity_curve_excludes_unresolved_and_pass_rows(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e4','2026-01-01T00:00:00Z','KXE4','YES','','','paper',NULL)"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e5','2026-01-01T00:00:00Z','KXE5','PASS','WIN','YES','paper',0.50)"
+        )
+    data = logger.get_equity_curve_data()
+    assert data == {"points": [], "is_real": [], "n": 0, "real_n": 0, "paper_n": 0, "final": None}
+
+
+def test_backfill_market_drift_uses_settled_markets_first(tmp_db):
+    """A ticker already in settled_markets is backfilled with zero API calls."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bfd1',datetime('now'),'KXBFD1','YES',0.30,'WIN','YES','paper')"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settled_markets (
+                ticker TEXT PRIMARY KEY, last_price REAL
+            )
+        """)
+        conn.execute("INSERT INTO settled_markets (ticker, last_price) VALUES ('KXBFD1', 0.50)")
+
+    with patch("core.kalshi.fetch_market") as mock_fetch:
+        result = logger.backfill_market_drift({})
+
+    assert result == {"backfilled": 1, "would_backfill": 0, "from_settled_markets": 1,
+                       "from_live_fetch": 0, "unrecoverable": 0, "rows": []}
+    mock_fetch.assert_not_called()
+    with logger._db() as conn:
+        row = conn.execute("SELECT market_drift_pp FROM signals WHERE call_id='bfd1'").fetchone()
+    assert row["market_drift_pp"] == pytest.approx(20.0)
+
+
+def test_backfill_market_drift_falls_back_to_live_fetch(tmp_db):
+    """A ticker settled_markets doesn't have yet falls back to a live Kalshi call."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bfd2',datetime('now'),'KXBFD2','NO',0.60,'WIN','NO','paper')"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+
+    with patch("core.kalshi.fetch_market", return_value={"last_price_dollars": 0.10}) as mock_fetch:
+        result = logger.backfill_market_drift({})
+
+    assert result == {"backfilled": 1, "would_backfill": 0, "from_settled_markets": 0,
+                       "from_live_fetch": 1, "unrecoverable": 0, "rows": []}
+    mock_fetch.assert_called_once()
+    with logger._db() as conn:
+        row = conn.execute("SELECT market_drift_pp FROM signals WHERE call_id='bfd2'").fetchone()
+    # NO call, price fell 0.60 -> 0.10 (toward NO) -> positive drift
+    assert row["market_drift_pp"] == pytest.approx(50.0)
+
+
+def test_backfill_market_drift_unrecoverable_when_no_price_available(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bfd3',datetime('now'),'KXBFD3','YES',0.30,'WIN','YES','paper')"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+
+    with patch("core.kalshi.fetch_market", side_effect=Exception("network error")):
+        result = logger.backfill_market_drift({})
+
+    assert result == {"backfilled": 0, "would_backfill": 0, "from_settled_markets": 0,
+                       "from_live_fetch": 0, "unrecoverable": 1, "rows": []}
+    with logger._db() as conn:
+        row = conn.execute("SELECT market_drift_pp FROM signals WHERE call_id='bfd3'").fetchone()
+    assert row["market_drift_pp"] is None
+
+
+def test_backfill_market_drift_idempotent_skips_already_populated_rows(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source,market_drift_pp) "
+            "VALUES ('bfd4',datetime('now'),'KXBFD4','YES',0.30,'WIN','YES','paper',15.0)"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+
+    with patch("core.kalshi.fetch_market") as mock_fetch:
+        result = logger.backfill_market_drift({})
+
+    assert result == {"backfilled": 0, "would_backfill": 0, "from_settled_markets": 0,
+                       "from_live_fetch": 0, "unrecoverable": 0, "rows": []}
+    mock_fetch.assert_not_called()
+
+
+def test_backfill_market_drift_when_settled_markets_table_missing_falls_back(tmp_db):
+    """settled_markets is created by a separate module (backtesting/settled_
+    fetcher.py) -- a DB that never ran it must not crash, just fall straight
+    to the live-fetch path."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('bfd5',datetime('now'),'KXBFD5','YES',0.30,'WIN','YES','paper')"
+        )
+        # No settled_markets table created at all.
+
+    with patch("core.kalshi.fetch_market", return_value={"last_price_dollars": 0.55}):
+        result = logger.backfill_market_drift({})
+
+    assert result == {"backfilled": 1, "would_backfill": 0, "from_settled_markets": 0,
+                       "from_live_fetch": 1, "unrecoverable": 0, "rows": []}
+
+
+# ─── limit / dry_run preflight support (GOAL_phase2-6_decisions.md Decision 2) ─
+
+def test_backfill_market_drift_limit_caps_rows_processed(tmp_db):
+    with logger._db() as conn:
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+                f"VALUES ('lim{i}',datetime('now', '+{i} seconds'),'KXLIM{i}','YES',0.30,'WIN','YES','paper')"
+            )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+        for i in range(5):
+            conn.execute("INSERT INTO settled_markets (ticker, last_price) VALUES (?, 0.50)", (f"KXLIM{i}",))
+
+    result = logger.backfill_market_drift({}, limit=2)
+    assert result["backfilled"] == 2
+
+    with logger._db() as conn:
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM signals WHERE market_drift_pp IS NULL AND ticker LIKE 'KXLIM%'"
+        ).fetchone()[0]
+    assert remaining == 3  # only 2 of 5 touched
+
+
+def test_backfill_market_drift_limit_processes_oldest_rows_first(tmp_db):
+    """Deterministic ordering (oldest timestamp first) so a limited/dry-run
+    preflight and the eventual full run touch rows in a predictable,
+    reproducible order."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('ord1','2026-01-02T00:00:00Z','KXORD1','YES',0.30,'WIN','YES','paper')"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('ord2','2026-01-01T00:00:00Z','KXORD2','YES',0.30,'WIN','YES','paper')"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+        conn.execute("INSERT INTO settled_markets (ticker, last_price) VALUES ('KXORD1', 0.50), ('KXORD2', 0.50)")
+
+    logger.backfill_market_drift({}, limit=1)
+
+    with logger._db() as conn:
+        row1 = conn.execute("SELECT market_drift_pp FROM signals WHERE call_id='ord1'").fetchone()
+        row2 = conn.execute("SELECT market_drift_pp FROM signals WHERE call_id='ord2'").fetchone()
+    assert row2["market_drift_pp"] is not None  # older row (Jan 1) processed first
+    assert row1["market_drift_pp"] is None      # newer row (Jan 2) left for next run
+
+
+def test_backfill_market_drift_dry_run_does_not_write(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('dry1',datetime('now'),'KXDRY1','YES',0.30,'WIN','YES','paper')"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+        conn.execute("INSERT INTO settled_markets (ticker, last_price) VALUES ('KXDRY1', 0.50)")
+
+    result = logger.backfill_market_drift({}, dry_run=True)
+
+    assert result["backfilled"] == 0
+    assert result["would_backfill"] == 1
+    with logger._db() as conn:
+        row = conn.execute("SELECT market_drift_pp FROM signals WHERE call_id='dry1'").fetchone()
+    assert row["market_drift_pp"] is None  # untouched despite would_backfill
+
+
+def test_backfill_market_drift_dry_run_returns_row_details_for_sign_check(tmp_db):
+    """The doc's explicit preflight step: a human must be able to eyeball
+    ticker/market_price_at_flag/late_price/market_drift_pp/direction for
+    every dry-run row before any write happens."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('dry2',datetime('now'),'KXDRY2','YES',0.30,'WIN','YES','paper')"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+        conn.execute("INSERT INTO settled_markets (ticker, last_price) VALUES ('KXDRY2', 0.50)")
+
+    result = logger.backfill_market_drift({}, dry_run=True)
+
+    assert result["rows"] == [{
+        "ticker": "KXDRY2", "market_price_at_flag": 0.30, "late_price": 0.50,
+        "market_drift_pp": 20.0, "direction": "YES",
+    }]
+
+
+def test_backfill_market_drift_dry_run_still_calls_live_fetch_when_needed(tmp_db):
+    """Dry run computes the real number (including a live Kalshi call when
+    settled_markets doesn't have it) -- it only skips the DB write, not the
+    fetch itself, since the whole point is verifying real computed values."""
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,market_price,result,outcome,source) "
+            "VALUES ('dry3',datetime('now'),'KXDRY3','NO',0.60,'WIN','NO','paper')"
+        )
+        conn.execute("CREATE TABLE IF NOT EXISTS settled_markets (ticker TEXT PRIMARY KEY, last_price REAL)")
+
+    with patch("core.kalshi.fetch_market", return_value={"last_price_dollars": 0.10}) as mock_fetch:
+        result = logger.backfill_market_drift({}, dry_run=True)
+
+    mock_fetch.assert_called_once()
+    assert result["would_backfill"] == 1
+    assert result["rows"][0]["late_price"] == 0.10
+    with logger._db() as conn:
+        row = conn.execute("SELECT market_drift_pp FROM signals WHERE call_id='dry3'").fetchone()
+    assert row["market_drift_pp"] is None  # still never written
+
+
+def test_migration_adds_market_drift_pp_without_corrupting_existing_rows(tmp_path):
+    import sqlite3
+    db_file = str(tmp_path / "old_schema_phase4.db")
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, whale_detected INTEGER DEFAULT 0, whale_direction TEXT,
+            outcome TEXT, result TEXT, pnl_if_traded REAL, run_id TEXT
+        );
+    """)
+    conn.execute("INSERT INTO signals (call_id, ticker, direction) "
+                 "VALUES ('oldp4', 'KXOLDROWP4', 'YES')")
+    conn.commit()
+    conn.close()
+
+    old_db_path = logger.DB_PATH
+    try:
+        logger.DB_PATH = db_file
+        logger._init_db()
+        with logger._db() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(signals)").fetchall()}
+            assert "market_drift_pp" in cols
+            row = c.execute(
+                "SELECT ticker, market_drift_pp FROM signals WHERE call_id='oldp4'"
+            ).fetchone()
+            assert row["ticker"] == "KXOLDROWP4"
+            assert row["market_drift_pp"] is None
+    finally:
+        logger.DB_PATH = old_db_path
 
 
 def test_backfill_market_baseline_brier_fills_existing_resolved_rows(tmp_db):
@@ -2762,3 +3219,132 @@ def test_resolve_outcomes_stake_does_not_affect_pnl_if_traded(tmp_db):
         ).fetchone()
     assert row["pnl_if_traded"] == pytest.approx(0.70)  # YES at 0.30 resolves YES
     assert row["stake_size_hypothetical"] == pytest.approx(15.0)
+
+
+# ─── reasoning / sources persistence (GOAL_subscriber_report.md Phase 3) ─────
+#
+# reasoning is Claude's narrative (already in the live in-memory signal dict
+# before this migration existed); sources is the structured web-search list
+# core/llm.py's _extract_web_search_sources (Phase 2) attaches. Stored so past
+# picks/the track record/the digest can show them, not just the run that
+# produced them. sources is JSON-encoded (TEXT column, SQLite has no array
+# type) -- readers must go through report._coerce_sources, never assume it's
+# already a list. Threaded into both log_signal() and log_pass(), same
+# category precedent, since main.py builds one `signal` dict shared by both.
+
+def test_schema_includes_reasoning_and_sources(tmp_db):
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "reasoning" in cols
+    assert "sources" in cols
+
+
+def test_migration_adds_reasoning_sources_without_corrupting_existing_rows(tmp_path):
+    """
+    Construct a DB with the OLD (pre-Phase-3) schema, insert a row, run the
+    migration (_init_db), and confirm the row survives with the new columns
+    present and NULL (never backfilled, per the module docstring).
+    """
+    import sqlite3
+    db_file = str(tmp_path / "old_schema_phase3.db")
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, whale_detected INTEGER DEFAULT 0, whale_direction TEXT,
+            outcome TEXT, result TEXT, pnl_if_traded REAL, run_id TEXT
+        );
+    """)
+    conn.execute("INSERT INTO signals (call_id, ticker, direction) "
+                 "VALUES ('oldp3', 'KXOLDROWP3', 'YES')")
+    conn.commit()
+    conn.close()
+
+    old_db_path = logger.DB_PATH
+    try:
+        logger.DB_PATH = db_file
+        logger._init_db()
+        with logger._db() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(signals)").fetchall()}
+            assert "reasoning" in cols
+            assert "sources" in cols
+            row = c.execute(
+                "SELECT ticker, reasoning, sources FROM signals WHERE call_id='oldp3'"
+            ).fetchone()
+            assert row["ticker"] == "KXOLDROWP3"  # pre-existing column untouched
+            assert row["reasoning"] is None
+            assert row["sources"] is None
+    finally:
+        logger.DB_PATH = old_db_path
+
+
+def test_migration_idempotent_for_reasoning_sources(tmp_db):
+    """Running _init_db() again (simulating a second process start) must not
+    error or duplicate the columns."""
+    logger._init_db()
+    logger._init_db()
+    with logger._db() as conn:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()]
+    assert cols.count("reasoning") == 1
+    assert cols.count("sources") == 1
+
+
+def test_log_signal_stores_reasoning_and_sources(tmp_db):
+    """reasoning (plain text) and sources (JSON-encoded list) round-trip
+    through log_signal exactly as core/llm.py's scoring functions produce
+    them -- a real list of {url, title, age} dicts, not a pre-serialized
+    string."""
+    import json
+    sig = {
+        "ticker": "KXP3A", "title": "Phase 3 test",
+        "market_price": 0.30, "our_estimate": 0.55, "edge": 0.25,
+        "direction": "YES", "confidence": "HIGH", "run_id": "test",
+        "reasoning": "Confirmed by a primary filing this week.",
+        "sources": [{"url": "https://reuters.com/x", "title": "Reuters", "age": "2 days ago"}],
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT reasoning, sources FROM signals WHERE ticker='KXP3A'"
+        ).fetchone()
+    assert row is not None
+    assert row["reasoning"] == "Confirmed by a primary filing this week."
+    stored_sources = json.loads(row["sources"])
+    assert stored_sources == [{"url": "https://reuters.com/x", "title": "Reuters", "age": "2 days ago"}]
+
+
+def test_log_signal_sources_defaults_to_empty_json_array_when_absent(tmp_db):
+    sig = {
+        "ticker": "KXP3B", "title": "No sources",
+        "market_price": 0.30, "our_estimate": 0.45, "edge": 0.15,
+        "direction": "YES", "confidence": "MED", "run_id": "test",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT reasoning, sources FROM signals WHERE ticker='KXP3B'"
+        ).fetchone()
+    assert row["reasoning"] == ""
+    assert row["sources"] == "[]"
+
+
+def test_log_pass_stores_reasoning_and_sources(tmp_db):
+    """PASS rows get the same treatment as calls -- main.py builds one shared
+    `signal` dict passed to both log_signal and log_pass."""
+    import json
+    sig = {
+        "ticker": "KXP3PASS", "title": "Pass with reasoning",
+        "market_price": 0.50, "our_estimate": 0.50, "edge": 0.0,
+        "confidence": "LOW", "run_id": "test",
+        "reasoning": "No clean edge found.",
+        "sources": [{"url": "https://ap.org/y", "title": "AP"}],
+    }
+    logger.log_pass(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT direction, reasoning, sources FROM signals WHERE ticker='KXP3PASS'"
+        ).fetchone()
+    assert row["direction"] == "PASS"
+    assert row["reasoning"] == "No clean edge found."
+    assert json.loads(row["sources"]) == [{"url": "https://ap.org/y", "title": "AP"}]
