@@ -162,13 +162,21 @@ def test_real_reasoning_used_when_present():
                      reasoning="Confirmed by a primary-source filing dated this week.")]
     out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
     assert "Confirmed by a primary-source filing dated this week." in out
-    assert "Full written analysis renders here" not in out
+    assert "We don't have a saved write-up for this one yet" not in out
 
 
 def test_placeholder_analysis_when_reasoning_absent():
+    """
+    backlog: subscriber-report-rework-2026-08. Was "Full written analysis
+    renders here once reasoning is persisted per signal" -- an internal
+    implementation note (referencing the DB persistence mechanism) leaking
+    into subscriber-facing copy. Still says nothing was saved for this call,
+    but reads like a product, not a TODO.
+    """
     signals = [_sig(ticker="KXA", direction="YES", confidence="HIGH")]
     out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
-    assert "Full written analysis renders here once reasoning is persisted per signal." in out
+    assert "We don't have a saved write-up for this one yet" in out
+    assert "renders here once reasoning is persisted" not in out
 
 
 def test_sources_checked_freeform_never_rendered_as_link():
@@ -512,3 +520,136 @@ def test_output_is_well_formed_html():
     checker.feed(out)
     assert checker.stack == [], f"unclosed tags: {checker.stack}"
     assert checker.mismatches == [], f"mismatched close tags: {checker.mismatches}"
+
+
+# ─── Whale / smart-money corroboration (subscriber-report-rework-2026-08) ──────
+#
+# whale_detected/whale_direction/whale_max_trade_size/smart_money_count/
+# smart_money_dir are all computed on every signal in main.py, but
+# _rank_top_picks never carried them into the pick view model at all --
+# same class of gap as main.py's own heuristic_label omission fixed the
+# same day (db-audit-2026-08). Watch items bypass _rank_top_picks entirely
+# (raw signal dicts), so they never needed the carry-through fix, just the
+# rendering.
+
+def test_corroboration_note_agrees_with_call_direction():
+    note = report._subscriber_corroboration_note(
+        call_direction="YES", whale_detected=True, whale_direction="YES",
+        smart_money_count=0, smart_money_dir=None,
+    )
+    assert note is not None
+    assert "same side as this call" in note["text"]
+
+
+def test_corroboration_note_conflicts_with_call_direction():
+    note = report._subscriber_corroboration_note(
+        call_direction="YES", whale_detected=True, whale_direction="NO",
+        smart_money_count=0, smart_money_dir=None,
+    )
+    assert note is not None
+    assert "opposite side of this call" in note["text"]
+
+
+def test_corroboration_note_prefers_whale_over_smart_money_when_both_present():
+    note = report._subscriber_corroboration_note(
+        call_direction="YES", whale_detected=True, whale_direction="YES",
+        smart_money_count=3, smart_money_dir="YES",
+    )
+    assert note is not None
+    assert "large trader" in note["text"]
+    assert "historically sharp" not in note["text"]
+
+
+def test_corroboration_note_falls_back_to_smart_money_when_no_whale():
+    note = report._subscriber_corroboration_note(
+        call_direction="YES", whale_detected=False, whale_direction=None,
+        smart_money_count=2, smart_money_dir="YES",
+    )
+    assert note is not None
+    assert "2 historically sharp traders" in note["text"]
+    assert "same side as this call" in note["text"]
+
+
+def test_corroboration_note_singular_trader_grammar():
+    note = report._subscriber_corroboration_note(
+        call_direction="NO", whale_detected=False, whale_direction=None,
+        smart_money_count=1, smart_money_dir="NO",
+    )
+    assert note is not None
+    assert "1 historically sharp trader " in note["text"]  # not "traders"
+
+
+def test_corroboration_note_none_when_no_signal_at_all():
+    note = report._subscriber_corroboration_note(
+        call_direction="YES", whale_detected=False, whale_direction=None,
+        smart_money_count=0, smart_money_dir=None,
+    )
+    assert note is None
+
+
+def test_corroboration_note_watch_item_has_no_agree_conflict_framing():
+    """call_direction=None (a watch item, no call made) states the fact
+    plainly -- there's nothing to agree or conflict with."""
+    note = report._subscriber_corroboration_note(
+        call_direction=None, whale_detected=True, whale_direction="YES",
+        smart_money_count=0, smart_money_dir=None,
+    )
+    assert note is not None
+    assert "same side" not in note["text"]
+    assert "opposite side" not in note["text"]
+    assert "hasn't cleared our own bar to call yet" in note["text"]
+
+
+def test_pick_renders_whale_pill_and_band_when_corroborated():
+    signals = [_sig(ticker="KXWHALE", direction="YES", confidence="HIGH",
+                     whale_detected=True, whale_direction="YES")]
+    out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
+    assert 'tag-whale">Smart money</span>' in out
+    assert "same side as this call" in out
+
+
+def test_pick_omits_whale_pill_when_not_corroborated():
+    # "tag-whale" alone would also match the CSS class definition in the
+    # <style> block, which is always present -- check for the actual
+    # rendered pill markup, not just the class name existing anywhere.
+    signals = [_sig(ticker="KXPLAIN", direction="YES", confidence="HIGH")]
+    out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
+    assert 'tag tag-whale' not in out
+
+
+def test_watch_item_renders_whale_pill_when_corroborated():
+    signals = [_sig(ticker="KXWATCHWHALE", direction="PASS", confidence="LOW",
+                     whale_detected=True, whale_direction="NO")]
+    out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
+    assert 'tag-whale">Smart money</span>' in out
+    assert "hasn't cleared our own bar to call yet" in out
+
+
+# ─── Heuristic-label-specific "Why flagged" copy ───────────────────────────────
+
+def test_why_flagged_uses_heuristic_label_when_present():
+    label, text = report._subscriber_why_flagged("HEURISTIC", "IPO announcement")
+    assert "IPO timing questions" in text
+
+
+def test_why_flagged_falls_back_to_bare_label_when_not_in_gloss():
+    """A heuristic_label with no entry in _SUBSCRIBER_HEURISTIC_GLOSS still
+    produces a specific sentence (using the bare label text, already fairly
+    plain English), not silence or a crash."""
+    label, text = report._subscriber_why_flagged("HEURISTIC", "government shutdown avoided")
+    assert "government shutdown avoided" in text
+
+
+def test_why_flagged_generic_when_no_heuristic_label():
+    """No heuristic_label at all (e.g. an older signal from before
+    db-audit-2026-08's main.py fix) falls back to the original generic
+    sentence -- never crashes, never blank."""
+    label, text = report._subscriber_why_flagged("HEURISTIC", None)
+    assert text == report.SUBSCRIBER_WHY_FLAGGED["HEURISTIC"][1]
+
+
+def test_why_flagged_non_heuristic_flag_path_unaffected():
+    """DRIFT/EDGE/etc. never had per-label specificity and don't gain any --
+    heuristic_label is only meaningful for HEURISTIC-flagged picks."""
+    label, text = report._subscriber_why_flagged("DRIFT", "some heuristic label")
+    assert text == report.SUBSCRIBER_WHY_FLAGGED["DRIFT"][1]

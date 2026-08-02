@@ -61,6 +61,88 @@ SUBSCRIBER_WHY_FLAGGED = {
 }
 _SUBSCRIBER_WHY_FALLBACK = ("Model estimate.", "Our own read of the evidence differs from the market's price.")
 
+# subscriber-report-rework-2026-08: plain-English gloss for a HEURISTIC-flagged
+# pick's specific heuristic_label, so "Why flagged" says something more
+# specific than a fully generic sentence when we know which pattern actually
+# matched (heuristic_label is reliably populated for new signals as of
+# db-audit-2026-08's main.py fix -- see BACKLOG.md). Deliberately NOT a
+# complete list of every _HEURISTIC_RULES label in core/scanner.py -- falls
+# back to the bare label text (already fairly plain English, e.g. "IPO
+# announcement") for anything not enumerated here, rather than blocking this
+# feature on keeping two files in permanent lockstep.
+_SUBSCRIBER_HEURISTIC_GLOSS = {
+    "competition win":              "many-entrant competitions",
+    "competition/award ranking":    "competition and award questions",
+    "entertainment award":          "entertainment award questions",
+    "sports award":                 "sports award questions",
+    "first named storm":            "“first named storm” questions",
+    "hurricane category ladder":    "storm-intensity questions",
+    "IPO announcement":             "IPO timing questions",
+}
+
+
+def _subscriber_why_flagged(flag_path: str, heuristic_label: "str | None") -> tuple[str, str]:
+    """
+    Returns (why_label, why_text) for the "Why flagged" band. Same lookup as
+    SUBSCRIBER_WHY_FLAGGED, except the HEURISTIC case is made specific to the
+    actual heuristic_label when one is known, instead of a single sentence
+    covering every heuristic pattern in the table alike.
+    """
+    why_label, why_text = SUBSCRIBER_WHY_FLAGGED.get(flag_path, _SUBSCRIBER_WHY_FALLBACK)
+    if flag_path == "HEURISTIC" and heuristic_label:
+        gloss = _SUBSCRIBER_HEURISTIC_GLOSS.get(heuristic_label, heuristic_label)
+        why_text = (
+            f"Markets in {gloss} have moved a certain, predictable way often "
+            f"enough that the current price looks out of step with that history."
+        )
+    return why_label, why_text
+
+
+def _subscriber_corroboration_note(
+    call_direction: "str | None",
+    whale_detected: bool,
+    whale_direction: "str | None",
+    smart_money_count: int,
+    smart_money_dir: "str | None",
+) -> "dict | None":
+    """
+    subscriber-report-rework-2026-08: surfaces whale/smart-money corroboration
+    on subscriber picks and watch items -- previously computed on every
+    signal (main.py) but never carried into the subscriber view model at all.
+
+    Deliberately does NOT quote a dollar position size: whale_max_trade_size
+    is a contract count relative to that market's own average trade size
+    (see core/report.py's existing "Nx average" usage), not a reliable
+    dollar figure -- asserting a $ amount here would be a fabricated-precision
+    claim the GOAL doc's guardrails exist to prevent. Direction agreement vs.
+    conflict against our own call is the reliable, genuinely useful signal.
+
+    call_direction is None for "on the watch" items (no call was made, so
+    there is nothing to agree or conflict with) -- states the fact plainly
+    instead. Prefers whale data (a concrete single large trade) over the
+    smart-money cross-reference (an aggregate of tracked wallets) when both
+    are present, rather than combining into one more complex sentence.
+    Returns None when neither signal fired.
+    """
+    if whale_detected and whale_direction in ("YES", "NO"):
+        source, direction = "A large trader", whale_direction
+    elif smart_money_count > 0 and smart_money_dir in ("YES", "NO"):
+        n = smart_money_count
+        source = f"{n} historically sharp trader{'s' if n != 1 else ''}"
+        direction = smart_money_dir
+    else:
+        return None
+
+    if call_direction is None:
+        text = (f"{source} moved {direction} on this one recently — it "
+                 f"hasn't cleared our own bar to call yet.")
+    elif direction == call_direction:
+        text = f"{source} is positioned {direction} here too — the same side as this call."
+    else:
+        text = (f"{source} is positioned {direction} here — the opposite "
+                 f"side of this call, worth watching closely.")
+    return {"label": "Smart money", "text": text}
+
 
 # ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -983,6 +1065,17 @@ def _rank_top_picks(signals: list[dict], n: int = 3) -> list[dict]:
             # sources_checked strings, which must never be rendered as a link.
             "reasoning":     s.get("reasoning", "") or "",
             "sources":       _coerce_sources(s.get("sources")),
+            # subscriber-report-rework-2026-08: heuristic_label and the whale/
+            # smart-money fields are all computed upstream in scanner.score_market()
+            # / main.py's signal dict exactly like every field above, but were
+            # never copied into this dict -- same class of gap as main.py's own
+            # heuristic_label omission fixed earlier the same day (db-audit-2026-08).
+            "heuristic_label":     s.get("heuristic_label"),
+            "whale_detected":      bool(s.get("whale_detected")),
+            "whale_direction":     s.get("whale_direction"),
+            "whale_max_trade_size": s.get("whale_max_trade_size"),
+            "smart_money_count":   s.get("smart_money_count") or 0,
+            "smart_money_dir":     s.get("smart_money_dir"),
         })
     return picks
 
@@ -1060,7 +1153,14 @@ def _subscriber_pick_view_model(pick: dict) -> dict:
     gap = abs(est_pct - mkt_pct)
     lo, hi = min(mkt_pct, est_pct), max(mkt_pct, est_pct)
     fp = pick.get("flag_path") or ""
-    why_label, why_text = SUBSCRIBER_WHY_FLAGGED.get(fp, _SUBSCRIBER_WHY_FALLBACK)
+    why_label, why_text = _subscriber_why_flagged(fp, pick.get("heuristic_label"))
+    corroboration = _subscriber_corroboration_note(
+        call_direction=direction,
+        whale_detected=pick.get("whale_detected", False),
+        whale_direction=pick.get("whale_direction"),
+        smart_money_count=pick.get("smart_money_count", 0),
+        smart_money_dir=pick.get("smart_money_dir"),
+    )
 
     url = None
     try:
@@ -1072,10 +1172,16 @@ def _subscriber_pick_view_model(pick: dict) -> dict:
     if reasoning:
         analysis = _html.escape(reasoning)
     else:
+        # subscriber-report-rework-2026-08: was "Full written analysis renders
+        # here once reasoning is persisted per signal" -- an internal
+        # implementation note (referencing the DB persistence mechanism)
+        # leaking into subscriber-facing copy. This still says nothing was
+        # saved for this specific call, but reads like a product, not a TODO.
         analysis = (
-            f"Full written analysis renders here once reasoning is persisted per signal. "
-            f"Right now the market prices this at {mkt_pct}% while our model estimates "
-            f"{est_pct}% — a {gap}-point gap in the {direction} direction."
+            f"We don't have a saved write-up for this one yet — the numbers "
+            f"above are the read: the market prices this at {mkt_pct}% while "
+            f"our model estimates {est_pct}%, a {gap}-point gap in the "
+            f"{direction} direction."
         )
 
     return {
@@ -1083,6 +1189,7 @@ def _subscriber_pick_view_model(pick: dict) -> dict:
         "mkt_pct": mkt_pct, "est_pct": est_pct, "gap": gap,
         "fill_left": lo, "fill_width": hi - lo,
         "why_label": why_label, "why_text": why_text,
+        "corroboration": corroboration,
         "conviction": SUBSCRIBER_CONVICTION.get(pick.get("confidence", "LOW"), "Low conviction"),
         "tag_class": "tag-yes" if direction == "YES" else "tag-no",
         "tag_label": f"Buy {direction}",
@@ -1106,12 +1213,21 @@ def _render_subscriber_pick(p: dict) -> str:
     else:
         src_html = '    <div class="src-pending">No sources cited for this call.</div>'
 
+    corrob = p.get("corroboration")
+    corrob_pill = '\n      <span class="tag tag-whale">Smart money</span>' if corrob else ""
+    corrob_band = (
+        f'\n\n    <div class="why why-whale">\n'
+        f'      <div class="wl">{corrob["label"]}</div>\n'
+        f'      <div class="wt">{corrob["text"]}</div>\n'
+        f'    </div>'
+    ) if corrob else ""
+
     return f"""
   <article class="pick">
     <div class="pick-head">
       <span class="rank">{p['rank']:02d}</span>
       <span class="tag {p['tag_class']}">{p['tag_label']}</span>
-      <span class="tag tag-conf">{p['conviction']}</span>
+      <span class="tag tag-conf">{p['conviction']}</span>{corrob_pill}
       <span class="resolves">Resolves {p['close_fmt']}</span>
     </div>
 
@@ -1135,7 +1251,7 @@ def _render_subscriber_pick(p: dict) -> str:
     <div class="why">
       <div class="wl">Why flagged</div>
       <div class="wt"><b>{p['why_label']}</b> {p['why_text']}</div>
-    </div>
+    </div>{corrob_band}
 
     <p class="analysis">{p['analysis']}</p>
 
@@ -1153,14 +1269,30 @@ def _render_subscriber_watch(w: dict) -> str:
     est_pct = round(est * 100)
     close_fmt = _subscriber_fmt_close(w.get("close_time") or w.get("close_time_raw") or "")
     question = _html.escape(w.get("title") or "")
+
+    # subscriber-report-rework-2026-08: watch items are raw signal dicts (not
+    # routed through _rank_top_picks), so whale/smart-money fields are
+    # already present here -- no carry-through fix needed, unlike picks.
+    # call_direction=None: no call was made on a watch item, so there's
+    # nothing to agree or conflict with -- states the fact plainly instead.
+    corrob = _subscriber_corroboration_note(
+        call_direction=None,
+        whale_detected=bool(w.get("whale_detected")),
+        whale_direction=w.get("whale_direction"),
+        smart_money_count=w.get("smart_money_count") or 0,
+        smart_money_dir=w.get("smart_money_dir"),
+    )
+    corrob_pill = '\n      <span class="tag tag-whale">Smart money</span>' if corrob else ""
+    corrob_line = f'\n    <div class="watch-note">{corrob["text"]}</div>' if corrob else ""
+
     return f"""
   <div class="watch">
     <div class="wmeta">
-      <span class="tag tag-no">No position</span>
+      <span class="tag tag-no">No position</span>{corrob_pill}
       <span class="resolves" style="margin-left:0;">Resolves {close_fmt}</span>
     </div>
     <h3 class="wq">{question}</h3>
-    <div class="watch-note">Market's at {mkt_pct}%, we lean {est_pct}%. The edge isn't clean enough to call yet — <b>holding off</b> until the picture sharpens.</div>
+    <div class="watch-note">Market's at {mkt_pct}%, we lean {est_pct}%. The edge isn't clean enough to call yet — <b>holding off</b> until the picture sharpens.</div>{corrob_line}
   </div>"""
 
 
@@ -1178,6 +1310,7 @@ _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
     --paper:#FBFAF7; --ink:#15181E; --ink-soft:#525A67; --ink-faint:#949AA5;
     --line:#E7E4DC; --line-soft:#EFEDE7; --slate:#1C2A3A;
     --edge:#0B6E52; --edge-soft:#E7F0EB; --amber:#9A5A12; --amber-soft:#F4ECDE;
+    --whale:#2F4C8C; --whale-soft:#E8ECF5;
     --serif:"Newsreader",Georgia,serif; --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     --mono:"IBM Plex Mono",ui-monospace,Consolas,Menlo,monospace;
     --sp-3:24px; --sp-6:48px;
@@ -1209,6 +1342,7 @@ _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
   .tag-yes{{color:var(--edge); background:var(--edge-soft);}}
   .tag-no{{color:var(--amber); background:var(--amber-soft);}}
   .tag-conf{{color:var(--ink-soft); background:var(--line-soft); border:1px solid var(--line);}}
+  .tag-whale{{color:var(--whale); background:var(--whale-soft);}}
   .resolves{{margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:.3px;}}
   .question{{font-family:var(--serif); font-weight:500; font-size:25px; line-height:1.28; letter-spacing:-.3px; margin:0 0 24px;}}
   .meter{{margin:0 0 26px;}}
@@ -1230,6 +1364,8 @@ _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
   .why{{display:flex; gap:14px; align-items:baseline; padding:16px 0; border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); margin-bottom:22px;}}
   .why .wl{{flex-shrink:0; font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink); width:96px; padding-top:2px;}}
   .why .wt{{font-size:14.5px; color:var(--ink-soft); line-height:1.5;}}
+  .why-whale{{border-top:none; margin-top:-22px; padding-top:0;}}
+  .why-whale .wl{{color:var(--whale);}}
   .why .wt b{{color:var(--ink); font-weight:500;}}
   .analysis{{font-size:16px; line-height:1.68; color:var(--ink); margin-bottom:26px;}}
   .src-head{{font-family:var(--mono); font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--ink-faint); margin-bottom:2px;}}
