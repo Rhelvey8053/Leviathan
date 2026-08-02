@@ -12,6 +12,8 @@ data/gate_state.json
 data/llm_daily_cost.json
 data/heartbeat_state.json
 data/leviathan.db
+data/leviathan.db-wal
+data/leviathan.db-shm
 data/leviathan.db.bak*
 data/db_backups/*
 subscribers.json
@@ -21,3 +23,8 @@ __pycache__/
 .pytest_cache/
 .claude/
 data/snapshots/*.json
+data/.leviathan.db-litestream/
+tools/litestream.exe
+tools/LICENSE
+tools/README.md
+tools/etc/

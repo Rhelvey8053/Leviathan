@@ -1,6 +1,7 @@
 import base64
 import os
 import time
+from datetime import datetime, timedelta, timezone
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
@@ -264,6 +265,153 @@ def fetch_event_markets(config: dict, event_ticker: str) -> list[dict]:
     )
     resp.raise_for_status()
     return resp.json().get("markets", [])
+
+
+def fetch_event_detail(config: dict, event_ticker: str) -> dict:
+    """
+    Returns a single event's detail (series_ticker, category, etc.) via
+    /events/{event_ticker} — used to backfill those two fields onto
+    fetch_near_dated_markets()'s results, since the /markets object itself
+    doesn't carry them (confirmed empirically) the way fetch_events()'s
+    per-event loop already attaches them from the event object.
+    """
+    base_url = _get_base_url(config)
+    path = f"/events/{event_ticker}"
+    resp = requests.get(
+        f"{base_url}{path}",
+        headers=_auth_headers("GET", _vpath(path)),
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json().get("event", {})
+
+
+def fetch_near_dated_markets(
+    config: dict, max_days: int = 14, target_count: int = 200, max_pages: int = 30,
+) -> list[dict]:
+    """
+    Returns open markets closing within max_days, fetched directly via
+    /markets?max_close_ts=... .
+
+    Why this exists: fetch_events() (the events-catalog path main.py's
+    primary market fetch and analysis/snapshot_markets.py both use)
+    structurally never surfaces near-dated markets. The /events object
+    carries no close_time field at all, and querying it with max_close_ts
+    has no effect (confirmed empirically — it silently returns whatever
+    events the default ordering picks, dominated by century-scale novelty
+    markets like Mars colonization/next-Pope/NATO-Sec-Gen). Confirmed
+    2026-08-01: of 2722 markets from a live events-catalog fetch, 0 closed
+    within 30 days. resolve_first.py (built specifically to accelerate
+    resolved-signal count toward the calibration gates) was consequently
+    starved — 1 row logged in its entire history — despite running
+    successfully every day, because its input snapshot never contained
+    anything for it to select.
+
+    /markets?max_close_ts=... DOES genuinely filter by close time
+    (confirmed empirically), but /markets?status=open directly is ~98%
+    dominated by the KXMVE multi-event parlay flood (confirmed: 1966 of
+    2000 raw entries in one live sample) — the same flood fetch_events()
+    already routes around for the long-horizon path via its own event-based
+    fetch shape. Excluded here by ticker prefix.
+
+    Queries in 1-day min_close_ts/max_close_ts sub-windows (hurricane-
+    recalibration follow-up finding, 2026-08-02) rather than one flat
+    max_close_ts query, because the flood's density is wildly uneven across
+    the window, not evenly ~98% throughout: live-sampled at the 0-14 day
+    horizon, day-buckets ranged from ~0% flood (8-9 days out: 1 flood / 199
+    real) to ~99.5% flood (10-14 days out: 198-199 flood / 1-2 real, PER
+    200-RESULT PAGE, not exhausted even at 200 pages / 40k markets sampled
+    in that one bucket). A single unbounded max_close_ts=14d query returned
+    1 real market total even at 200 pages, because within that flat query
+    the flood apparently never runs out before the page cap does. Chunking
+    by day bounds each day's own page budget independently, so one
+    flood-saturated day can't starve every other day's real inventory the
+    way a single shared budget did.
+
+    max_pages is a hard cap on total HTTP calls across ALL day-chunks
+    combined (same external contract as before chunking), split into a
+    small per-chunk cap so a single bad day can't consume the whole budget.
+    Stops overall once target_count non-flood markets are collected or the
+    total page budget is exhausted, whichever comes first.
+
+    series_ticker/category are backfilled via one fetch_event_detail() call
+    per UNIQUE event_ticker in the batch (many near-dated markets — e.g.
+    several prop bets on one baseball game — share a single event_ticker,
+    so this is far cheaper than one call per market), matching the same
+    two fields main.py's events-catalog loop already attaches from the
+    event object it already has in hand.
+    """
+    base_url = _get_base_url(config)
+    path = "/markets"
+    now = datetime.now(timezone.utc)
+    exclude_prefixes = tuple(
+        config.get("markets", {}).get("near_dated_exclude_prefixes", ["KXMVE"])
+    )
+
+    # Per-chunk page cap: keeps one flood-saturated day from consuming the
+    # entire max_pages budget. 5 is generous relative to what live sampling
+    # needed -- flood-light days surfaced real markets on page 1, and
+    # flood-saturated days stayed ~100% flood well past page 5 too, so more
+    # pages there wouldn't have helped.
+    CHUNK_MAX_PAGES = 5
+
+    collected: list[dict] = []
+    seen_tickers: set[str] = set()
+    pages = 0
+    day = 0
+    while day < max_days and len(collected) < target_count and pages < max_pages:
+        chunk_min_ts = int((now + timedelta(days=day)).timestamp())
+        chunk_max_ts = int((now + timedelta(days=day + 1)).timestamp())
+        day += 1
+
+        cursor = None
+        chunk_pages = 0
+        while (chunk_pages < CHUNK_MAX_PAGES and pages < max_pages
+               and len(collected) < target_count):
+            params = {
+                "status": "open", "limit": 200,
+                "min_close_ts": chunk_min_ts, "max_close_ts": chunk_max_ts,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            resp = requests.get(
+                f"{base_url}{path}",
+                headers=_auth_headers("GET", _vpath(path)),
+                params=params,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            page = data.get("markets", [])
+            pages += 1
+            chunk_pages += 1
+            if not page:
+                break
+            for m in page:
+                t = m.get("ticker", "")
+                if t and t not in seen_tickers and not t.startswith(exclude_prefixes):
+                    seen_tickers.add(t)
+                    collected.append(m)
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+
+    collected = collected[:target_count]
+
+    event_tickers = {m.get("event_ticker") for m in collected if m.get("event_ticker")}
+    event_meta: dict[str, tuple[str, str]] = {}
+    for et in event_tickers:
+        try:
+            ev = fetch_event_detail(config, et)
+            event_meta[et] = (ev.get("series_ticker", ""), ev.get("category", ""))
+        except Exception:
+            event_meta[et] = ("", "")
+    for m in collected:
+        series_ticker, category = event_meta.get(m.get("event_ticker"), ("", ""))
+        m["series_ticker"] = series_ticker
+        m["category"]      = category
+
+    return collected
 
 
 def fetch_settled_events(config: dict, max_fetch: int = 2000) -> list[dict]:

@@ -59,6 +59,34 @@ def _make_response(blocks, stop_reason="tool_use"):
     return resp
 
 
+def _make_search_result_item(url: str, title: str = "A title", page_age: str = "2 days ago"):
+    item = MagicMock()
+    item.type = "web_search_result"
+    item.url = url
+    item.title = title
+    item.page_age = page_age
+    return item
+
+
+def _make_web_search_tool_result_block(items):
+    """A successful web_search_tool_result block -- .content is a list of results."""
+    block = MagicMock()
+    block.type = "web_search_tool_result"
+    block.content = items
+    return block
+
+
+def _make_web_search_error_block():
+    """A failed web_search_tool_result block -- .content is an error object, not a list."""
+    block = MagicMock()
+    block.type = "web_search_tool_result"
+    error = MagicMock()
+    error.type = "web_search_tool_result_error"
+    error.error_code = "max_uses_exceeded"
+    block.content = error
+    return block
+
+
 def _make_config(backend="api"):
     return {
         "llm": {
@@ -67,6 +95,73 @@ def _make_config(backend="api"):
             "max_web_searches": 4,
         }
     }
+
+
+# ── _extract_web_search_sources tests (GOAL_subscriber_report.md Phase 2) ────
+
+class TestExtractWebSearchSources:
+
+    def test_no_web_search_blocks_returns_empty_list(self):
+        from core.llm import _extract_web_search_sources
+        block = _make_tool_use_block("record_scores", {"scores": []})
+        resp  = _make_response([block])
+        assert _extract_web_search_sources(resp) == []
+
+    def test_single_result_extracted_with_url_title_age(self):
+        from core.llm import _extract_web_search_sources
+        item  = _make_search_result_item("https://reuters.com/a", title="Reuters piece", page_age="1 day ago")
+        block = _make_web_search_tool_result_block([item])
+        resp  = _make_response([block])
+        sources = _extract_web_search_sources(resp)
+        assert sources == [{"url": "https://reuters.com/a", "title": "Reuters piece", "age": "1 day ago"}]
+
+    def test_error_result_block_skipped_not_raised(self):
+        from core.llm import _extract_web_search_sources
+        error_block = _make_web_search_error_block()
+        good_item   = _make_search_result_item("https://ap.org/b")
+        good_block  = _make_web_search_tool_result_block([good_item])
+        resp = _make_response([error_block, good_block])
+        sources = _extract_web_search_sources(resp)
+        assert sources == [{"url": "https://ap.org/b", "title": "A title", "age": "2 days ago"}]
+
+    def test_dedupes_by_url_preserving_first_seen(self):
+        from core.llm import _extract_web_search_sources
+        item1 = _make_search_result_item("https://x.com/1", title="First")
+        item2 = _make_search_result_item("https://x.com/1", title="Duplicate")
+        item3 = _make_search_result_item("https://x.com/2", title="Second")
+        block = _make_web_search_tool_result_block([item1, item2, item3])
+        resp  = _make_response([block])
+        sources = _extract_web_search_sources(resp)
+        assert len(sources) == 2
+        assert sources[0]["title"] == "First"
+        assert sources[1]["url"] == "https://x.com/2"
+
+    def test_capped_at_max_sources_per_signal(self):
+        from core.llm import _extract_web_search_sources, MAX_SOURCES_PER_SIGNAL
+        items = [_make_search_result_item(f"https://x.com/{i}") for i in range(10)]
+        block = _make_web_search_tool_result_block(items)
+        resp  = _make_response([block])
+        sources = _extract_web_search_sources(resp)
+        assert len(sources) == MAX_SOURCES_PER_SIGNAL
+        assert sources[0]["url"] == "https://x.com/0"
+
+    def test_merges_across_two_responses(self):
+        """Both the initial and forced call are walked -- a search can happen on either."""
+        from core.llm import _extract_web_search_sources
+        block1 = _make_web_search_tool_result_block([_make_search_result_item("https://a.com")])
+        block2 = _make_web_search_tool_result_block([_make_search_result_item("https://b.com")])
+        resp1  = _make_response([block1])
+        resp2  = _make_response([block2])
+        sources = _extract_web_search_sources(resp1, resp2)
+        urls = [s["url"] for s in sources]
+        assert urls == ["https://a.com", "https://b.com"]
+
+    def test_none_response_skipped(self):
+        from core.llm import _extract_web_search_sources
+        block = _make_web_search_tool_result_block([_make_search_result_item("https://a.com")])
+        resp  = _make_response([block])
+        sources = _extract_web_search_sources(resp, None)
+        assert len(sources) == 1
 
 
 # ── score_via_api tests ───────────────────────────────────────────────────────
@@ -265,6 +360,69 @@ class TestScoreViaApi:
         assert "KXTEST-01" in tickers
         assert "KXTEST-03" in tickers
 
+    def test_web_search_sources_attached_to_every_score_in_batch(self):
+        """Search results aren't attributable to one market within a batch call,
+        so the same sources list is attached to every score (GOAL_subscriber_
+        report.md Phase 2)."""
+        scores_input = [_valid_score(ticker="KXTEST-01"), _valid_score(ticker="KXTEST-02")]
+        search_item  = _make_search_result_item("https://reuters.com/x", title="Reuters")
+        search_block = _make_web_search_tool_result_block([search_item])
+        score_block  = _make_tool_use_block("record_scores", {"scores": scores_input})
+        resp = _make_response([search_block, score_block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            from core.llm import score_via_api
+            scores, _ = score_via_api("sys", "user", _make_config())
+
+        assert len(scores) == 2
+        for s in scores:
+            assert s["sources"] == [{"url": "https://reuters.com/x", "title": "Reuters", "age": "2 days ago"}]
+
+    def test_no_web_search_yields_empty_sources_not_missing_key(self):
+        score = _valid_score()
+        block = _make_tool_use_block("record_scores", {"scores": [score]})
+        resp  = _make_response([block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            from core.llm import score_via_api
+            scores, _ = score_via_api("sys", "user", _make_config())
+
+        assert scores[0]["sources"] == []
+
+    def test_sources_merged_across_forced_call(self):
+        """Sources found on the first (unforced) response must not be lost
+        when a second call is needed to force record_scores."""
+        first_item  = _make_search_result_item("https://first.com")
+        first_block = _make_web_search_tool_result_block([first_item])
+        text_block      = MagicMock()
+        text_block.type = "text"
+        text_block.name = None
+        first_resp = _make_response([first_block, text_block], stop_reason="end_turn")
+
+        score = _valid_score()
+        forced_item  = _make_search_result_item("https://second.com")
+        forced_block = _make_tool_use_block("record_scores", {"scores": [score]})
+        forced_resp  = _make_response([_make_web_search_tool_result_block([forced_item]), forced_block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.side_effect = [first_resp, forced_resp]
+
+            from core.llm import score_via_api
+            scores, _ = score_via_api("sys", "user", _make_config())
+
+        urls = [s["url"] for s in scores[0]["sources"]]
+        assert urls == ["https://first.com", "https://second.com"]
+
 
 # ── probe_via_api tests ───────────────────────────────────────────────────────
 
@@ -297,6 +455,25 @@ class TestProbeViaApi:
         assert result["ticker"] == "KXTEST-01"
         assert result["claude_estimate"] == 0.55
         assert "cost_usd" in token_info
+
+    def test_web_search_sources_attached(self):
+        """probe_via_api scores exactly one market per call, so attribution
+        is unambiguous -- unlike the batch score_via_api/score_blind_via_api."""
+        probe_input  = self._valid_probe_input()
+        search_item  = _make_search_result_item("https://ap.org/probe", title="AP")
+        search_block = _make_web_search_tool_result_block([search_item])
+        probe_block  = _make_tool_use_block("record_probe", probe_input)
+        resp = _make_response([search_block, probe_block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            from core.llm import probe_via_api
+            result, _ = probe_via_api("sys", "user", _make_config())
+
+        assert result["sources"] == [{"url": "https://ap.org/probe", "title": "AP", "age": "2 days ago"}]
 
     def test_force_tool_when_no_probe_block(self):
         """Forced second call when first response has no record_probe block."""
@@ -522,6 +699,23 @@ class TestScoreBlindViaApi:
         assert len(scores) == 1
         assert scores[0]["ticker"] == "KXTEST-01"
         assert "cost_usd" in token_info
+
+    def test_web_search_sources_attached(self):
+        score = _valid_blind_score()
+        search_item  = _make_search_result_item("https://bloomberg.com/y", title="Bloomberg")
+        search_block = _make_web_search_tool_result_block([search_item])
+        score_block  = _make_tool_use_block("record_blind_scores", {"scores": [score]})
+        resp = _make_response([search_block, score_block])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            from core.llm import score_blind_via_api
+            scores, _ = score_blind_via_api("sys", "user", _make_config())
+
+        assert scores[0]["sources"] == [{"url": "https://bloomberg.com/y", "title": "Bloomberg", "age": "2 days ago"}]
 
     def test_missing_required_field_raises(self):
         bad = _valid_blind_score()

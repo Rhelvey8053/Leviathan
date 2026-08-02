@@ -10,7 +10,9 @@ backend=api replaces the CLI subprocess in scorer.py with:
 
 Agentic loop: one API call with tool_choice="any" lets Claude search and then
 call record_scores. Web search is executed server-side by Anthropic so no
-client-side result handling is needed. If Claude reaches end_turn without calling
+client-side result handling is needed beyond reading the results back out of
+the response (_extract_web_search_sources, GOAL_subscriber_report.md Phase 2)
+to attach real source links. If Claude reaches end_turn without calling
 record_scores, a forced second call constrains tool_choice to record_scores only.
 
 _find_claude() is the canonical CLI binary finder — imported by scorer.py and
@@ -322,6 +324,58 @@ def _find_tool_use(response: Any, name: str) -> Any | None:
     return None
 
 
+# GOAL_subscriber_report.md Phase 2 — real source links, not placeholders.
+MAX_SOURCES_PER_SIGNAL = 4
+
+
+def _extract_web_search_sources(*responses: Any) -> list[dict]:
+    """
+    Collect real web_search_tool_result URLs from one or more API responses
+    as [{"url": ..., "title": ..., "age": ...}] -- structured and separate
+    from the model's freeform sources_checked self-report. core/report.py's
+    subscriber renderer only ever builds <a href> from this structured list,
+    never from sources_checked (see tests/test_subscriber_html.py's guardrail
+    test) -- this function is what makes that list non-empty for real.
+
+    Accepts one response for the common case, or two when _force_tool()
+    fired a second billed call -- both are walked, same reasoning as
+    _finalize_token_info pricing both (a search can happen on either call).
+    De-dupes by URL across all responses combined, preserves the order
+    results were first encountered in, caps at MAX_SOURCES_PER_SIGNAL.
+
+    A web_search_tool_result block's .content is a list of web_search_result
+    items on success, or a single error object (e.g. max_uses exceeded) on
+    failure -- error blocks are skipped rather than raised, since a failed
+    search shouldn't fail the whole scoring call.
+    """
+    seen_urls: set[str] = set()
+    sources: list[dict] = []
+    for response in responses:
+        if response is None:
+            continue
+        for block in response.content:
+            if getattr(block, "type", None) != "web_search_tool_result":
+                continue
+            content = getattr(block, "content", None)
+            if not isinstance(content, list):
+                continue  # web_search_tool_result_error -- skip, don't raise
+            for item in content:
+                if getattr(item, "type", None) != "web_search_result":
+                    continue
+                url = getattr(item, "url", None)
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                sources.append({
+                    "url": url,
+                    "title": getattr(item, "title", "") or "",
+                    "age": getattr(item, "page_age", None),
+                })
+                if len(sources) >= MAX_SOURCES_PER_SIGNAL:
+                    return sources
+    return sources
+
+
 def _validate_scores(scores: list[dict]) -> None:
     """Raise ValueError if any score dict is missing a required field or has a bad enum value."""
     for s in scores:
@@ -404,7 +458,11 @@ def score_via_api(
     Score markets via Anthropic Messages API with forced tool_choice structured output.
 
     Returns (scores, token_info) where:
-      scores     — list of dicts matching scorer.py RESPONSE_SCHEMA (8 required fields)
+      scores     — list of dicts matching scorer.py RESPONSE_SCHEMA (8 required fields),
+                   each with an added "sources" key: [{"url","title","age"}, ...] from
+                   real web_search_tool_result blocks (GOAL_subscriber_report.md Phase 2),
+                   shared across every score in the batch since search results aren't
+                   attributable to one specific market within a single API call.
       token_info — input_tokens, output_tokens, cache_creation/read tokens, cost_usd
 
     Web search (web_search_20250305) is executed server-side by Anthropic.
@@ -450,6 +508,9 @@ def score_via_api(
             if block is not None:
                 scores = block.input["scores"]
                 _validate_scores(scores)
+                sources = _extract_web_search_sources(response)
+                for s in scores:
+                    s["sources"] = sources
                 return scores, _finalize_token_info(response, model=model)
 
             # Claude finished without calling record_scores — force it
@@ -463,6 +524,9 @@ def score_via_api(
                 raise RuntimeError("score_via_api: forced record_scores returned no tool_use block")
             scores = block.input["scores"]
             _validate_scores(scores)
+            sources = _extract_web_search_sources(response, forced)
+            for s in scores:
+                s["sources"] = sources
             # Both calls are billed -- price the pair together, not just the forced one.
             return scores, _finalize_token_info(response, forced, model=model)
 
@@ -491,6 +555,9 @@ def score_blind_via_api(
     _check_cost_ceiling / _finalize_token_info path as every other metered
     call in this module, so blind-arm sampling counts against the same
     daily_cost_ceiling_usd as the main scan and replay-runner.
+
+    Each returned score also gets a "sources" key -- see score_via_api's
+    docstring; same structured/freeform separation from sources_checked.
     """
     _check_cost_ceiling(config)
 
@@ -527,6 +594,9 @@ def score_blind_via_api(
             if block is not None:
                 scores = block.input["scores"]
                 _validate_blind_scores(scores)
+                sources = _extract_web_search_sources(response)
+                for s in scores:
+                    s["sources"] = sources
                 return scores, _finalize_token_info(response, model=model)
 
             forced = _force_tool(
@@ -539,6 +609,9 @@ def score_blind_via_api(
                 raise RuntimeError("score_blind_via_api: forced record_blind_scores returned no tool_use block")
             scores = block.input["scores"]
             _validate_blind_scores(scores)
+            sources = _extract_web_search_sources(response, forced)
+            for s in scores:
+                s["sources"] = sources
             return scores, _finalize_token_info(response, forced, model=model)
 
         except (anthropic.APIError, anthropic.APITimeoutError) as e:
@@ -561,7 +634,9 @@ def probe_via_api(
     """
     Probe a single market via API with record_probe tool.
     Returns (probe_input_dict, token_info).
-    probe_input_dict keys: ticker, claude_estimate, predicted_direction, confidence, rationale.
+    probe_input_dict keys: ticker, claude_estimate, predicted_direction, confidence,
+    rationale, sources ([{"url","title","age"}, ...] from real web_search_tool_result
+    blocks -- unambiguous here since probe scores exactly one market per call).
     """
     _check_cost_ceiling(config)
 
@@ -594,7 +669,9 @@ def probe_via_api(
 
             block = _find_tool_use(response, "record_probe")
             if block is not None:
-                return block.input, _finalize_token_info(response, model=model)
+                probe_input = block.input
+                probe_input["sources"] = _extract_web_search_sources(response)
+                return probe_input, _finalize_token_info(response, model=model)
 
             forced = _force_tool(
                 client, model, system, messages,
@@ -603,8 +680,10 @@ def probe_via_api(
             block = _find_tool_use(forced, "record_probe")
             if block is None:
                 raise RuntimeError("probe_via_api: forced record_probe returned no tool_use block")
+            probe_input = block.input
+            probe_input["sources"] = _extract_web_search_sources(response, forced)
             # Both calls are billed -- price the pair together, not just the forced one.
-            return block.input, _finalize_token_info(response, forced, model=model)
+            return probe_input, _finalize_token_info(response, forced, model=model)
 
         except (anthropic.APIError, anthropic.APITimeoutError) as e:
             last_exc = e

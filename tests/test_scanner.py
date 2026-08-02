@@ -211,6 +211,31 @@ def test_no_keyword_match_kept():
     assert len(scanner.filter_markets([m], BASE_CFG)) == 1
 
 
+# ─── filter_markets: prop-market skill filter ────────────────────────────────
+
+def test_prop_market_prefix_dropped_by_default():
+    """KXMLBMENTION ('what will the announcers say') is excluded even with
+    no explicit config -- default applies without prop_market_exclude_prefixes set."""
+    m = _market(ticker="KXMLBMENTION-26AUG01MINSEA-WILD")
+    assert scanner.filter_markets([m], BASE_CFG) == []
+
+def test_prop_market_prefix_kept_when_not_excluded():
+    m = _market(ticker="KXWTACHALLENGERMATCH-26AUG01INGPRE-PRE")
+    assert len(scanner.filter_markets([m], BASE_CFG)) == 1
+
+def test_prop_market_custom_exclude_prefixes_from_config():
+    cfg = {"markets": {**BASE_CFG["markets"], "prop_market_exclude_prefixes": ["KXCUSTOMPROP"]}}
+    excluded = _market(ticker="KXCUSTOMPROP-DEF")
+    kept     = _market(ticker="KXMLBMENTION-DEF")  # not excluded under this custom list
+    result = scanner.filter_markets([excluded, kept], cfg)
+    assert [m["ticker"] for m in result] == ["KXMLBMENTION-DEF"]
+
+def test_prop_market_exclude_prefixes_empty_list_disables_filter():
+    cfg = {"markets": {**BASE_CFG["markets"], "prop_market_exclude_prefixes": []}}
+    m = _market(ticker="KXMLBMENTION-26AUG01MINSEA-WILD")
+    assert len(scanner.filter_markets([m], cfg)) == 1
+
+
 # ─── classify_time_horizon ───────────────────────────────────────────────────
 
 @pytest.mark.parametrize("days,expected", [
@@ -1047,10 +1072,10 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will the US impose a tariff on Canadian steel above 25%?", 0.40),
     ("Will Trump raise tariffs on China imports in Q3 2026?", 0.40),
     ("Will tariff rates on EU goods be reduced by end of 2026?", 0.40),
-    # Sports awards
-    ("Will Shohei Ohtani win the NL MVP in 2026?", 0.20),
-    ("Will Connor McDavid win the NHL MVP award?", 0.20),
-    ("Will the Heisman Trophy go to a running back?", 0.20),
+    # Sports awards (rate 0.04 -- see test_sports_award_recalibration)
+    ("Will Shohei Ohtani win the NL MVP in 2026?", 0.04),
+    ("Will Connor McDavid win the NHL MVP award?", 0.04),
+    ("Will the Heisman Trophy go to a running back?", 0.04),
     # Sports playoff qualification
     ("Will the New York Yankees make the playoffs in 2026?", 0.35),
     ("Will Manchester City qualify for the Champions League?", 0.35),
@@ -1098,8 +1123,10 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Unemployment without "rate" suffix
     ("Will unemployment be above 4.5% in June 2026?", 0.50),
     ("Will unemployment rise above 5% before Q4?", 0.50),
-    # Price levels — "hit $" form
-    ('Will Nvidia stock hit $200 before year end?', 0.35),
+    # Price levels — "hit $" form. price-threshold heuristic removed
+    # 2026-08-02 (price-threshold-recalibration) -- no longer has a
+    # generic base_rate, matches core.scanner.estimate_base_rate() default.
+    ('Will Nvidia stock hit $200 before year end?', None),
     # "gold top" now correctly classified as commodity price level (0.40), not generic (0.35)
     ('Will gold top $3,000 in 2026?', 0.40),
     # IPO — "go public" form
@@ -1126,7 +1153,7 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Labor strikes
     ("Will Hollywood writers go on strike again in 2026?", 0.30),
     ("Will the UAW announce a work stoppage in Q3 2026?", 0.30),
-    # Entertainment awards — must NOT hit the " win " catch-all (0.52)
+    # Entertainment awards — must NOT hit the " win " catch-all (0.08)
     ("Will Beyoncé win the Grammy for Album of the Year?", 0.20),
     ("Will the Oscars Academy Award go to a streaming film?", 0.20),
     ("Will the Golden Globe Award for Best Drama go to HBO?", 0.20),
@@ -1154,8 +1181,10 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Health / mortality
     ("Will the suspect die before trial in 2026?", 0.15),
     ("Will the 95-year-old still alive by December 2026?", 0.15),
-    # False positive guard — "stock above $150" must NOT hit stock index block
-    ("Will Apple stock above $150?", 0.35),            # generic "above $" → 0.35, not 0.50
+    # False positive guard — "stock above $150" must NOT hit stock index block.
+    # price-threshold heuristic removed 2026-08-02 (price-threshold-recalibration)
+    # -- falls through to no match now, not the generic "above $" rate.
+    ("Will Apple stock above $150?", None),
     # False positive guard — "summit" alone in unrelated context → no match from diplomatic block
     # (summit could be a mountain/location; diplomatic block requires "summit between/with" etc.)
     ("Will the tech summit produce a new AI governance framework?", 0.30),  # no heuristic
@@ -1404,9 +1433,11 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     # Corporate market entry (~35%)
     ("Will Amazon enter the healthcare insurance market?", 0.35),
     ("Will Apple move into the banking market?", 0.35),
-    # Production / delivery milestone (~40%)
-    ("Will Tesla achieve 2 million vehicle deliveries in 2026?", 0.40),
-    ("Will Boeing hit its aircraft delivery target?", 0.40),
+    # production/delivery milestone heuristic removed 2026-08-02
+    # (production-delivery-milestone-recalibration) -- was a delivery-count
+    # ladder artifact, no longer has a generic base_rate.
+    ("Will Tesla achieve 2 million vehicle deliveries in 2026?", None),
+    ("Will Boeing hit its aircraft delivery target?", None),
     # Independence referendum (~15%)
     ("Will Taiwan hold a referendum on independence?", 0.15),
     ("Will Catalonia hold a plebiscite on independence?", 0.15),
@@ -1583,7 +1614,12 @@ def test_base_rate_new_categories(title, expected_rate):
     ("Will the short seller report tank the stock?",                "short seller report"),
     ("Will Hindenburg Research publish a report on Tesla?",         "short seller report"),
     ("Will housing permits fall below 1.3 million units?",         "housing permits data"),
-    ("Will the government shutdown end before March?",              "government shutdown"),
+    # "shutdown end" -> government shutdown avoided/resolved, not the shutdown
+    # itself (base_rate is 0.85 for this exact phrasing -- see the matching
+    # test_base_rate_gap_fixes case above; this label test previously
+    # disagreed with the rate test, which was exactly the desync bug
+    # win-catchall-recalibration's sibling item fixed).
+    ("Will the government shutdown end before March?",              "government shutdown avoided"),
     ("Will Congress avoid a shutdown by the CR deadline?",          "government shutdown avoided"),
     # None — no matching heuristic
     ("Will this highly unusual unique event happen?",               None),
@@ -1624,6 +1660,94 @@ def test_base_rate_gap_fixes(title, expected_rate):
     assert rate == pytest.approx(expected_rate), (
         f"title={title!r}: expected {expected_rate}, got {rate}"
     )
+
+
+def test_generic_win_catchall_rate():
+    """
+    backlog: win-catchall-recalibration. Was 0.52 (treated as a 2-way
+    "slight favourite" matchup) until analysis/heuristic_backtest.py
+    measured the real YES rate at 7.7% across 1,397 settled Kalshi markets
+    matching this pattern -- mostly many-way fields ("will X win the
+    tournament/award" among many entrants), not 2-way games.
+    """
+    m = _market(title="Will Contestant X win the reality competition?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.08)
+
+
+def test_show_renewal_recalibration():
+    """
+    backlog: show-renewal-recalibration. Was 0.25 labeled "show renewal"
+    until analysis/heuristic_backtest.py (2026-08-02) found the bare "season
+    N" / "movie" / "film" keywords mostly catch many-way reality-competition
+    and award-nominee fields ("Will X win Top Chef Season 23?", "Will X win
+    Movie/Limited Actor at the Emmys?"), not actual renewal questions --
+    measured actual YES rate 1.73% across 637 settled markets.
+    """
+    m = _market(title="Will Contestant Y win Top Chef Season 23?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.02)
+    assert scanner.get_heuristic_label(m) == "competition/award ranking"
+
+
+def test_hurricane_category_ladder_recalibration():
+    """
+    backlog: hurricane-recalibration. The generic "hurricane" rule (0.45)
+    was never actually exercised by a genuine one-off "will this hurricane
+    happen" question -- all 29 real settled-market matches were one of two
+    structurally distinct sub-patterns, split out 2026-08-02.
+
+    Category ladder ("Will [Storm] become a Category N hurricane?"): a
+    ladder artifact like price-threshold/production-delivery-milestone --
+    many rungs for one storm's peak intensity resolve together. All 5
+    matches traced to one ticker (KXHURCAT-26BERTHA), 0/5 YES.
+    """
+    m = _market(title="Will Bertha become a Category 3 hurricane?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.05)
+    assert scanner.get_heuristic_label(m) == "hurricane category ladder"
+
+
+def test_first_named_storm_recalibration():
+    """
+    backlog: hurricane-recalibration. First named storm ("Will [Name] be
+    the first named hurricane in [Basin] in [Year]?"): a many-way field
+    over a fixed, published list of ~24 candidate names (NOAA's annual
+    naming list), structurally similar to win-catchall/competition-award-
+    ranking. All 24 matches traced to one ticker
+    (KXFIRSTHURRICANE-26DEC01EPAC), 1 YES -- consistent with 1/~24.
+    """
+    m = _market(title="Will Fausto be the first named hurricane in the Eastern Pacific in 2026?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.04)
+    assert scanner.get_heuristic_label(m) == "first named storm"
+
+
+def test_generic_hurricane_rule_still_applies_to_non_ladder_titles():
+    """
+    Sanity check that the more specific sub-rules don't accidentally
+    swallow genuine generic hurricane titles that don't match either
+    sub-pattern (e.g. tests/test_scanner.py:1035's
+    "Will a Category 4 hurricane hit the US in 2026?" case).
+    """
+    m = _market(title="Will a hurricane make landfall in Florida in 2026?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.45)
+    assert scanner.get_heuristic_label(m) == "hurricane"
+
+
+def test_sports_award_recalibration():
+    """
+    backlog: sports-award-recalibration. "sports award" (mvp/cy young/
+    rookie of the year/heisman/hall of fame/all-star/golden glove/best
+    player) was 0.20, treated like a small-field favourite pick, until
+    analysis/heuristic_backtest.py (2026-08) found it's a many-way field
+    like win-catchall/show-renewal/first-named-storm: 107 real settled-
+    market matches trace to exactly 4 event_tickers (KXMLBASGMVP-26,
+    KXWNBACCUPMVP-26, KXWCAWARD-26GGLOVE, KXNBASUMMERMVP-2026), each one
+    award with ~21-36 named-nominee markets and exactly 1 YES per ticker
+    (the actual winner) -- 4/107 YES overall (3.7%). Re-tuned to the
+    measured rate (0.04, matching first-named-storm's precedent for a
+    similarly-sized many-way field).
+    """
+    m = _market(title="Will Cody Bellinger win All-Star Game MVP?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.04)
+    assert scanner.get_heuristic_label(m) == "sports award"
 
 
 def test_heuristic_label_on_score_market_result():

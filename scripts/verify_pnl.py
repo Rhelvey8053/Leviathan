@@ -109,8 +109,11 @@ def run(apply: bool = False) -> int:
         conn.close()
         return 1
 
-    # Backup DB before writing
+    # Backup DB before writing. litestream-setup-2026-08: leviathan.db is now
+    # in WAL mode -- checkpoint first so the copy is complete on its own,
+    # not missing recent transactions still sitting in leviathan.db-wal.
     print(f"\nBacking up {DB_PATH.name} → {BAK_PATH.name}...")
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     shutil.copy2(str(DB_PATH), str(BAK_PATH))
     print(f"Backup written: {BAK_PATH}")
 

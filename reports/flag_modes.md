@@ -1,12 +1,12 @@
 # Flag Mode Comparison — Leviathan v1
 
-**Snapshot:** 2026-07-29T17:01:17.110868+00:00  
+**Snapshot:** 2026-08-02T15:19:14.209172+00:00  
 **Environment:** PROD  
-**Total markets in snapshot:** 2493  
+**Total markets in snapshot:** 2922  
 **Production thresholds:** edge=0.08, price=[0.05, 0.95], vol x1.0  
 **Drift thresholds (config):** abs>0.03, pct>7% (see grid below)  
 
-Filter stage is identical across all modes. Markets surviving filter: **28**
+Filter stage is identical across all modes. Markets surviving filter: **30**
 
 ## Signal Presence (mode-independent)
 
@@ -14,10 +14,10 @@ These signal counts reflect which signals FIRED across all filtered markets, ind
 
 | Signal | Markets firing | % of filtered |
 |--------|---------------|---------------|
-| `sig_edge` (raw_edge > 0.08) | 19 | 68% |
-| `sig_drift` (abs+pct drift thresholds) | 12 | 43% |
-| `sig_br_none` (no heuristic match) | 6 | 21% |
-| `sig_edge` AND `sig_drift` (both present) | 8 | 29% |
+| `sig_edge` (raw_edge > 0.08) | 17 | 57% |
+| `sig_drift` (abs+pct drift thresholds) | 10 | 33% |
+| `sig_br_none` (no heuristic match) | 7 | 23% |
+| `sig_edge` AND `sig_drift` (both present) | 6 | 20% |
 
 > **Attribution bug (now fixed):** Under `passthrough`, BR_NONE was checked before DRIFT so markets with both signals were labelled BR_NONE and DRIFT appeared as 0. The `sig_*` fields above show the true fire rates regardless of mode.
 
@@ -25,11 +25,11 @@ These signal counts reflect which signals FIRED across all filtered markets, ind
 
 | Mode | Survived filter | Flagged | % flagged | EDGE | BR_NONE | DRIFT | HEURISTIC |
 |------|----------------|---------|-----------|------|---------|-------|-----------|
-| `passthrough` | 28 | 27 | 96.4% | 19 | 6 | 2 | 0 |
-| `strict_anomaly_only` | 28 | 12 | 42.9% | 0 | 0 | 12 | 0 |
-| `strict_with_heuristic` | 28 | 23 | 82.1% | 0 | 0 | 12 | 11 |
+| `passthrough` | 30 | 26 | 86.7% | 17 | 7 | 2 | 0 |
+| `strict_anomaly_only` | 30 | 10 | 33.3% | 0 | 0 | 10 | 0 |
+| `strict_with_heuristic` | 30 | 21 | 70.0% | 0 | 0 | 10 | 11 |
 
-Under `passthrough`, 6 markets are labelled BR_NONE and the DRIFT branch is never reached — but `sig_drift` shows 12 of those markets actually have a drift signal present. Passthrough was masking drift by flagging via BR_NONE first.
+Under `passthrough`, 7 markets are labelled BR_NONE and the DRIFT branch is never reached — but `sig_drift` shows 10 of those markets actually have a drift signal present. Passthrough was masking drift by flagging via BR_NONE first.
 
 ## Drift Signal Diagnosis (by price bucket)
 
@@ -37,24 +37,24 @@ Root cause of the 86% drift-fire rate: `compute_drift_signal` previously require
 
 | Price bucket | N | Drift% (abs>0.03, pct>7%) | Avg abs move | Avg pct move |
 |-------------|---|----------------|-------------|-------------|
-| Low [0.05-0.15) | 12 | 25% | 0.0212 | 0.220 |
-| MidLo [0.15-0.35) | 10 | 60% | 0.0590 | 0.418 |
-| Mid [0.35-0.65) | 5 | 60% | 0.0490 | 0.085 |
-| High [0.65-0.95] | 1 | 0% | 0.0150 | 0.020 |
+| Low [0.05-0.15) | 19 | 37% | 0.0304 | 0.876 |
+| MidLo [0.15-0.35) | 5 | 40% | 0.0650 | 0.197 |
+| Mid [0.35-0.65) | 5 | 20% | 0.0840 | 0.102 |
+| High [0.65-0.95] | 1 | 0% | 0.0600 | 0.069 |
 
 Low-price markets fire at 100% because small absolute moves (0.5-1.5 cents) are large relative percentages. The fix requires BOTH `abs_drift > drift_min_abs` AND `pct_drift > drift_min_pct` — eliminating cent-level noise at low prices.
 
 ## Drift Threshold Sweep (% of filtered markets flagging as drift)
 
-Grid of `drift_min_abs` x `drift_min_pct` combinations. Values show what percentage of the 28 filtered markets would have `drift_flag=True` under each combination. Config baseline (abs>0.03, pct>7%) = **43%**.
+Grid of `drift_min_abs` x `drift_min_pct` combinations. Values show what percentage of the 30 filtered markets would have `drift_flag=True` under each combination. Config baseline (abs>0.03, pct>7%) = **33%**.
 
 | drift_min_abs | pct>5% | pct>7% | pct>10% | pct>15% | pct>20% |
 |---|---|---|---|---|---|
-| abs>0.01 | 22/28 (79%) | 20/28 (71%) | 18/28 (64%) | 14/28 (50%) | 10/28 (36%) |
-| abs>0.02 | 16/28 (57%) | 14/28 (50%) | 13/28 (46%) | 11/28 (39%) | 8/28 (29%) |
-| abs>0.03 | 13/28 (46%) | 12/28 (43%) | 11/28 (39%) | 9/28 (32%) | 7/28 (25%) |
-| abs>0.04 | 10/28 (36%) | 10/28 (36%) | 9/28 (32%) | 7/28 (25%) | 6/28 (21%) |
-| abs>0.05 | 8/28 (29%) | 8/28 (29%) | 7/28 (25%) | 5/28 (18%) | 5/28 (18%) |
+| abs>0.01 | 22/30 (73%) | 20/30 (67%) | 20/30 (67%) | 17/30 (57%) | 16/30 (53%) |
+| abs>0.02 | 20/30 (67%) | 18/30 (60%) | 18/30 (60%) | 17/30 (57%) | 16/30 (53%) |
+| abs>0.03 | 12/30 (40%) | 10/30 (33%) | 10/30 (33%) | 10/30 (33%) | 10/30 (33%) |
+| abs>0.04 | 9/30 (30%) | 8/30 (27%) | 8/30 (27%) | 8/30 (27%) | 8/30 (27%) |
+| abs>0.05 | 6/30 (20%) | 5/30 (17%) | 5/30 (17%) | 5/30 (17%) | 5/30 (17%) |
 
 > **Config keys:** `markets.drift_min_abs` and `markets.drift_min_pct` — currently at `0.03` / `0.07`. Adjust these to move diagonally in the grid above to reduce noise.
 
@@ -64,8 +64,8 @@ Grid of `drift_min_abs` x `drift_min_pct` combinations. Values show what percent
 
 **Recommended mode: `strict_with_heuristic`**
 
-Config baseline (abs>0.03, pct>7%) flags 12/28 markets as drift. Combined with strict_with_heuristic (no BR_NONE noise), expected candidates: ~12 drift + 19 heuristic-edge (with overlap possible).
+Config baseline (abs>0.03, pct>7%) flags 10/30 markets as drift. Combined with strict_with_heuristic (no BR_NONE noise), expected candidates: ~10 drift + 17 heuristic-edge (with overlap possible).
 
-At config thresholds (abs>0.03, pct>7%), drift flags 12/28 filtered markets (43%). `strict_with_heuristic` mode removes the BR_NONE catch-all and surfaces only markets with genuine heuristic edge or price drift.
+At config thresholds (abs>0.03, pct>7%), drift flags 10/30 filtered markets (33%). `strict_with_heuristic` mode removes the BR_NONE catch-all and surfaces only markets with genuine heuristic edge or price drift.
 
 > **Note:** This comparison measures candidate *volume and selectivity* only. Signal *correctness* — whether flagged markets are actually mispriced — cannot be judged until markets resolve and outcomes are logged.

@@ -1376,6 +1376,51 @@ def test_score_via_cli_accepts_valid_response(monkeypatch):
     assert scores[0]["ticker"] == "KXTEST-01"
 
 
+def test_score_via_cli_normalizes_sources_checked_to_sources(monkeypatch):
+    """
+    backlog: db-audit-2026-08. The CLI's JSON schema returns "sources_checked"
+    (a list of headline/URL strings), but core.logger and core.report both
+    read the "sources" key (matching the API backend's _extract_web_search_sources
+    shape: [{"url","title"}, ...]) -- nothing renamed one to the other, so
+    every CLI-scored signal's real cited sources were silently discarded and
+    logged as an empty list. Must be wrapped into dicts, not passed through
+    as bare strings -- report._coerce_sources's consumers call s.get("url"),
+    which would crash on a plain string.
+    """
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": ["Reuters: headline text", "https://example.com/article"],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
+        scores = scorer._score_via_cli("sys", "user")
+    assert scores[0]["sources"] == [
+        {"url": "Reuters: headline text", "title": "Reuters: headline text"},
+        {"url": "https://example.com/article", "title": "https://example.com/article"},
+    ]
+    assert scores[0]["sources_checked"] == ["Reuters: headline text", "https://example.com/article"]
+
+
+def test_score_via_cli_empty_sources_checked_leaves_sources_unset(monkeypatch):
+    """No sources cited → no "sources" key added (not an empty list either),
+    matching the API backend's behavior when _extract_web_search_sources
+    finds nothing."""
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
+        scores = scorer._score_via_cli("sys", "user")
+    assert "sources" not in scores[0]
+
+
 # ─── _score_via_cli: timeout retry ────────────────────────────────────────────
 
 def test_score_via_cli_retries_after_timeout_then_succeeds(monkeypatch):
@@ -1439,3 +1484,99 @@ def test_score_via_cli_recovers_from_mixed_timeout_and_nonzero_exit():
         scores = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
     assert mock_run.call_count == 3
+
+
+# ─── rescore_single_market (GOAL_phase2-6_decisions.md Decision 1) ───────────
+#
+# One market per API call so its web_search_tool_result set -- and therefore
+# its `sources` -- is genuinely its own, not shared with N other markets
+# from a batch score_markets() call. Only used for the handful of markets
+# about to be published as subscriber calls.
+
+def _api_config(**overrides):
+    cfg = {"llm": {"backend": "api", "model": "claude-sonnet-4-6"}}
+    cfg["llm"].update(overrides)
+    return cfg
+
+
+def test_rescore_single_market_returns_score_and_token_info_api_backend():
+    from unittest.mock import patch
+    market = _base_market()
+    score = {
+        "ticker": "KXTEST-26DEC01", "market_price": 0.25, "our_estimate": 0.40,
+        "edge": 0.15, "direction": "YES", "confidence": "MED",
+        "reasoning": "x", "sources_checked": [], "sources": [{"url": "https://x.com", "title": "X"}],
+    }
+    token_info = {"cost_usd": 0.01, "input_tokens": 100, "output_tokens": 50}
+    with patch("core.scorer._score_via_api", return_value=([score], token_info)) as mock_api:
+        result, info = scorer.rescore_single_market(market, _api_config())
+    assert result == score
+    assert info == token_info
+    mock_api.assert_called_once()
+
+
+def test_rescore_single_market_returns_none_when_api_returns_no_scores():
+    from unittest.mock import patch
+    market = _base_market()
+    with patch("core.scorer._score_via_api", return_value=([], {"cost_usd": 0.0})):
+        result, info = scorer.rescore_single_market(market, _api_config())
+    assert result is None
+    assert info == {"cost_usd": 0.0}
+
+
+def test_rescore_single_market_builds_single_market_prompt():
+    """The prompt sent must describe exactly one market, not a batch --
+    that's the whole point of the fix."""
+    from unittest.mock import patch
+    market = _base_market(ticker="KXONLY")
+    captured = {}
+
+    def _fake_score_via_api(sys_prompt, user_prompt, config, temperature=None):
+        captured["user_prompt"] = user_prompt
+        return [], {}
+
+    with patch("core.scorer._score_via_api", side_effect=_fake_score_via_api):
+        scorer.rescore_single_market(market, _api_config())
+
+    prompt = captured["user_prompt"]
+    assert prompt.count("KXONLY") >= 1
+    # Only one market entry in the "--- MARKETS ---" section -- no "2." header.
+    markets_section = prompt.split("--- MARKETS ---")[1]
+    assert "\n2." not in markets_section
+
+
+def test_rescore_single_market_ignores_min_pre_lv_filter():
+    """A market already in the published shortlist cleared whatever gate
+    got it there -- re-applying min_pre_lv here would be nonsensical, not a
+    safety check. Confirm a market that WOULD fail min_pre_lv still gets
+    scored."""
+    from unittest.mock import patch
+    # A market with no whale/drift/watchlist signals -- would score very
+    # low on compute_leviathan_score, well under a typical min_pre_lv=20.
+    market = _base_market(ticker="KXLOWSCORE")
+    config = _api_config()
+    config["scoring"] = {"min_pre_claude_lv": 999}  # impossibly high gate
+    score = {
+        "ticker": "KXLOWSCORE", "market_price": 0.25, "our_estimate": 0.40,
+        "edge": 0.15, "direction": "YES", "confidence": "MED",
+        "reasoning": "x", "sources_checked": [],
+    }
+    with patch("core.scorer._score_via_api", return_value=([score], {})) as mock_api:
+        result, _ = scorer.rescore_single_market(market, config)
+    mock_api.assert_called_once()  # never filtered out despite min_pre_claude_lv
+    assert result == score
+
+
+def test_rescore_single_market_cli_backend():
+    from unittest.mock import patch
+    market = _base_market()
+    score = {
+        "ticker": "KXTEST-26DEC01", "market_price": 0.25, "our_estimate": 0.40,
+        "edge": 0.15, "direction": "YES", "confidence": "MED",
+        "reasoning": "x", "sources_checked": [],
+    }
+    config = {"llm": {"backend": "cli"}}
+    with patch("core.scorer._score_via_cli", return_value=[score]):
+        result, info = scorer.rescore_single_market(market, config)
+    assert result == score
+    assert info == {}

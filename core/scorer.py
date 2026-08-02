@@ -1071,6 +1071,18 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
     _validate_scores(scores)
+    # db-audit-2026-08: the CLI's own JSON schema asks for "sources_checked"
+    # (a self-reported list of headline/URL strings), but every downstream
+    # consumer -- core/logger.py's persistence, core/report.py's rendering
+    # -- reads the "sources" key instead, matching the shape the API
+    # backend's _extract_web_search_sources sets ([{"url","title"}, ...]).
+    # Nothing renamed one to the other, so every CLI-scored signal's real
+    # cited sources were silently discarded and logged as an empty list.
+    # Wrapped into the same {"url","title"} dict shape report._coerce_sources
+    # already expects, since a bare string there would break s.get("url").
+    for s in scores:
+        if "sources" not in s and s.get("sources_checked"):
+            s["sources"] = [{"url": src, "title": src} for src in s["sources_checked"] if src]
     return scores
 
 
@@ -1107,4 +1119,48 @@ def score_markets(
     if backend == "api":
         return _score_via_api(sys_prompt, user_prompt, config)
     return _score_via_cli(sys_prompt, user_prompt), {}
+
+
+def rescore_single_market(
+    market: dict,
+    config: dict,
+    calibration: dict | None = None,
+    flag_cal: dict | None = None,
+    now: "datetime | None" = None,
+) -> tuple[dict | None, dict]:
+    """
+    Re-score exactly ONE market via its own API call (GOAL_phase2-6_decisions.md
+    Decision 1). A batch score_markets() call can cover several markets in
+    one API request, and Anthropic's web_search_tool_result blocks aren't
+    tagged per-market -- every score in that batch ends up sharing the same
+    `sources` list, which is a real misattribution once rendered as "the
+    sources behind THIS pick." Scoring one market alone makes its search
+    results genuinely its own.
+
+    Only meant to be called for the handful of markets about to be
+    published as subscriber calls, not the full scan -- cost is one extra
+    API call per published pick, not per scanned market.
+
+    Deliberately does NOT re-apply min_pre_lv or the max_markets_per_run
+    slice score_markets() uses: `market` already cleared whatever gate got
+    it into the published shortlist in the first place, so re-filtering it
+    here would be nonsensical, not a safety check.
+
+    Returns (score_dict, token_info). score_dict is None (not raised) when
+    the API declines to return a record_scores entry for this market at
+    all -- rare, but the caller should keep that pick's existing
+    batch-scored `sources` rather than losing the pick outright.
+    """
+    user_prompt = build_prompt([market], now=now)
+    sys_prompt  = build_system_prompt(calibration, flag_cal=flag_cal)
+
+    backend = config.get("llm", {}).get("backend", "cli")
+    if backend == "api":
+        scores, token_info = _score_via_api(sys_prompt, user_prompt, config)
+    else:
+        scores, token_info = _score_via_cli(sys_prompt, user_prompt), {}
+
+    if not scores:
+        return None, token_info
+    return scores[0], token_info
 

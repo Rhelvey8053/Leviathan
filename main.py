@@ -6,8 +6,10 @@ import sys
 import time
 import traceback
 import uuid
-import winsound
 from datetime import datetime, timezone
+
+if sys.platform == "win32":
+    import winsound
 
 from dotenv import load_dotenv
 
@@ -97,6 +99,58 @@ def _sample_for_blind_arm(flagged_markets: list[dict], scored_by_ticker: dict,
     if len(eligible) <= n:
         return eligible
     return random.Random(run_id).sample(eligible, n)
+
+
+def _rescore_shortlist_for_clean_sources(
+    final_signals: list[dict],
+    flagged_markets: list[dict],
+    config: dict,
+    calibration: dict | None = None,
+    flag_cal: dict | None = None,
+) -> dict:
+    """
+    Re-score the published shortlist one-market-per-call for clean, honest
+    source attribution (GOAL_phase2-6_decisions.md Decision 1). A batch
+    score_markets() call can cover several markets in one API request, and
+    Anthropic's web_search_tool_result blocks aren't tagged per-market --
+    every score in that batch shares one `sources` list, which is a real
+    misattribution once rendered as "the sources behind THIS pick." Only
+    the handful of markets about to be published as subscriber calls need
+    this -- cost is ~N_published extra API calls, not O(flagged_markets).
+
+    Mutates each shortlisted signal's `sources` key in place (same object
+    identity report.determine_subscriber_shortlist returns, per its own
+    docstring) and returns accounting info for the caller to fold into
+    run_meta: {"rescored_count": n, "shortlist_size": n, "tokens": n,
+    "cost_usd": float}. A market re-score that comes back empty leaves that
+    pick's existing batch-scored `sources` untouched rather than losing the
+    pick outright.
+    """
+    shortlist = report.determine_subscriber_shortlist(final_signals, config)
+    markets_by_ticker = {m.get("ticker", ""): m for m in flagged_markets}
+    rescored_count = 0
+    tokens = 0
+    cost_usd = 0.0
+    for sig in shortlist:
+        market = markets_by_ticker.get(sig.get("ticker", ""))
+        if not market:
+            continue
+        fresh_score, rescore_info = scorer.rescore_single_market(
+            market, config, calibration=calibration, flag_cal=flag_cal,
+        )
+        cost_usd += rescore_info.get("cost_usd", 0) or 0
+        tokens   += (rescore_info.get("input_tokens", 0) or 0) + \
+                    (rescore_info.get("output_tokens", 0) or 0)
+        if fresh_score:
+            sig["sources"] = fresh_score.get("sources") or []
+            rescored_count += 1
+
+    return {
+        "shortlist_size": len(shortlist),
+        "rescored_count": rescored_count,
+        "tokens":         tokens,
+        "cost_usd":       cost_usd,
+    }
 
 
 def _extremize(p: float, alpha: float) -> float:
@@ -230,6 +284,34 @@ def main():
             except Exception as _e:
                 print(f"      [warn] fetch_event_markets({event_ticker}): {_e}")
         print(f"      Fetched {len(all_markets)} markets from {len(events)} events")
+
+        # Near-dated supplement (GOAL: expand scope so more data resolves
+        # faster) -- the events-catalog loop above structurally never
+        # surfaces near-dated markets (confirmed empirically: 0 of 2722
+        # closed within 30 days, starving resolve_first.py's whole
+        # mechanism). See fetch_near_dated_markets's docstring for the
+        # full root-cause writeup. Merged into the same `seen`/all_markets
+        # so downstream code (scanner, resolve_first via the snapshot)
+        # sees one unified list, never a second population to reconcile.
+        nd_cfg = config.get("markets", {})
+        try:
+            near_dated = kalshi.fetch_near_dated_markets(
+                config,
+                max_days=nd_cfg.get("near_dated_max_days", 14),
+                target_count=nd_cfg.get("near_dated_target_count", 200),
+                max_pages=nd_cfg.get("near_dated_max_pages", 30),
+            )
+            nd_added = 0
+            for m in near_dated:
+                t = m.get("ticker")
+                if t and t not in seen:
+                    seen.add(t)
+                    all_markets.append(m)
+                    nd_added += 1
+            print(f"      Near-dated supplement: +{nd_added} markets (closing within "
+                  f"{nd_cfg.get('near_dated_max_days', 14)}d, {len(near_dated)} fetched)")
+        except Exception as _e:
+            print(f"      [warn] fetch_near_dated_markets: {_e}")
     except Exception as e:
         print(f"      Events fetch failed ({e}), falling back to /markets...")
         try:
@@ -774,6 +856,11 @@ def main():
             "watchlist_signal": m.get("watchlist_signal", False),
             "flag_path":            m.get("flag_path"),
             "base_rate":            m.get("base_rate"),
+            # db-audit-2026-08: computed in the same score_market() call as
+            # base_rate/flag_path above but never copied into the logged
+            # signal -- heuristic_label was persisted for 2 of 271 rows
+            # ever, though ~218 rows have a base_rate.
+            "heuristic_label":      m.get("heuristic_label"),
             "net_edge":             m.get("net_edge"),
             "heuristic_direction":  m.get("heuristic_direction"),
             "short_horizon":        m.get("short_horizon", False),
@@ -885,6 +972,7 @@ def main():
                     "watchlist_signal":     m.get("watchlist_signal", False),
                     "flag_path":            m.get("flag_path"),
                     "base_rate":            m.get("base_rate"),
+                    "heuristic_label":      m.get("heuristic_label"),
                     "net_edge":             m.get("net_edge"),
                     "heuristic_direction":  m.get("heuristic_direction"),
                     "short_horizon":        m.get("short_horizon", False),
@@ -910,6 +998,26 @@ def main():
             sig["repeat_count"] = logger.get_ticker_day_count(ticker, days=14)
     new_signals    = [s for s in final_signals if not s.get("is_repeat")]
     repeat_signals = [s for s in final_signals if s.get("is_repeat")]
+
+    # Re-score the published shortlist individually so their `sources` are
+    # genuinely per-pick, not batch-shared (GOAL_phase2-6_decisions.md
+    # Decision 1) -- see _rescore_shortlist_for_clean_sources's docstring.
+    # Scoped to new_signals only: repeat signals never get logger.log_signal()
+    # called on them (dedup design, see Step 7 below), so re-scoring a repeat
+    # would spend a real API call on a `sources` update that's discarded at
+    # the end of this run instead of persisted.
+    if config.get("llm", {}).get("backend") == "api" and new_signals:
+        try:
+            rescore_result = _rescore_shortlist_for_clean_sources(
+                new_signals, flagged_markets, config, calibration=_cal, flag_cal=_flag_cal,
+            )
+            if rescore_result["shortlist_size"]:
+                print(f"      Re-scored {rescore_result['rescored_count']}/{rescore_result['shortlist_size']} "
+                      f"shortlisted pick(s) individually for clean source attribution")
+            run_meta["tokens_used"] = run_meta.get("tokens_used", 0) + rescore_result["tokens"]
+            run_meta["cost_usd"]    = run_meta.get("cost_usd", 0) + rescore_result["cost_usd"]
+        except Exception as e:
+            print(f"      Shortlist re-score FAILED (non-fatal, keeping batch-shared sources): {e}")
 
     # Step 7 — Log signals
     print("[7/8] Logging signals...")
@@ -1056,7 +1164,8 @@ def main():
             pass
 
     print(f"\n=== Done in {time.time() - start_time:.1f}s | {len(final_signals)} signals | cost {_fmt_usd(cost)} ===\n")
-    winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+    if sys.platform == "win32":
+        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
 
 
 if __name__ == "__main__":

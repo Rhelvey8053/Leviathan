@@ -388,6 +388,53 @@ class TestMainIntegration(unittest.TestCase):
         self.assertEqual(len(rows), 1)
 
 
+class TestBackupDb(unittest.TestCase):
+    """
+    backlog: litestream-setup-2026-08. leviathan.db is now in WAL mode
+    (required by Litestream's continuous replication) -- a plain file copy
+    would miss recent transactions still sitting in leviathan.db-wal, not
+    yet folded into the main file. backup_db() must checkpoint first.
+    """
+
+    def test_checkpoints_before_copying(self):
+        import analysis.resolve_first as rf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = Path(tmpdir) / "src.db"
+            bak = Path(tmpdir) / "src.db.bak"
+            conn = sqlite3.connect(str(src))
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("CREATE TABLE t (a INTEGER)")
+            conn.execute("INSERT INTO t VALUES (1)")
+            conn.commit()
+            conn.close()
+
+            with patch.object(rf, "DB_PATH", src), patch.object(rf, "DB_BAK", bak):
+                rf.backup_db()
+
+            self.assertTrue(bak.exists())
+            # The backup must be self-contained -- readable and correct on
+            # its own, with no separate -wal file required alongside it.
+            bak_conn = sqlite3.connect(str(bak))
+            rows = bak_conn.execute("SELECT a FROM t").fetchall()
+            bak_conn.close()
+            self.assertEqual(rows, [(1,)])
+
+    def test_skips_when_backup_already_exists(self):
+        import analysis.resolve_first as rf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = Path(tmpdir) / "src.db"
+            bak = Path(tmpdir) / "src.db.bak"
+            sqlite3.connect(str(src)).close()
+            bak.write_text("existing backup, must not be touched")
+
+            with patch.object(rf, "DB_PATH", src), patch.object(rf, "DB_BAK", bak):
+                rf.backup_db()
+
+            self.assertEqual(bak.read_text(), "existing backup, must not be touched")
+
+
 class TestLoadSnapshotFallback(unittest.TestCase):
     """
     load_snapshot() falls back to a live Kalshi fetch when no snapshot file

@@ -2,4 +2,4 @@ requests
 python-dotenv
 cryptography
 anthropic
-mcp[cli]
+mcp[cli]==1.28.1

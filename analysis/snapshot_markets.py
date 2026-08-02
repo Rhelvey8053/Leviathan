@@ -58,6 +58,30 @@ def fetch_snapshot(config: dict) -> tuple[list[dict], int]:
         except Exception as e:
             print(f"  [warn] fetch_event_markets({event_ticker}): {e}")
 
+    # Near-dated supplement -- the events-catalog loop above structurally
+    # never surfaces near-dated markets (see kalshi.fetch_near_dated_markets's
+    # docstring for the full root-cause writeup: confirmed empirically 0 of
+    # 2722 events-catalog markets closed within 30 days). This snapshot file
+    # is what resolve_first.py's load_snapshot() reads, so without this,
+    # resolve_first's near-dated selector has nothing to select from no
+    # matter how often the snapshot is refreshed.
+    nd_cfg = config.get("markets", {})
+    try:
+        near_dated = kalshi.fetch_near_dated_markets(
+            config,
+            max_days=nd_cfg.get("near_dated_max_days", 14),
+            target_count=nd_cfg.get("near_dated_target_count", 200),
+            max_pages=nd_cfg.get("near_dated_max_pages", 30),
+        )
+        for m in near_dated:
+            t = m.get("ticker")
+            if t and t not in seen:
+                seen.add(t)
+                markets.append(m)
+        print(f"  Near-dated supplement: +{len(near_dated)} markets")
+    except Exception as e:
+        print(f"  [warn] fetch_near_dated_markets: {e}")
+
     return markets, len(events)
 
 
