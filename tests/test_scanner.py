@@ -1750,6 +1750,40 @@ def test_sports_award_recalibration():
     assert scanner.get_heuristic_label(m) == "sports award"
 
 
+def test_down_ballot_election_many_way_field_recalibration():
+    """
+    backlog: down-ballot-election-recalibration. "down-ballot election"
+    (n=43, gap +0.287, predicted 52% vs actual 23.3%) turned out to be a
+    mixed population, not a single miscalibration -- grouping the 43 real
+    settled-market matches by event_ticker found 23/43 (53%) on one
+    many-way primary field (KXGOVCA-26, "Who will win the governorship in
+    California?", 23 named candidates, 0 YES -- same shape as
+    sports-award/win-catchall), with the remaining 20 spread thin (2 each)
+    across 10 structurally different 2-candidate general-election-race
+    tickers (KXHOUSERACE-CA*, HOUSECA40-26, etc: "Will Republican/Democrat
+    win the House race for CA-37?"), each genuinely a fair head-to-head
+    between exactly 2 named parties -- 50% is the correct base rate there,
+    not a miscalibration, so that sub-population is left alone at 0.52.
+    Split out the many-way sub-pattern via the distinct "governorship"
+    noun form (vs "governor" used in the genuine 2-way race titles), rate
+    set to 0.04 matching first-named-storm/sports-award's precedent for a
+    similarly-sized many-way field.
+    """
+    m = _market(title="Who will win the governorship in Texas?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.04)
+    assert scanner.get_heuristic_label(m) == "down-ballot election (many-way field)"
+
+
+def test_down_ballot_election_two_way_race_still_calibrated_at_original_rate():
+    """
+    Sanity check that the many-way sub-rule doesn't swallow genuine 2-way
+    down-ballot races, which calibrate correctly at the original rate.
+    """
+    m = _market(title="Will Democratic win the House race for CA-37?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.52)
+    assert scanner.get_heuristic_label(m) == "down-ballot election"
+
+
 def test_heuristic_label_on_score_market_result():
     """score_market() passes heuristic_label through to the result dict."""
     m = _market(title="Will Ethereum complete the Pectra network upgrade by Q2 2026?")
