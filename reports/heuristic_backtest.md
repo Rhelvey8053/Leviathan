@@ -1,6 +1,6 @@
 # Heuristic Backtest — Leviathan v1
 
-**Generated:** 2026-08-02T00:34:38.527412+00:00  
+**Generated:** 2026-08-02T04:30:52.402326+00:00  
 **Source:** settled_markets (real Kalshi resolutions, no LLM cost)  
 **Total settled markets (binary result):** 12600  
 **Heuristic coverage:** 2154 / 12600 (17.1%)  
@@ -8,8 +8,8 @@
 ## Overall calibration
 
 - Naive baseline (always predict the population YES-rate, 23.3%): Brier = 0.1786
-- Heuristic table (only where a pattern matched): Brier = 0.0837
-- Delta: -0.0949 -> heuristics beat the naive baseline
+- Heuristic table (only where a pattern matched): Brier = 0.0824
+- Delta: -0.0962 -> heuristics beat the naive baseline
 - Directional accuracy (excludes exact-0.5 coin-flip predictions, n=2096): 89.0%
 
 ## By heuristic label
@@ -19,7 +19,7 @@
 | competition win | 734 | 8.0% | 8.2% | -0.002 | 0.0751 |
 | competition/award ranking | 637 | 2.0% | 1.7% | +0.003 | 0.0170 |
 | entertainment award | 236 | 20.0% | 10.6% | +0.094 | 0.1036 |
-| sports award | 107 | 20.0% | 3.7% | +0.163 | 0.0624 |
+| sports award | 107 | 4.0% | 3.7% | +0.003 | 0.0360 |
 | political coup | 89 | 10.0% | 3.4% | +0.066 | 0.0370 |
 | down-ballot election | 43 | 52.0% | 23.3% | +0.287 | 0.2611 |
 | AI model release | 34 | 25.0% | 11.8% | +0.132 | 0.1213 |
