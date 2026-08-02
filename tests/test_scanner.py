@@ -1072,10 +1072,10 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will the US impose a tariff on Canadian steel above 25%?", 0.40),
     ("Will Trump raise tariffs on China imports in Q3 2026?", 0.40),
     ("Will tariff rates on EU goods be reduced by end of 2026?", 0.40),
-    # Sports awards
-    ("Will Shohei Ohtani win the NL MVP in 2026?", 0.20),
-    ("Will Connor McDavid win the NHL MVP award?", 0.20),
-    ("Will the Heisman Trophy go to a running back?", 0.20),
+    # Sports awards (rate 0.04 -- see test_sports_award_recalibration)
+    ("Will Shohei Ohtani win the NL MVP in 2026?", 0.04),
+    ("Will Connor McDavid win the NHL MVP award?", 0.04),
+    ("Will the Heisman Trophy go to a running back?", 0.04),
     # Sports playoff qualification
     ("Will the New York Yankees make the playoffs in 2026?", 0.35),
     ("Will Manchester City qualify for the Champions League?", 0.35),
@@ -1729,6 +1729,25 @@ def test_generic_hurricane_rule_still_applies_to_non_ladder_titles():
     m = _market(title="Will a hurricane make landfall in Florida in 2026?")
     assert scanner.estimate_base_rate(m) == pytest.approx(0.45)
     assert scanner.get_heuristic_label(m) == "hurricane"
+
+
+def test_sports_award_recalibration():
+    """
+    backlog: sports-award-recalibration. "sports award" (mvp/cy young/
+    rookie of the year/heisman/hall of fame/all-star/golden glove/best
+    player) was 0.20, treated like a small-field favourite pick, until
+    analysis/heuristic_backtest.py (2026-08) found it's a many-way field
+    like win-catchall/show-renewal/first-named-storm: 107 real settled-
+    market matches trace to exactly 4 event_tickers (KXMLBASGMVP-26,
+    KXWNBACCUPMVP-26, KXWCAWARD-26GGLOVE, KXNBASUMMERMVP-2026), each one
+    award with ~21-36 named-nominee markets and exactly 1 YES per ticker
+    (the actual winner) -- 4/107 YES overall (3.7%). Re-tuned to the
+    measured rate (0.04, matching first-named-storm's precedent for a
+    similarly-sized many-way field).
+    """
+    m = _market(title="Will Cody Bellinger win All-Star Game MVP?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.04)
+    assert scanner.get_heuristic_label(m) == "sports award"
 
 
 def test_heuristic_label_on_score_market_result():

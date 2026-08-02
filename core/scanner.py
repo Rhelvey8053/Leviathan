@@ -433,7 +433,11 @@ _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['approval rating', 'job approval', 'favorability rating', 'approve of the', 'disapprove of the', 'net approval'], 0.5, 'approval rating'),
     (['union election', 'union vote', 'vote to unionize', 'unionize the', 'labor union vote', 'form a union', 'nlrb election', 'union drive', 'union campaign', 'union organizing', 'right to organize', 'vote on unionization', 'union certification', 'union authorization', 'organize a union', 'unionization vote'], 0.4, 'unionization vote'),
     (['go on strike', 'labor strike', 'workers strike', 'union strike', 'strike action', 'work stoppage', 'walkout', 'general strike', 'nationwide strike', 'national strike', 'transit strike', 'teachers strike', 'nurses strike', 'rail strike', 'airline strike'], 0.3, 'labor strike'),
-    (['mvp', 'cy young', 'rookie of the year', 'heisman', 'hall of fame', 'all-star', 'golden glove', 'best player'], 0.2, 'sports award'),
+    # sports-award-recalibration (2026-08): was 0.2, measured 4/107 YES (3.7%) across
+    # 4 event_tickers (KXMLBASGMVP-26, KXWNBACCUPMVP-26, KXWCAWARD-26GGLOVE,
+    # KXNBASUMMERMVP-2026) -- a many-way field (one winner per award among ~21-36
+    # named nominees), same pattern as win-catchall/show-renewal/first-named-storm.
+    (['mvp', 'cy young', 'rookie of the year', 'heisman', 'hall of fame', 'all-star', 'golden glove', 'best player'], 0.04, 'sports award'),
     (['make the playoffs', 'reach the playoffs', 'qualify for', 'qualify for the champions league', 'advance to', 'make it to', 'clinch a playoff'], 0.35, 'sports qualification'),
     (['get traded', 'be traded', 'trade deadline', 'sign with', 'free agent signing', 'sign a contract', 'extension'], 0.3, 'sports transaction'),
     (['become ceo', 'be named ceo', 'be appointed ceo', 'new ceo', 'become the ceo', 'named as ceo', 'appoint a new ceo', 'become cfo', 'be named cfo', 'new cfo', 'become chair', 'be named chair', 'become chairman'], 0.35, 'corporate leadership appointment'),
