@@ -1,6 +1,6 @@
 # Heuristic Backtest — Leviathan v1
 
-**Generated:** 2026-08-02T15:04:52.406149+00:00  
+**Generated:** 2026-08-02T18:52:25.072460+00:00  
 **Source:** settled_markets (real Kalshi resolutions, no LLM cost)  
 **Total settled markets (binary result):** 12600  
 **Heuristic coverage:** 2154 / 12600 (17.1%)  
@@ -8,10 +8,10 @@
 ## Overall calibration
 
 - Naive baseline (always predict the population YES-rate, 23.3%): Brier = 0.1786
-- Heuristic table (only where a pattern matched): Brier = 0.0824
-- Delta: -0.0962 -> heuristics beat the naive baseline
-- Directional accuracy (excludes exact-0.5 coin-flip predictions, n=2096): 89.0%
-- Expected Calibration Error (10 bins, across the whole table -- not per-label, see note below): 0.0259
+- Heuristic table (only where a pattern matched): Brier = 0.0795
+- Delta: -0.0990 -> heuristics beat the naive baseline
+- Directional accuracy (excludes exact-0.5 coin-flip predictions, n=2096): 90.1%
+- Expected Calibration Error (10 bins, across the whole table -- not per-label, see note below): 0.0208
 
 ## Reliability by predicted-probability bin
 
@@ -19,12 +19,12 @@ Bucketed by predicted probability across ALL labels together, not per-label -- e
 
 | Predicted range | n | Avg predicted | Actual YES rate | Gap |
 |---|---|---|---|---|
-| 0-10% | 1507 | 5.1% | 5.0% | +0.001 |
+| 0-10% | 1530 | 5.1% | 5.0% | +0.001 |
 | 10-20% | 90 | 10.1% | 3.3% | +0.067 |
 | 20-30% | 324 | 21.8% | 15.7% | +0.060 |
 | 30-40% | 82 | 35.0% | 51.2% | -0.162 |
 | 40-50% | 40 | 41.8% | 45.0% | -0.033 |
-| 50-60% | 106 | 51.0% | 38.7% | +0.124 |
+| 50-60% | 83 | 50.8% | 49.4% | +0.014 |
 | 60-70% | 2 | 65.0% | 0.0% | +0.650 |
 | 70-80% | 3 | 75.0% | 66.7% | +0.083 |
 
@@ -37,11 +37,12 @@ Bucketed by predicted probability across ALL labels together, not per-label -- e
 | entertainment award | 236 | 20.0% | 10.6% | +0.094 | 0.1036 |
 | sports award | 107 | 4.0% | 3.7% | +0.003 | 0.0360 |
 | political coup | 89 | 10.0% | 3.4% | +0.066 | 0.0370 |
-| down-ballot election | 43 | 52.0% | 23.3% | +0.287 | 0.2611 |
 | AI model release | 34 | 25.0% | 11.8% | +0.132 | 0.1213 |
 | legislative passage | 33 | 35.0% | 42.4% | -0.074 | 0.2498 |
 | supreme court ruling | 24 | 50.0% | 37.5% | +0.125 | 0.2500 |
 | first named storm | 24 | 4.0% | 4.2% | -0.002 | 0.0399 |
+| down-ballot election (many-way field) | 23 | 4.0% | 0.0% | +0.040 | 0.0016 |
+| down-ballot election | 20 | 52.0% | 50.0% | +0.020 | 0.2504 |
 | SpaceX launch | 15 | 40.0% | 40.0% | +0.000 | 0.2400 |
 | executive order | 14 | 45.0% | 21.4% | +0.236 | 0.2239 |
 | IPO announcement | 13 | 25.0% | 0.0% | +0.250 | 0.0625 |

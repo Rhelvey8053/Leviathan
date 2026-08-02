@@ -198,6 +198,7 @@ _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['win the game', 'win on', 'win their next'], 0.52, 'sports game'),
     (['win the election', 'win election', 'wins the election', 'win the primary', 'win the runoff'], 0.52, 'election'),
     (['win the presidency', 'win the white house'], 0.5, 'presidential election'),
+    (['win the governorship'], 0.04, 'down-ballot election (many-way field)'),
     (['win the senate race', 'win the house race', 'win the gubernatorial', 'win the mayoral', 'mayor race', 'win the governor'], 0.52, 'down-ballot election'),
     (['be reelected', 'win reelection', 'win re-election', 'reelected', 're-elected', 'secure a second term', 'win a second term', 'second presidential term'], 0.52, 'reelection'),
     (['primary challenge', 'primary challenger', 'face a primary', 'challenge in the primary', 'defeated in the primary', 'lose the primary', 'lost the primary', 'primary opponent'], 0.3, 'primary challenge'),
