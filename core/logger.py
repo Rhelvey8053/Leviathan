@@ -94,11 +94,8 @@ def _init_db() -> None:
         """)
         # Additive schema migration — non-destructive, safe to run repeatedly.
         for col in [
-            "contract_type         TEXT",
             "segment               TEXT",
             "entry_price           REAL",
-            "resolution_date       TEXT",
-            "logged_under          TEXT",
             "source                TEXT    DEFAULT 'paper'",
             "from_signal           INTEGER DEFAULT 0",
             "signal_call_id        TEXT",
@@ -189,6 +186,18 @@ def _init_db() -> None:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
         conn.execute("UPDATE signals SET source='paper' WHERE source IS NULL")
+        # db-audit-2026-08: contract_type/resolution_date/logged_under were
+        # never read or written by any code path (confirmed against every
+        # INSERT INTO signals in this file) -- dead schema from an earlier
+        # design, not columns any feature depends on. Dropped rather than
+        # left blank forever; existence-checked like _add_col so this stays
+        # idempotent/safe to run repeatedly -- SQLite's DROP COLUMN has no
+        # IF EXISTS clause (unlike Postgres/MySQL), it errors on a column
+        # that's already gone.
+        _existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+        for _dead_col in ("contract_type", "resolution_date", "logged_under"):
+            if _dead_col in _existing_cols:
+                conn.execute(f"ALTER TABLE signals DROP COLUMN {_dead_col}")
     _migrate_csv()
 
 
@@ -528,9 +537,16 @@ def log_run(run_data: dict) -> None:
 def pull_real_fills(config: dict) -> dict:
     """
     Fetch all real Kalshi fills and insert them as source='real_fill' rows.
-    Matches each fill against prior paper signals by ticker; sets from_signal,
-    signal_call_id, and direction_aligned accordingly.
-    Returns a summary dict: pulled, matched, aligned, contradictory.
+    Matches each fill against the most recent PRIOR paper signal by ticker
+    (never a paper signal logged after the fill -- see db-audit-2026-08 note
+    below); sets from_signal, signal_call_id, and direction_aligned
+    accordingly. Returns a summary dict: pulled, matched, aligned, contradictory.
+
+    call_id uses Kalshi's own fill_id/trade_id (stable across re-runs) rather
+    than a random uuid (db-audit-2026-08: the prior random call_id meant
+    INSERT OR IGNORE could never actually dedupe a re-run -- every call would
+    insert a fresh duplicate row for the same real fills, silently double-
+    counting real PnL).
     """
     from core import kalshi as _kalshi
 
@@ -541,25 +557,25 @@ def pull_real_fills(config: dict) -> dict:
     try:
         with _db() as conn:
             sig_rows = conn.execute(
-                f"SELECT call_id, ticker, direction FROM signals "
+                f"SELECT call_id, ticker, direction, timestamp FROM signals "
                 f"WHERE {_NO_PASS} ORDER BY timestamp ASC"
             ).fetchall()
     except Exception:
         sig_rows = []
 
-    # Most-recent actionable (YES/NO) paper signal per ticker (last in ASC
-    # order wins). A later PASS decision on the same ticker must never
-    # displace this -- PASS rows are excluded above by the direction
-    # filter, since a fill can only ever be matched against the actual
-    # YES/NO call it was meant to confirm, not whatever Claude said most
-    # recently regardless of direction (a prior version included PASS
-    # rows here, so a real fill correctly matching an earlier YES/NO call
-    # could be marked "contradictory" simply because Claude passed on the
-    # same ticker on a later, unrelated scan).
-    ticker_signals: dict = {}
+    # All actionable (YES/NO) paper signals per ticker, chronological (ASC,
+    # matching sig_rows' own order). A later PASS decision on the same
+    # ticker must never displace a real match -- PASS rows are excluded
+    # above by the direction filter, since a fill can only ever be matched
+    # against the actual YES/NO call it was meant to confirm, not whatever
+    # Claude said most recently regardless of direction (a prior version
+    # included PASS rows here, so a real fill correctly matching an earlier
+    # YES/NO call could be marked "contradictory" simply because Claude
+    # passed on the same ticker on a later, unrelated scan).
+    ticker_signals: dict[str, list[dict]] = {}
     for row in sig_rows:
         if row["ticker"]:
-            ticker_signals[row["ticker"]] = dict(row)
+            ticker_signals.setdefault(row["ticker"], []).append(dict(row))
 
     pulled = len(fills)
     matched = aligned = contradictory = 0
@@ -572,8 +588,22 @@ def pull_real_fills(config: dict) -> dict:
         fee         = _to_float(fill.get("fee_cost", 0)) or 0.0
         count       = _to_int(fill.get("count")) or 1
         created     = fill.get("created_time", "")
+        fill_id     = fill.get("fill_id") or fill.get("trade_id") or str(uuid.uuid4())
 
-        sig = ticker_signals.get(ticker)
+        # db-audit-2026-08: must be the most recent signal that PRECEDES
+        # this fill, not just "most recent overall" -- a paper signal
+        # logged after a real trade already happened can't be what the
+        # trade was acting on. sig_rows/ticker_signals are chronological
+        # ASC, so the first candidate found after this fill's timestamp
+        # means every later one is too late as well.
+        sig = None
+        if created:
+            for candidate in ticker_signals.get(ticker, []):
+                if candidate["timestamp"] and candidate["timestamp"] <= created:
+                    sig = candidate
+                else:
+                    break
+
         from_sig     = 0
         sig_call_id  = None
         dir_aligned  = None
@@ -601,7 +631,7 @@ def pull_real_fills(config: dict) -> dict:
                      entry_price, fill_count, fill_fee)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
-                    str(uuid.uuid4())[:8],
+                    fill_id,
                     created, ticker, ticker,
                     fill_price, None, None,
                     side, action,

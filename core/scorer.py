@@ -1071,6 +1071,18 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
     _validate_scores(scores)
+    # db-audit-2026-08: the CLI's own JSON schema asks for "sources_checked"
+    # (a self-reported list of headline/URL strings), but every downstream
+    # consumer -- core/logger.py's persistence, core/report.py's rendering
+    # -- reads the "sources" key instead, matching the shape the API
+    # backend's _extract_web_search_sources sets ([{"url","title"}, ...]).
+    # Nothing renamed one to the other, so every CLI-scored signal's real
+    # cited sources were silently discarded and logged as an empty list.
+    # Wrapped into the same {"url","title"} dict shape report._coerce_sources
+    # already expects, since a bare string there would break s.get("url").
+    for s in scores:
+        if "sources" not in s and s.get("sources_checked"):
+            s["sources"] = [{"url": src, "title": src} for src in s["sources_checked"] if src]
     return scores
 
 

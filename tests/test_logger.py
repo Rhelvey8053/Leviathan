@@ -25,7 +25,7 @@ def tmp_db(tmp_path, monkeypatch):
 
 
 def _insert(call_id, ticker, direction, market_price,
-            outcome="", result="", pnl=None, edge=0.10):
+            outcome="", result="", pnl=None, edge=0.10, timestamp=None):
     """Insert a signal row directly into whatever DB logger.DB_PATH points at."""
     with logger._db() as conn:
         conn.execute("""
@@ -36,7 +36,7 @@ def _insert(call_id, ticker, direction, market_price,
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             call_id,
-            datetime.now(timezone.utc).isoformat(),
+            timestamp or datetime.now(timezone.utc).isoformat(),
             ticker, "Test Market",
             market_price, 0.40,
             edge,
@@ -276,7 +276,8 @@ def test_schema_new_columns_present(tmp_db):
         cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
     for col in ("source", "from_signal", "signal_call_id", "direction_aligned",
                 "entry_price", "fill_count", "fill_fee",
-                "contract_type", "segment", "resolution_date", "logged_under",
+                "segment",  # contract_type/resolution_date/logged_under dropped as
+                            # dead schema, db-audit-2026-08 -- see test_dead_columns_dropped_*
                 "flag_path", "watchlist_signal",
                 "sig_edge", "sig_drift", "sig_br_none",
                 "base_rate", "net_edge", "heuristic_direction", "short_horizon", "time_horizon",
@@ -319,6 +320,27 @@ def test_existing_signals_tagged_paper(tmp_db):
     assert row["source"] == "paper"
 
 
+def test_dead_columns_dropped_and_migration_stays_idempotent(tmp_db):
+    """
+    backlog: db-audit-2026-08. contract_type/resolution_date/logged_under
+    were never read or written by any code path -- dropped as dead schema.
+    _init_db() must tolerate running again after they're already gone
+    (SQLite's DROP COLUMN has no IF EXISTS clause, unlike Postgres/MySQL,
+    so this only works if the migration existence-checks first).
+    """
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "contract_type" not in cols
+    assert "resolution_date" not in cols
+    assert "logged_under" not in cols
+    # segment and direction_aligned are used elsewhere (log_probe,
+    # pull_real_fills) and must NOT have been dropped alongside the dead ones.
+    assert "segment" in cols
+    assert "direction_aligned" in cols
+
+    logger._init_db()  # re-run: must not raise on already-dropped columns
+
+
 # ─── Real fills: pull_real_fills ──────────────────────────────────────────────
 
 def _mock_fill(ticker, side="YES", price=0.30, fee=0.01, count=5, action="BUY"):
@@ -336,7 +358,10 @@ def _mock_fill(ticker, side="YES", price=0.30, fee=0.01, count=5, action="BUY"):
 
 def test_fill_matching_signal_ticker_sets_from_signal(tmp_db):
     """Fill on a ticker that has a prior paper signal → from_signal=1."""
-    _insert("sig-abc", "KXIPO-TEST", "YES", 0.30)
+    # Must precede _mock_fill's hardcoded created_time (2026-06-15) --
+    # db-audit-2026-08: pull_real_fills() only matches signals that came
+    # BEFORE the fill, not just "most recent overall".
+    _insert("sig-abc", "KXIPO-TEST", "YES", 0.30, timestamp="2026-06-01T00:00:00Z")
 
     with patch("core.kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="YES")]):
         summary = logger.pull_real_fills({})
@@ -358,7 +383,7 @@ def test_fill_matching_signal_ticker_sets_from_signal(tmp_db):
 
 def test_fill_direction_contradictory(tmp_db):
     """Fill side opposes signal direction → direction_aligned=0."""
-    _insert("sig-xyz", "KXIPO-TEST", "YES", 0.30)
+    _insert("sig-xyz", "KXIPO-TEST", "YES", 0.30, timestamp="2026-06-01T00:00:00Z")
 
     with patch("core.kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="NO")]):
         summary = logger.pull_real_fills({})
@@ -431,6 +456,49 @@ def test_fill_unrelated_ticker_no_match(tmp_db):
         ).fetchone()
     assert row["from_signal"]    == 0
     assert row["signal_call_id"] is None
+
+
+def test_fill_signal_after_fill_does_not_match(tmp_db):
+    """
+    backlog: db-audit-2026-08. A paper signal logged AFTER the real fill
+    can't be what the trade was acting on, even though it's the "most
+    recent" signal for that ticker overall. Prior behavior matched on
+    recency alone, so this would have incorrectly set from_signal=1.
+    """
+    _insert("sig-too-late", "KXIPO-TEST", "YES", 0.30, timestamp="2026-07-01T00:00:00Z")
+
+    with patch("core.kalshi.fetch_fills", return_value=[_mock_fill("KXIPO-TEST", side="YES")]):
+        summary = logger.pull_real_fills({})
+
+    assert summary["matched"] == 0
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT from_signal, signal_call_id FROM signals WHERE source='real_fill'"
+        ).fetchone()
+    assert row["from_signal"]    == 0
+    assert row["signal_call_id"] is None
+
+
+def test_pull_real_fills_uses_stable_fill_id_as_call_id(tmp_db):
+    """
+    backlog: db-audit-2026-08. call_id must be Kalshi's own fill_id, not a
+    fresh random uuid every call -- otherwise INSERT OR IGNORE can never
+    actually dedupe a re-run, and calling this twice would double-log the
+    same real fill (double-counting real PnL).
+    """
+    fill = _mock_fill("KXIPO-TEST", side="YES")
+    fill["fill_id"] = "kalshi-fill-abc123"
+
+    with patch("core.kalshi.fetch_fills", return_value=[fill]):
+        logger.pull_real_fills({})
+        logger.pull_real_fills({})  # re-run: must not create a duplicate row
+
+    with logger._db() as conn:
+        rows = conn.execute(
+            "SELECT call_id FROM signals WHERE source='real_fill'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["call_id"] == "kalshi-fill-abc123"
 
 
 def test_pull_empty_fills_returns_zero_summary(tmp_db):

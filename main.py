@@ -854,6 +854,11 @@ def main():
             "watchlist_signal": m.get("watchlist_signal", False),
             "flag_path":            m.get("flag_path"),
             "base_rate":            m.get("base_rate"),
+            # db-audit-2026-08: computed in the same score_market() call as
+            # base_rate/flag_path above but never copied into the logged
+            # signal -- heuristic_label was persisted for 2 of 271 rows
+            # ever, though ~218 rows have a base_rate.
+            "heuristic_label":      m.get("heuristic_label"),
             "net_edge":             m.get("net_edge"),
             "heuristic_direction":  m.get("heuristic_direction"),
             "short_horizon":        m.get("short_horizon", False),
@@ -965,6 +970,7 @@ def main():
                     "watchlist_signal":     m.get("watchlist_signal", False),
                     "flag_path":            m.get("flag_path"),
                     "base_rate":            m.get("base_rate"),
+                    "heuristic_label":      m.get("heuristic_label"),
                     "net_edge":             m.get("net_edge"),
                     "heuristic_direction":  m.get("heuristic_direction"),
                     "short_horizon":        m.get("short_horizon", False),

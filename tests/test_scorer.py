@@ -1376,6 +1376,51 @@ def test_score_via_cli_accepts_valid_response(monkeypatch):
     assert scores[0]["ticker"] == "KXTEST-01"
 
 
+def test_score_via_cli_normalizes_sources_checked_to_sources(monkeypatch):
+    """
+    backlog: db-audit-2026-08. The CLI's JSON schema returns "sources_checked"
+    (a list of headline/URL strings), but core.logger and core.report both
+    read the "sources" key (matching the API backend's _extract_web_search_sources
+    shape: [{"url","title"}, ...]) -- nothing renamed one to the other, so
+    every CLI-scored signal's real cited sources were silently discarded and
+    logged as an empty list. Must be wrapped into dicts, not passed through
+    as bare strings -- report._coerce_sources's consumers call s.get("url"),
+    which would crash on a plain string.
+    """
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": ["Reuters: headline text", "https://example.com/article"],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
+        scores = scorer._score_via_cli("sys", "user")
+    assert scores[0]["sources"] == [
+        {"url": "Reuters: headline text", "title": "Reuters: headline text"},
+        {"url": "https://example.com/article", "title": "https://example.com/article"},
+    ]
+    assert scores[0]["sources_checked"] == ["Reuters: headline text", "https://example.com/article"]
+
+
+def test_score_via_cli_empty_sources_checked_leaves_sources_unset(monkeypatch):
+    """No sources cited → no "sources" key added (not an empty list either),
+    matching the API backend's behavior when _extract_web_search_sources
+    finds nothing."""
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
+        scores = scorer._score_via_cli("sys", "user")
+    assert "sources" not in scores[0]
+
+
 # ─── _score_via_cli: timeout retry ────────────────────────────────────────────
 
 def test_score_via_cli_retries_after_timeout_then_succeeds(monkeypatch):
