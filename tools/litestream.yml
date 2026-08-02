@@ -1,0 +1,15 @@
+# Litestream config -- continuous WAL-streaming backup of leviathan.db to a
+# local folder replica (no cloud credentials). Complements, doesn't replace,
+# the existing manual data/db_backups/*.bak snapshots -- those are good
+# point-in-time copies taken before a risky change (schema migration, etc);
+# this is continuous, catching everything in between so a crash between
+# manual backups doesn't lose data.
+#
+# Restore with: tools\litestream.exe restore -o <output-path> data\leviathan.db
+# (reads the replica path from this same config file via -config, see
+# scripts\launch_litestream.ps1)
+
+dbs:
+  - path: ../data/leviathan.db
+    replica:
+      path: ../data/db_backups/litestream_replica

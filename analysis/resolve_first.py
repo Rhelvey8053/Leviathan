@@ -41,6 +41,15 @@ NEEDED_FOR_WINRATE = 20
 def backup_db() -> None:
     """Back up leviathan.db to leviathan.db.bak_3a (once — skip if bak exists)."""
     if not DB_BAK.exists() and DB_PATH.exists():
+        # litestream-setup-2026-08: leviathan.db is now in WAL mode (required
+        # by Litestream's continuous local-folder replication). A plain file
+        # copy would miss recent transactions still sitting in
+        # leviathan.db-wal, not yet folded into the main file -- checkpoint
+        # first so the copy is self-contained and complete on its own.
+        import sqlite3
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
         shutil.copy2(DB_PATH, DB_BAK)
         print(f"[resolve_first] Backed up DB to {DB_BAK.name}")
 
