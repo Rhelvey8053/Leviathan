@@ -137,6 +137,67 @@ def test_summarize_empty_input_does_not_crash():
     assert summary["by_label"] == []
 
 
+# ─── _ece ───────────────────────────────────────────────────────────────────
+
+def test_ece_perfect_calibration_is_zero():
+    # predicted 0.0 matching actual 0.0, and predicted 1.0 matching actual
+    # 1.0 -- the only base_rate values where a bin's empirical outcome
+    # frequency can exactly equal the prediction with a small sample.
+    rows = [_r(0.0, 0.0), _r(0.0, 0.0), _r(1.0, 1.0), _r(1.0, 1.0)]
+    ece, bins = hb._ece(rows)
+    assert ece == pytest.approx(0.0)
+    assert len(bins) == 2
+
+
+def test_ece_bins_across_labels_not_within_one():
+    """
+    The whole point of binning at the table level: two different labels
+    with different flat rates landing in the same 10% band get pooled into
+    one bin, not kept separate (a per-label version would be degenerate --
+    every row in a single label shares one base_rate, so there's nothing to
+    bin within it).
+    """
+    rows = [
+        _r(0.20, 1.0, label="label_a"),
+        _r(0.22, 0.0, label="label_b"),
+    ]
+    ece, bins = hb._ece(rows)
+    assert len(bins) == 1
+    assert bins[0]["n"] == 2
+    assert bins[0]["avg_predicted"] == pytest.approx(0.21)
+    assert bins[0]["actual_yes_rate"] == pytest.approx(0.5)
+
+
+def test_ece_weights_bins_by_size():
+    # 9 rows at 0.0 (all actual 0.0, gap=0) + 1 row at 1.0 predicting YES but
+    # actual is NO (gap=1.0) -> ece = (9/10)*0 + (1/10)*1.0 = 0.1
+    rows = [_r(0.0, 0.0) for _ in range(9)] + [_r(1.0, 0.0)]
+    ece, bins = hb._ece(rows)
+    assert ece == pytest.approx(0.1)
+
+
+def test_ece_base_rate_of_exactly_one_lands_in_last_bin():
+    """base_rate=1.0 must not overflow past the last bin (idx would be
+    n_bins, one past the valid 0..n_bins-1 range, without the min() clamp)."""
+    ece, bins = hb._ece([_r(1.0, 1.0)])
+    assert len(bins) == 1
+    assert bins[0]["lo"] == pytest.approx(0.9)
+    assert bins[0]["hi"] == pytest.approx(1.0)
+
+
+def test_ece_empty_input_does_not_crash():
+    ece, bins = hb._ece([])
+    assert ece is None
+    assert bins == []
+
+
+def test_summarize_includes_ece():
+    results = [_r(0.0, 0.0), _r(1.0, 1.0)]
+    summary = hb.summarize(results)
+    assert summary["ece"] == pytest.approx(0.0)
+    assert len(summary["ece_bins"]) == 2
+
+
 # ─── main() end-to-end ──────────────────────────────────────────────────────
 
 def test_main_runs_end_to_end_and_writes_report(tmp_db, capsys, tmp_path, monkeypatch):

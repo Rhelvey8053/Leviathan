@@ -104,6 +104,54 @@ def _directional_accuracy(rows: list[dict]) -> tuple[float | None, int]:
     return correct / len(decided), len(decided)
 
 
+def _ece(rows: list[dict], n_bins: int = 10) -> tuple[float | None, list[dict]]:
+    """
+    Expected Calibration Error, bucketed by predicted probability across the
+    WHOLE heuristic table (not per-label -- each label maps to one fixed flat
+    rate, so every row within a label shares the identical base_rate and a
+    per-label reliability breakdown would be degenerate, collapsing into a
+    single bin). Bucketing across labels instead reveals whether predictions
+    in the same probability band are collectively well-calibrated in
+    aggregate, even when individual labels in that band are individually too
+    small (n<10) to trust alone (idea borrowed from
+    Quentin-Piot/prediction-market-backtester's reporting/calibration.py,
+    2026-08-02 GitHub research -- adapted here since that repo's version
+    assumes a continuous per-market model score, not a table of flat rates).
+
+    Returns (ece, bins) where bins is a list of dicts (lo, hi, n,
+    avg_predicted, actual_yes_rate) for bins with at least one row.
+    ece = sum(n_i/N * |avg_predicted_i - actual_yes_rate_i|) across bins,
+    the standard weighted-absolute-gap definition.
+    """
+    if not rows:
+        return None, []
+    width = 1.0 / n_bins
+    buckets: dict[int, list[dict]] = {}
+    for r in rows:
+        idx = min(int(r["base_rate"] / width), n_bins - 1)  # base_rate==1.0 -> last bin
+        buckets.setdefault(idx, []).append(r)
+
+    total = len(rows)
+    bin_rows = []
+    ece = 0.0
+    for idx in sorted(buckets):
+        bucket = buckets[idx]
+        n = len(bucket)
+        avg_pred = sum(r["base_rate"] for r in bucket) / n
+        actual_rate = sum(r["actual"] for r in bucket) / n
+        gap = abs(avg_pred - actual_rate)
+        ece += (n / total) * gap
+        bin_rows.append({
+            "lo":              idx * width,
+            "hi":              (idx + 1) * width,
+            "n":               n,
+            "avg_predicted":   avg_pred,
+            "actual_yes_rate": actual_rate,
+            "gap":             avg_pred - actual_rate,
+        })
+    return ece, bin_rows
+
+
 def summarize(results: list[dict]) -> dict:
     total = len(results)
     matched = [r for r in results if r["base_rate"] is not None]
@@ -116,6 +164,7 @@ def summarize(results: list[dict]) -> dict:
     brier = _brier(matched)
     naive_brier = _brier(naive_rows)
     directional_accuracy, n_decided = _directional_accuracy(matched)
+    ece, ece_bins = _ece(matched)
 
     by_label: dict[str, list[dict]] = {}
     for r in matched:
@@ -146,6 +195,8 @@ def summarize(results: list[dict]) -> dict:
         "directional_accuracy":  directional_accuracy,
         "n_decided":             n_decided,
         "by_label":              label_rows,
+        "ece":                   ece,
+        "ece_bins":              ece_bins,
     }
 
 
@@ -179,6 +230,25 @@ def render_report(summary: dict) -> str:
         lines.append(f"- Delta: {delta:+.4f} -> {verdict}")
     lines.append(f"- Directional accuracy (excludes exact-0.5 coin-flip predictions, n={summary['n_decided']}): "
                   f"{_fmt_pct(summary['directional_accuracy'])}")
+    lines.append(f"- Expected Calibration Error (10 bins, across the whole table -- not per-label, "
+                  f"see note below): {summary['ece']:.4f}" if summary["ece"] is not None else
+                  "- Expected Calibration Error: --")
+    lines.append("")
+    lines.append("## Reliability by predicted-probability bin")
+    lines.append("")
+    lines.append("Bucketed by predicted probability across ALL labels together, not per-label -- each "
+                  "label maps to one fixed flat rate, so every row within a label shares the identical "
+                  "prediction and a per-label version of this table would be degenerate (one bin holding "
+                  "100% of that label's rows). This view instead asks: of every row this heuristic table "
+                  "assigned a ~35% chance to, regardless of which label, how often did YES actually happen?")
+    lines.append("")
+    lines.append("| Predicted range | n | Avg predicted | Actual YES rate | Gap |")
+    lines.append("|---|---|---|---|---|")
+    for b in summary["ece_bins"]:
+        lines.append(
+            f"| {b['lo']*100:.0f}-{b['hi']*100:.0f}% | {b['n']} | {_fmt_pct(b['avg_predicted'])} | "
+            f"{_fmt_pct(b['actual_yes_rate'])} | {b['gap']:+.3f} |"
+        )
     lines.append("")
     lines.append("## By heuristic label")
     lines.append("")
@@ -227,6 +297,18 @@ def main():
                   "WORSE than naive baseline" if delta > 0.005 else "no meaningful lift")
         print(f"  Delta vs naive:                  {delta:+.4f}  --> {verdict}")
     print(f"  Directional accuracy (n={summary['n_decided']}):          {_fmt_pct(summary['directional_accuracy'])}")
+    if summary["ece"] is not None:
+        print(f"  Expected Calibration Error (10 bins):    {summary['ece']:.4f}")
+    print()
+    print(_rule("="))
+    print("RELIABILITY BY PREDICTED-PROBABILITY BIN (across all labels, see report for why)")
+    print(_rule("-"))
+    print()
+    print(f"  {'Range':<10}  {'n':>5}  {'Avg pred':>9}  {'Actual YES':>10}  {'Gap':>7}")
+    print(f"  {'-'*10}  {'-'*5}  {'-'*9}  {'-'*10}  {'-'*7}")
+    for b in summary["ece_bins"]:
+        print(f"  {b['lo']*100:>3.0f}-{b['hi']*100:<3.0f}%   {b['n']:>5}  {_fmt_pct(b['avg_predicted']):>9}  "
+              f"{_fmt_pct(b['actual_yes_rate']):>10}  {b['gap']:>+7.3f}")
     print()
     print(_rule("="))
     print("BY HEURISTIC LABEL")

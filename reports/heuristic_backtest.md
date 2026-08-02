@@ -1,6 +1,6 @@
 # Heuristic Backtest — Leviathan v1
 
-**Generated:** 2026-08-02T04:30:52.402326+00:00  
+**Generated:** 2026-08-02T05:09:31.445067+00:00  
 **Source:** settled_markets (real Kalshi resolutions, no LLM cost)  
 **Total settled markets (binary result):** 12600  
 **Heuristic coverage:** 2154 / 12600 (17.1%)  
@@ -11,6 +11,22 @@
 - Heuristic table (only where a pattern matched): Brier = 0.0824
 - Delta: -0.0962 -> heuristics beat the naive baseline
 - Directional accuracy (excludes exact-0.5 coin-flip predictions, n=2096): 89.0%
+- Expected Calibration Error (10 bins, across the whole table -- not per-label, see note below): 0.0259
+
+## Reliability by predicted-probability bin
+
+Bucketed by predicted probability across ALL labels together, not per-label -- each label maps to one fixed flat rate, so every row within a label shares the identical prediction and a per-label version of this table would be degenerate (one bin holding 100% of that label's rows). This view instead asks: of every row this heuristic table assigned a ~35% chance to, regardless of which label, how often did YES actually happen?
+
+| Predicted range | n | Avg predicted | Actual YES rate | Gap |
+|---|---|---|---|---|
+| 0-10% | 1507 | 5.1% | 5.0% | +0.001 |
+| 10-20% | 90 | 10.1% | 3.3% | +0.067 |
+| 20-30% | 324 | 21.8% | 15.7% | +0.060 |
+| 30-40% | 82 | 35.0% | 51.2% | -0.162 |
+| 40-50% | 40 | 41.8% | 45.0% | -0.033 |
+| 50-60% | 106 | 51.0% | 38.7% | +0.124 |
+| 60-70% | 2 | 65.0% | 0.0% | +0.650 |
+| 70-80% | 3 | 75.0% | 66.7% | +0.083 |
 
 ## By heuristic label
 
