@@ -254,6 +254,28 @@ def test_markets_scanned_rendered():
     assert "12,345" in out
 
 
+def test_next_resolve_only_considers_actually_published_picks():
+    """
+    Regression guard: with more than 3 qualifying calls, "Next to resolve"
+    must reflect the top-3 ranked picks that actually get published (same
+    ranking _rank_top_picks uses), never an earlier-in-list-but-unranked
+    call that didn't make the cut. KXSOON below still qualifies as a call
+    (MED confidence, at the threshold) but ranks 4th on edge -- the
+    weakest of the batch -- so it does NOT make the published top-3. It's
+    listed FIRST in the input (scan order) but closes soonest -- a naive
+    calls[:3] slice would wrongly pick it up and surface its close date.
+    """
+    signals = [
+        _sig(ticker="KXSOON", direction="YES", confidence="MED", edge=0.05, close_time="2026-08-01T00:00:00Z"),
+        _sig(ticker="KXA", direction="YES", confidence="HIGH", edge=0.30, close_time="2026-09-01T00:00:00Z"),
+        _sig(ticker="KXB", direction="NO",  confidence="HIGH", edge=0.25, close_time="2026-09-05T00:00:00Z"),
+        _sig(ticker="KXC", direction="YES", confidence="MED",  edge=0.20, close_time="2026-09-10T00:00:00Z"),
+    ]
+    out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
+    assert '<div class="n">Sep 1</div><div class="l">Next to resolve</div>' in out
+    assert "Aug 1" not in out
+
+
 # ─── resolved-picks recap (GOAL_subscriber_report.md Phase 5) ────────────────
 
 def _resolved(**kwargs):

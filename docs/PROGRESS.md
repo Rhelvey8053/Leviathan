@@ -2,6 +2,62 @@
 
 ---
 
+## 2026-07-31 — Post-implementation audit of the subscriber report + Decisions doc work
+
+Asked for a bug/gap audit right after the Decisions-doc commit landed. Read
+through the full diff (`core/logger.py`, `core/report.py`, `core/llm.py`,
+`core/scorer.py`, `main.py`) rather than just re-testing; found and fixed
+two real bugs, flagged one cosmetic issue, and restated one known process
+gap.
+
+**Fixed — `next_resolve` used the wrong 3 calls (`core/report.py`,
+`render_subscriber_html`).** The "Next to resolve" digest stat computed
+close times from `calls[:3]` — the calls list in scan/flag order — instead
+of the actual ranked top-3 that `_rank_top_picks` selects and that get
+published as `picks`. Whenever more than 3 calls qualify in a run, this
+could surface a close date belonging to a market that isn't even one of
+today's published picks, or miss the true soonest-resolving one among the
+real top-3. Fixed by computing `_rank_top_picks(calls, n=3)` once and
+reusing it for both `picks` and the close-time list. Added
+`test_next_resolve_only_considers_actually_published_picks` — verified it
+fails against the old `calls[:3]` code (first attempt at the fixture didn't
+actually create a discrepancy since insertion order happened to match rank
+order; fixed the fixture to put the weak, soonest-closing signal first in
+scan order so the two orderings genuinely diverge) and passes against the
+fix.
+
+**Fixed — `get_equity_curve_data()`'s "most recent real fill wins" wasn't
+actually enforced (`core/logger.py`).** When a single paper signal has more
+than one matched real fill, the docstring claims the most recently resolved
+one overrides the paper pnl. The query backing that dict had no `ORDER BY`,
+so the winner was whatever order SQLite happened to return rows in, not
+necessarily chronological. Added `ORDER BY timestamp ASC` so the dict
+comprehension's last-write-wins actually matches the documented behavior —
+worth the two-line fix given this is exactly the real-vs-paper honesty
+Choice B was built around. Added
+`test_equity_curve_multiple_real_fills_most_recent_wins` (inserts the
+later-timestamped fill with an earlier rowid to prove the ordering, not
+insertion order, decides the winner); verified it fails against the
+unordered query and passes against the fix.
+
+**Flagged, not changed (both pre-existing, cosmetic):**
+- `_market_movers()`'s ranking heuristic takes `max()` across three
+  different-scale quantities (price drift, spread %, order-book imbalance)
+  to sort candidates for the "market movers" section — not a strict
+  apples-to-apples comparison, so ranking across different anomaly types
+  can be a little arbitrary. Not incorrect data, just an imprecise sort.
+- The whole subscriber digest / Track Record feature still isn't wired
+  into the automated `Leviathan-DailyRun` scheduled task — the live daily
+  email still goes out via `render_html`/`compile_report`, and
+  `subscriber_preview.html`/`track_record.html` only regenerate on a manual
+  `python scripts/render_subscriber_preview.py` run. This is the deliberate
+  guardrail both handoff docs called for, not a new discovery, but worth
+  restating: the Track Record page's numbers go stale between manual runs.
+
+Full suite green throughout (2022 passed after the `next_resolve` test,
++1 more after the equity-curve ordering test, 1 skipped, 13 subtests
+passed).
+
 ## 2026-07-31 — Decision 1 follow-up: stop re-scoring repeat signals that never get logged
 
 Found during a post-implementation self-review of the Decision 1 wiring

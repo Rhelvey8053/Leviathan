@@ -366,8 +366,10 @@ def log_pass(signal: dict) -> None:
                 (call_id,timestamp,ticker,title,market_price,our_estimate,
                  edge,direction,confidence,whale_detected,whale_direction,
                  outcome,result,pnl_if_traded,run_id,source,
-                 flag_path,base_rate,net_edge,heuristic_direction,
+                 flag_path,watchlist_signal,sig_edge,sig_drift,sig_br_none,
+                 base_rate,net_edge,heuristic_direction,
                  short_horizon,time_horizon,close_time,leviathan_score,heuristic_label,
+                 net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker,
                  whale_max_trade_size,category,
                  ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
                  confidence_downgraded,second_pass,
@@ -375,7 +377,7 @@ def log_pass(signal: dict) -> None:
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -399,6 +401,10 @@ def log_pass(signal: dict) -> None:
                 signal.get("run_id", ""),
                 "paper",
                 signal.get("flag_path"),
+                1 if signal.get("watchlist_signal") else 0,
+                1 if signal.get("sig_edge") else 0,
+                1 if signal.get("sig_drift") else 0,
+                1 if signal.get("sig_br_none") else 0,
                 _to_float(signal.get("base_rate")),
                 _to_float(signal.get("net_edge")),
                 signal.get("heuristic_direction"),
@@ -407,6 +413,10 @@ def log_pass(signal: dict) -> None:
                 signal.get("close_time"),
                 _to_int(signal.get("leviathan_score")),
                 signal.get("heuristic_label"),
+                _to_float(signal.get("net_edge_after_fee")),
+                _to_float(signal.get("ev_after_fee_per_contract")),
+                signal.get("event_ticker", ""),
+                signal.get("series_ticker", ""),
                 _to_float(signal.get("whale_max_trade_size")),
                 signal.get("category", ""),
                 1 if signal.get("ob_flag") else 0,
@@ -1665,13 +1675,19 @@ def get_equity_curve_data() -> dict:
                 f"AND pnl_if_traded IS NOT NULL"
             ).fetchall()
             real_rows = conn.execute(
-                "SELECT signal_call_id, pnl_if_traded FROM signals "
+                "SELECT signal_call_id, pnl_if_traded, timestamp FROM signals "
                 "WHERE source='real_fill' AND signal_call_id IS NOT NULL "
-                "AND result IN ('WIN','LOSS') AND pnl_if_traded IS NOT NULL"
+                "AND result IN ('WIN','LOSS') AND pnl_if_traded IS NOT NULL "
+                "ORDER BY timestamp ASC"
             ).fetchall()
     except Exception:
         return {"points": [], "is_real": [], "n": 0, "real_n": 0, "paper_n": 0, "final": None}
 
+    # ORDER BY timestamp ASC + dict-comprehension last-write-wins is what
+    # actually makes "the most recently resolved fill wins" (this function's
+    # own docstring) true when one signal has more than one matched real
+    # fill -- a plain unordered query left this to whatever order SQLite
+    # happened to return rows in, which isn't guaranteed to be chronological.
     real_pnl_by_call = {r["signal_call_id"]: r["pnl_if_traded"] for r in real_rows}
 
     ordered = sorted(paper_rows, key=lambda r: r["timestamp"] or "")

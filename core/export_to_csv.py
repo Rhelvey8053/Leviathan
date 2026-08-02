@@ -191,10 +191,16 @@ def _print_validation(rows: list, final_cols: list) -> None:
         idx = col_idx.get(col)
         return row[idx] if idx is not None else None
 
-    resolved   = sum(1 for r in rows if get(r, "result") in ("WIN", "LOSS"))
-    pending    = n - resolved
-    wins       = sum(1 for r in rows if get(r, "result") == "WIN")
-    losses     = sum(1 for r in rows if get(r, "result") == "LOSS")
+    # PASS rows (Claude found no actionable edge) never entered the
+    # outcome/result pipeline as a real bet -- direction == outcome can
+    # never be true for them, so resolve_outcomes() leaves them as LOSS
+    # by construction. Excluded here to match the direction != 'PASS'
+    # convention already used by every core.logger.get_stats* function.
+    non_pass   = [r for r in rows if get(r, "direction") != "PASS"]
+    resolved   = sum(1 for r in non_pass if get(r, "result") in ("WIN", "LOSS"))
+    pending    = len(non_pass) - resolved
+    wins       = sum(1 for r in non_pass if get(r, "result") == "WIN")
+    losses     = sum(1 for r in non_pass if get(r, "result") == "LOSS")
     win_rate   = (wins / resolved * 100) if resolved else 0.0
 
     total_pnl = 0.0

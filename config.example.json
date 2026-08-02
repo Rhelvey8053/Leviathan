@@ -66,7 +66,14 @@
       "EPS beat",
       "revenue beat"
     ],
-    "categories": []
+    "categories": [],
+    "near_dated_max_days": 14,
+    "near_dated_target_count": 200,
+    "near_dated_max_pages": 30,
+    "near_dated_exclude_prefixes": ["KXMVE"],
+    "_near_dated_notes": "Supplements the events-catalog fetch (fetch_events -- which structurally never surfaces near-dated markets, confirmed 2026-08-01) with a direct /markets?max_close_ts=... fetch, filtered to exclude the KXMVE parlay flood. Feeds both the main scanner's short-horizon buckets and resolve_first.py's near-dated selector, which was previously starved (1 row logged in its whole history).",
+    "prop_market_exclude_prefixes": ["KXMLBMENTION"],
+    "_prop_market_exclude_notes": "backlog: prop-market-skill-filter. Ticker-prefix exclusion in core.scanner.filter_markets(), same mechanism as near_dated_exclude_prefixes/KXMVE. KXMLBMENTION ('what will the announcer say') markets have no real predictive skill ceiling the way a price/outcome market does, but are liquid enough to clear every other filter -- confirmed 2026-08-01: 10/36 near-dated markets sampled were this category and survived volume/OI/price/close-time filters cleanly. Conservative default (only the one category with concrete zero-skill-ceiling evidence); extend the list if other gimmick categories turn up."
   },
   "whales": {
     "size_multiplier": 5,

@@ -1483,12 +1483,21 @@ def render_subscriber_html(
     now_utc = now_utc or datetime.now(timezone.utc)
     calls, watch = _split_calls_watch(signals, config)
 
-    picks = [_subscriber_pick_view_model(p) for p in _rank_top_picks(calls, n=3)]
+    ranked_calls = _rank_top_picks(calls, n=3)
+    picks = [_subscriber_pick_view_model(p) for p in ranked_calls]
     watch_sorted = sorted(watch, key=lambda s: -compute_leviathan_score(s))[:3]
 
+    # Must be the SAME 3 calls as `picks` (ranked_calls), not calls[:3] --
+    # calls is in scan/flag order, not ranked order, so slicing it directly
+    # here could reference a close date for a market that isn't one of the
+    # published picks at all whenever more than 3 calls qualify. ranked_calls
+    # dicts (from _rank_top_picks) carry close_time_raw; watch_sorted dicts
+    # are the original raw signals and carry close_time/expiration_time.
     close_times = [
-        (s.get("close_time") or s.get("expiration_time"))
-        for s in [*calls[:3], *watch_sorted] if (s.get("close_time") or s.get("expiration_time"))
+        ct for ct in (
+            [s.get("close_time_raw") for s in ranked_calls]
+            + [(s.get("close_time") or s.get("expiration_time")) for s in watch_sorted]
+        ) if ct
     ]
     next_resolve = _subscriber_fmt_close(min(close_times)) if close_times else "—"
 

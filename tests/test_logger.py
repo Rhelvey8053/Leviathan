@@ -1846,6 +1846,37 @@ def test_equity_curve_real_fill_overrides_paper_pnl_for_matched_signal(tmp_db):
     assert data["paper_n"] == 0
 
 
+def test_equity_curve_multiple_real_fills_most_recent_wins(tmp_db):
+    """
+    Regression guard: when one signal has more than one matched real fill
+    (e.g. partial fills across separate orders), the most recently resolved
+    one must win, per this function's own docstring. The earlier fill row is
+    inserted with a LATER call_id/rowid than the later-timestamped fill, so
+    a query without ORDER BY timestamp -- relying on SQLite's incidental
+    rowid-order return -- would pick the wrong one here.
+    """
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,pnl_if_traded) "
+            "VALUES ('e9','2026-01-01T00:00:00Z','KXE9','YES','WIN','YES','paper',0.50)"
+        )
+        # Inserted first (earlier rowid) but LATER timestamp -- the fill that
+        # should win.
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,"
+            "signal_call_id,pnl_if_traded) "
+            "VALUES ('e9-fill-b','2026-01-03T00:00:00Z','KXE9','YES','WIN','YES','real_fill','e9',0.90)"
+        )
+        # Inserted second (later rowid) but EARLIER timestamp -- must lose.
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,result,outcome,source,"
+            "signal_call_id,pnl_if_traded) "
+            "VALUES ('e9-fill-a','2026-01-02T00:00:00Z','KXE9','YES','WIN','YES','real_fill','e9',0.10)"
+        )
+    data = logger.get_equity_curve_data()
+    assert data["points"] == [0.90]
+
+
 def test_equity_curve_mixed_real_and_paper_counts(tmp_db):
     with logger._db() as conn:
         conn.execute(

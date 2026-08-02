@@ -282,6 +282,34 @@ def main():
             except Exception as _e:
                 print(f"      [warn] fetch_event_markets({event_ticker}): {_e}")
         print(f"      Fetched {len(all_markets)} markets from {len(events)} events")
+
+        # Near-dated supplement (GOAL: expand scope so more data resolves
+        # faster) -- the events-catalog loop above structurally never
+        # surfaces near-dated markets (confirmed empirically: 0 of 2722
+        # closed within 30 days, starving resolve_first.py's whole
+        # mechanism). See fetch_near_dated_markets's docstring for the
+        # full root-cause writeup. Merged into the same `seen`/all_markets
+        # so downstream code (scanner, resolve_first via the snapshot)
+        # sees one unified list, never a second population to reconcile.
+        nd_cfg = config.get("markets", {})
+        try:
+            near_dated = kalshi.fetch_near_dated_markets(
+                config,
+                max_days=nd_cfg.get("near_dated_max_days", 14),
+                target_count=nd_cfg.get("near_dated_target_count", 200),
+                max_pages=nd_cfg.get("near_dated_max_pages", 30),
+            )
+            nd_added = 0
+            for m in near_dated:
+                t = m.get("ticker")
+                if t and t not in seen:
+                    seen.add(t)
+                    all_markets.append(m)
+                    nd_added += 1
+            print(f"      Near-dated supplement: +{nd_added} markets (closing within "
+                  f"{nd_cfg.get('near_dated_max_days', 14)}d, {len(near_dated)} fetched)")
+        except Exception as _e:
+            print(f"      [warn] fetch_near_dated_markets: {_e}")
     except Exception as e:
         print(f"      Events fetch failed ({e}), falling back to /markets...")
         try:
