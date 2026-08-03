@@ -1086,6 +1086,118 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
     return scores
 
 
+def _aggregate_multi_sample(passes: list[list[dict]]) -> list[dict]:
+    """
+    backlog: multi-sample-scoring. Merges N independent score_markets()
+    passes over the SAME batch/prompt into one score list, per ticker.
+
+    direction is not free-standing data to average -- RESPONSE_SCHEMA
+    defines it as derived per-pass from comparing that pass's own
+    our_estimate to market_price ("YES if our_estimate > market_price and
+    edge is worth acting on", etc). A 0.7-YES sample and a 0.5-PASS sample
+    are answers to two different implicit questions, so blending their
+    our_estimate values directly would average across disagreeing framings.
+    Instead: direction is decided by majority vote across the N samples
+    for that ticker, ties (e.g. 2 YES / 2 NO / 1 PASS, or an even split)
+    broken toward PASS as the conservative default -- deliberately does
+    NOT act on a sample set that couldn't agree. our_estimate is then the
+    mean, taken only over the samples that agreed with the winning
+    direction (averaging in a disagreeing sample's estimate would still
+    blend framings even after the vote). edge is recomputed fresh from
+    that mean vs market_price rather than trusting any single sample's
+    self-reported edge, which won't in general match the aggregate.
+
+    confidence/reasoning are taken from the single agreeing sample whose
+    own our_estimate is closest to the mean (the most "representative"
+    individual call) rather than invented fresh -- there's no principled
+    way to average a HIGH/MED/LOW enum or a reasoning string. sources are
+    unioned (deduped by url) across every agreeing sample, since each
+    represents a genuinely independent research pass and collectively
+    they're a broader evidence base than any single one.
+
+    n_samples on the result is how many of the N passes agreed with the
+    final direction, for logging/calibration -- e.g. main.py's confluence
+    machinery or a future "how unanimous was this call" report.
+
+    A ticker missing from some passes (a parse hiccup, or Claude omitting
+    it from that pass's JSON array) is aggregated over however many passes
+    did include it -- no requirement to see it in all N.
+    """
+    by_ticker: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for pass_scores in passes:
+        for s in pass_scores:
+            ticker = s.get("ticker")
+            if ticker is None:
+                continue
+            if ticker not in by_ticker:
+                by_ticker[ticker] = []
+                order.append(ticker)
+            by_ticker[ticker].append(s)
+
+    aggregated = []
+    for ticker in order:
+        samples = by_ticker[ticker]
+        votes = {"YES": 0, "NO": 0, "PASS": 0}
+        norm_dirs = []
+        for s in samples:
+            d = s.get("direction")
+            d = d if d in votes else "PASS"
+            norm_dirs.append(d)
+            votes[d] += 1
+
+        top = max(votes.values())
+        winners = [d for d, c in votes.items() if c == top]
+        direction = winners[0] if len(winners) == 1 else "PASS"
+
+        # Ties among YES/NO with zero literal PASS samples resolve to
+        # "PASS" as a label with nothing in its own bucket to average --
+        # fall back to every sample rather than dividing by zero.
+        pool = [s for s, d in zip(samples, norm_dirs) if d == direction]
+        n_agree = len(pool)
+        if not pool:
+            pool = samples
+
+        market_price = samples[0].get("market_price")
+        estimates = [float(s.get("our_estimate") or 0) for s in pool]
+        our_estimate = sum(estimates) / len(estimates)
+        edge = abs(round(our_estimate - float(market_price or 0), 4))
+
+        rep = min(pool, key=lambda s: abs(float(s.get("our_estimate") or 0) - our_estimate))
+
+        sources: list = []
+        seen_urls = set()
+        for s in pool:
+            for src in (s.get("sources") or []):
+                url = src.get("url") if isinstance(src, dict) else src
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    sources.append(src)
+
+        sources_checked: list = []
+        seen_sc = set()
+        for s in pool:
+            for src in (s.get("sources_checked") or []):
+                if src not in seen_sc:
+                    seen_sc.add(src)
+                    sources_checked.append(src)
+
+        aggregated.append({
+            "ticker": ticker,
+            "market_price": market_price,
+            "our_estimate": round(our_estimate, 4),
+            "edge": round(edge, 4),
+            "direction": direction,
+            "confidence": rep.get("confidence", "LOW"),
+            "reasoning": rep.get("reasoning", ""),
+            "sources_checked": sources_checked,
+            "sources": sources,
+            "n_samples": n_agree,
+        })
+
+    return aggregated
+
+
 def score_markets(
     flagged_markets: list[dict],
     config: dict,
@@ -1100,6 +1212,13 @@ def score_markets(
     Live callers never set this; replay-runner passes the as-of date it's
     replaying so prompt text describes days-remaining relative to that
     date, not today.
+
+    config["scoring"]["multi_sample_n"] (default 1): backlog:
+    multi-sample-scoring. When >1, runs the SAME batch/prompt through the
+    backend that many times independently and merges the results via
+    _aggregate_multi_sample() instead of returning the single pass
+    directly. n_samples<=1 takes the exact original single-call path
+    (no behavior change for any existing caller/config).
     """
     if not flagged_markets:
         return [], {}
@@ -1116,9 +1235,30 @@ def score_markets(
     sys_prompt   = build_system_prompt(calibration, flag_cal=flag_cal)
 
     backend = config.get("llm", {}).get("backend", "cli")
-    if backend == "api":
-        return _score_via_api(sys_prompt, user_prompt, config)
-    return _score_via_cli(sys_prompt, user_prompt), {}
+    n_samples = int(config.get("scoring", {}).get("multi_sample_n", 1))
+
+    if n_samples <= 1:
+        if backend == "api":
+            return _score_via_api(sys_prompt, user_prompt, config)
+        return _score_via_cli(sys_prompt, user_prompt), {}
+
+    passes: list[list[dict]] = []
+    combined_token_info = {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+    }
+    for _ in range(n_samples):
+        if backend == "api":
+            pass_scores, tok = _score_via_api(sys_prompt, user_prompt, config)
+            for key in combined_token_info:
+                combined_token_info[key] += tok.get(key, 0)
+        else:
+            pass_scores = _score_via_cli(sys_prompt, user_prompt)
+        passes.append(pass_scores)
+
+    token_info = combined_token_info if backend == "api" else {}
+    return _aggregate_multi_sample(passes), token_info
 
 
 def rescore_single_market(
