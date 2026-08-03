@@ -1,16 +1,17 @@
 # Leviathan Backlog
-Last updated: 2026-08-02 | Metrics: resolved=12, fills=7
+Last updated: 2026-08-03 | Metrics: resolved=25, fills=7
 
-## Ready (1)
+## Ready (4)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 4 | brier-tracking | Track Brier scores over time to measure forecast calibration quality across runs. Unlocked 2026-08-03 -- backlog/checker.py's weekly run confirmed resolved_count reached its gate (25 >= 25) via live DB metrics. | calibration |
+| 4 | confluence-detection | Flag and track signals where multiple independent sources agree on direction. Unlocked 2026-08-03, same resolved_count>=25 gate as brier-tracking. | validation |
+| 5 | multi-sample-scoring | Score each qualifying market N times independently and aggregate to a single estimate, replacing the single-pass call in score_markets. Unlocked 2026-08-03 -- backlog.json's real trigger is resolved_count>=25 (now met), correcting this entry's earlier hand-maintained "blocked on ext-signal-activation" note, which was stale/inaccurate bookkeeping not reflected in the actual gate. | calibration |
 | 4 | kalshi-sdk-migration-implementation | Now that the evaluation (kalshi-sdk-evaluation-2026-08, see Done) live-tested both candidates against the real API, the actual swap: write a thin adapter inside core/kalshi.py that calls the chosen SDK (kalshi-sdk, TexasCoding -- cleaner ergonomics, auth worked with no bugs, `_all` auto-pagination helpers, `.to_dataframe()` export) internally but converts every response back to the exact same dict-shaped/string-typed contract every current caller already expects (main.py, analysis/resolve_first.py, analysis/snapshot_markets.py, scripts/position_reconciliation.py, and every test asserting dict access) -- NOT a typed-model propagation throughout the codebase, which would be far larger and riskier than this project's current size justifies. Must preserve fetch_near_dated_markets's KXMVE-flood day-chunking and every other empirically-discovered workaround, which are business logic unrelated to the HTTP client and don't go away with any SDK. Needs a live dry-run comparing old-vs-new output for all 21 of core/kalshi.py's current functions (the evaluation only spot-checked 2: get_markets, get_balance), full test suite green, before touching any call site. Scope check 2026-08-02 (reading core/kalshi.py in full, deliberately stopped short of implementing): the SDK's typed models don't just change types, some fields are renamed outright vs Kalshi's raw JSON shape core/kalshi.py currently passes through as-is -- e.g. our `"no_ask_dollars": "1.0000"` (string) vs the SDK Market model's `no_ask` (Decimal, no `_dollars` suffix). A safe adapter needs field-by-field remapping across all ~10 distinct response shapes (markets/events/trades/orderbook/fills/positions/candlesticks), each independently verified against live data, not just a type-conversion wrapper -- realistically several more hours beyond the evaluation, on code that also handles real fills/positions. The current hand-rolled auth/request code has no active bug (confirmed by the evaluation); the only benefit is boilerplate reduction, not a fix. Deliberately left for its own dedicated session with full runway rather than rushed alongside other same-session work. | infrastructure |
 
-## Locked (9)
+## Locked (7)
 | Priority | ID | Gate | Area |
 |----------|-----|------|------|
-| 4 | brier-tracking | resolved_count >= 25 | calibration |
-| 4 | confluence-detection | resolved_count >= 25 | validation |
 | 4 | per-heuristic-scorecard | resolved_count_per_category_max >= 15 | reporting |
 | 4 | per-wallet-track-record | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | calibration-curve | resolved_count >= 50 | calibration |
@@ -19,13 +20,12 @@ Last updated: 2026-08-02 | Metrics: resolved=12, fills=7
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (7)
+## Blocked (6)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
 | 6 | graphify-skill-evaluation | project shape changing to include a heterogeneous, non-code corpus (research papers, notes, screenshots) alongside the code, the way its own worked examples show real benefit. Evaluated 2026-08-02: Graphify-Labs/graphify (formerly safishamsi/graphify), a Claude Code `/graphify` skill that parses a folder into a local, queryable knowledge graph (tree-sitter AST + NetworkX/Leiden, runs entirely locally, no phone-home found). Legitimate on every technical signal checked -- PyPI package (`graphifyy`) matches the GitHub repo exactly, real multi-contributor history, CI configured, worked examples with committed input+output for independent verification, no typosquat risk. One residual, unresolved concern: 100k+ stars / 9.7k forks on a 4-month-old repo is an unusually fast growth rate that can't be confirmed organic from available signals. Not installed -- its own worked examples show the claimed "71.5x fewer tokens" benefit was on a heterogeneous 52-file corpus (code+papers+images), while its httpx example (single-language, single-repo, structurally the closest match to Leviathan) showed ~1x, i.e. no real benefit at Leviathan's current shape. Install footprint is also global (`~/.claude/CLAUDE.md`, `~/.claude/skills/`), not scoped to this project. | infrastructure |
 | 3 | replay-instrument-validation | human: approve real metered API spend to build the replay corpus. 2026-08-01 audit: replay_signals has 0 rows -- backtesting/replay_runner.py has never actually been run, despite settled_markets having 12,600 rows available. It forces config.llm.backend="api" (real billing, not the free CLI/Pro path used by the live scan) and processes only DEFAULT_MAX_MARKETS=5 tickers per invocation, so reaching n>=300 means dozens of invocations against the daily_cost_ceiling_usd=$20/day cap, likely spread over several days. Did not run this without checking first. | validation |
 | 5 | methodology-writeup | replay-instrument-validation, preregistration | reporting |
-| 5 | multi-sample-scoring | ext-signal-activation (both originally-listed blockers, llm-cost-ceiling and market-baseline-brier, are already Done below -- gate_notifier.py's dependency-tracking is deliberately not auto-evaluated in v1, so this sat stale until this audit found the real blocker: the feature those two unblocked, ext-signal-activation's extremizing transform, has never actually fired) | calibration |
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
