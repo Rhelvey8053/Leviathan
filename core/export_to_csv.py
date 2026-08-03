@@ -73,7 +73,7 @@ WHITELIST = [
     "ob_flag", "ob_imbalance", "ob_direction",
     "spread_wide", "spread_pct",
     "confidence_downgraded", "second_pass",
-    "ext_estimate", "ext_edge", "ext_n_signals", "ext_alpha",
+    "ext_estimate", "ext_edge", "ext_n_signals", "ext_alpha", "confluence_count",
     "poly_price", "poly_price_gap", "consensus_gap", "consensus_dir",
     "smart_money_count", "smart_money_dir",
     "brier_scorer", "brier_market",

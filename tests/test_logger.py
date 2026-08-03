@@ -1586,6 +1586,95 @@ def test_log_run_idempotent_replace(tmp_db):
     assert rows[0]["markets_scanned"] == 200  # second write wins
 
 
+# ─── brier-tracking (runs.brier_scorer/brier_market/brier_n) ─────────────────
+
+def test_schema_includes_brier_snapshot_columns_on_runs(tmp_db):
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    for col in ("brier_scorer", "brier_market", "brier_n"):
+        assert col in cols
+
+
+def test_migration_adds_brier_columns_to_old_runs_schema_without_corrupting_rows(tmp_path):
+    """Construct a DB with the OLD (pre-brier-tracking) runs schema, insert a
+    row, run the migration (_init_db), and confirm the row survives with the
+    new columns present and NULL (never coerced to 0)."""
+    import sqlite3
+    db_file = str(tmp_path / "old_runs_schema.db")
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT
+        );
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, whale_flags INTEGER, model_used TEXT,
+            tokens_used INTEGER, cost_usd REAL, runtime_ms INTEGER
+        );
+    """)
+    conn.execute("INSERT INTO runs (run_id, markets_scanned) VALUES ('old-run', 100)")
+    conn.commit()
+    conn.close()
+
+    old_db_path = logger.DB_PATH
+    try:
+        logger.DB_PATH = db_file
+        logger._init_db()
+        with logger._db() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(runs)").fetchall()}
+            for col in ("brier_scorer", "brier_market", "brier_n"):
+                assert col in cols
+            row = c.execute("SELECT * FROM runs WHERE run_id='old-run'").fetchone()
+            assert row["markets_scanned"] == 100
+            assert row["brier_scorer"] is None
+            assert row["brier_n"] is None
+    finally:
+        logger.DB_PATH = old_db_path
+
+
+def test_log_run_stores_brier_snapshot(tmp_db):
+    logger.log_run({
+        "run_id": "run-brier-1", "timestamp": "2026-08-03T00:00:00Z",
+        "markets_scanned": 100, "signals_generated": 2, "whale_flags": 0,
+        "model_used": "m1", "tokens_used": 0, "cost_usd": 0.0, "runtime_ms": 1000,
+        "brier_scorer": 0.18, "brier_market": 0.22, "brier_n": 25,
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT * FROM runs WHERE run_id='run-brier-1'").fetchone()
+    assert row["brier_scorer"] == pytest.approx(0.18)
+    assert row["brier_market"] == pytest.approx(0.22)
+    assert row["brier_n"] == 25
+
+
+def test_get_brier_history_empty(tmp_db):
+    assert logger.get_brier_history() == []
+
+
+def test_get_brier_history_excludes_runs_with_null_brier_n(tmp_db):
+    """A run logged without a brier snapshot (brier_n never set) must not
+    show up as a spurious data point."""
+    logger.log_run({"run_id": "run-nobrier", "timestamp": "2026-08-01T00:00:00Z",
+                    "markets_scanned": 50, "signals_generated": 1,
+                    "whale_flags": 0, "model_used": "m1",
+                    "tokens_used": 0, "cost_usd": 0.0, "runtime_ms": 1000})
+    assert logger.get_brier_history() == []
+
+
+def test_get_brier_history_ordered_oldest_first(tmp_db):
+    logger.log_run({"run_id": "run-b2", "timestamp": "2026-08-02T00:00:00Z",
+                    "markets_scanned": 100, "signals_generated": 2, "whale_flags": 0,
+                    "model_used": "m1", "tokens_used": 0, "cost_usd": 0.0, "runtime_ms": 1000,
+                    "brier_scorer": 0.20, "brier_market": 0.25, "brier_n": 20})
+    logger.log_run({"run_id": "run-b1", "timestamp": "2026-08-01T00:00:00Z",
+                    "markets_scanned": 90, "signals_generated": 1, "whale_flags": 0,
+                    "model_used": "m1", "tokens_used": 0, "cost_usd": 0.0, "runtime_ms": 1000,
+                    "brier_scorer": 0.22, "brier_market": 0.26, "brier_n": 15})
+    history = logger.get_brier_history()
+    assert [h["run_id"] for h in history] == ["run-b1", "run-b2"]
+    assert history[0]["n"] == 15
+    assert history[1]["n"] == 20
+
+
 # ─── get_brier_score ──────────────────────────────────────────────────────────
 
 def test_brier_score_pending_when_no_resolved(tmp_db):
@@ -3184,6 +3273,48 @@ def test_log_signal_stores_extremizing_fields(tmp_db):
     assert row["ext_alpha"] == pytest.approx(1.3)
 
 
+def test_schema_includes_confluence_count_column(tmp_db):
+    """backlog: confluence-detection. New column exists on signals."""
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "confluence_count" in cols
+
+
+def test_log_signal_stores_confluence_count(tmp_db):
+    sig = {
+        "ticker": "KXCONF1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "confluence_count": 2,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT confluence_count FROM signals WHERE ticker='KXCONF1'"
+        ).fetchone()
+    assert row["confluence_count"] == 2
+
+
+def test_log_pass_stores_confluence_count(tmp_db):
+    """
+    log_pass()'s INSERT column list previously lagged log_signal()'s for
+    confluence_count (same class of gap log-pass-schema-parity fixed for
+    the earlier Tier 2/3 columns) -- caught here directly rather than
+    relying on the two INSERTs staying manually in sync.
+    """
+    sig = {
+        "ticker": "KXCONF2", "direction": "PASS", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "confluence_count": 1,
+    }
+    logger.log_pass(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT confluence_count FROM signals WHERE ticker='KXCONF2'"
+        ).fetchone()
+    assert row is not None
+    assert row["confluence_count"] == 1
+
+
 def test_log_signal_stores_cross_market_fields(tmp_db):
     sig = {
         "ticker": "KXXM1", "direction": "YES", "confidence": "MED", "run_id": "test",
@@ -3447,3 +3578,86 @@ def test_log_pass_stores_reasoning_and_sources(tmp_db):
     assert row["direction"] == "PASS"
     assert row["reasoning"] == "No clean edge found."
     assert json.loads(row["sources"]) == [{"url": "https://ap.org/y", "title": "AP"}]
+
+
+# ─── get_stats_by_confluence (backlog: confluence-detection) ─────────────────
+
+def _insert_confluence(call_id, confluence_count, result_val, our_estimate=0.60,
+                        direction="YES", pnl=0.60, edge=0.20):
+    """Insert a resolved paper signal with a given confluence_count."""
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, result, outcome, pnl_if_traded, source, confluence_count)
+            VALUES (?,datetime('now'),?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, f"KX{call_id}", direction, 0.40, our_estimate,
+            edge, result_val, direction, pnl, "paper", confluence_count,
+        ))
+
+
+def test_get_stats_by_confluence_empty(tmp_db):
+    """Empty DB -> all buckets have total=0, win_rate=None."""
+    stats = logger.get_stats_by_confluence()
+    for bucket in ("0", "1", "2+"):
+        assert stats[bucket]["total"]    == 0
+        assert stats[bucket]["win_rate"] is None
+
+
+def test_get_stats_by_confluence_buckets_correctly(tmp_db):
+    """0/1/2/3 confluence_count values sort into the 0 / 1 / 2+ buckets."""
+    _insert_confluence("cf1", 0, "LOSS")
+    _insert_confluence("cf2", 1, "WIN")
+    _insert_confluence("cf3", 2, "WIN")
+    _insert_confluence("cf4", 3, "WIN")
+    stats = logger.get_stats_by_confluence()
+    assert stats["0"]["total"]  == 1
+    assert stats["1"]["total"]  == 1
+    assert stats["2+"]["total"] == 2
+    assert stats["2+"]["wins"]  == 2
+
+
+def test_get_stats_by_confluence_win_rate_and_brier(tmp_db):
+    """win_rate and brier are computed correctly for a populated bucket."""
+    _insert_confluence("cf5", 2, "WIN",  our_estimate=0.80, direction="YES")
+    _insert_confluence("cf6", 2, "LOSS", our_estimate=0.80, direction="YES")
+    stats = logger.get_stats_by_confluence()
+    assert stats["2+"]["total"]    == 2
+    assert stats["2+"]["win_rate"] == pytest.approx(50.0)
+    # brier: WIN -> (0.80-1)^2=0.04, LOSS -> (0.80-0)^2=0.64 -> mean 0.34
+    assert stats["2+"]["brier"]    == pytest.approx(0.34)
+
+
+def test_get_stats_by_confluence_excludes_null_confluence_count(tmp_db):
+    """
+    Rows logged before confluence_count existed (NULL) are excluded, not
+    coerced into the "0" bucket -- NULL means "not measured", not "zero
+    agreeing sources".
+    """
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, result, outcome, pnl_if_traded, source, confluence_count)
+            VALUES ('cfnull',datetime('now'),'KXCFNULL','YES',0.40,0.60,
+                    0.20,'WIN','YES',0.60,'paper',NULL)
+        """)
+    stats = logger.get_stats_by_confluence()
+    for bucket in ("0", "1", "2+"):
+        assert stats[bucket]["total"] == 0
+
+
+def test_get_stats_by_confluence_excludes_pass_direction(tmp_db):
+    """PASS-direction rows (no real YES/NO call) must not contaminate stats."""
+    _insert_confluence("cf7", 2, "WIN")
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, direction, market_price, our_estimate,
+             edge, result, outcome, pnl_if_traded, source, confluence_count)
+            VALUES ('cfpass',datetime('now'),'KXCFPASS','PASS',0.40,0.60,
+                    0.20,'','',NULL,'paper',2)
+        """)
+    stats = logger.get_stats_by_confluence()
+    assert stats["2+"]["total"] == 1

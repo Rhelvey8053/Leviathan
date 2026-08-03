@@ -36,12 +36,12 @@ def _db():
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
-def _add_col(conn, col_def: str) -> None:
-    """Add a column to signals if it doesn't already exist (idempotent)."""
+def _add_col(conn, col_def: str, table: str = "signals") -> None:
+    """Add a column to `table` if it doesn't already exist (idempotent)."""
     col_name = col_def.split()[0]
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if col_name not in existing:
-        conn.execute(f"ALTER TABLE signals ADD COLUMN {col_def}")
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
 
 
 def _init_db() -> None:
@@ -146,6 +146,15 @@ def _init_db() -> None:
             "ext_edge              REAL",
             "ext_n_signals         INTEGER",
             "ext_alpha             REAL",
+            # backlog: confluence-detection. The same agreeing-signal count
+            # ext_n_signals carries, but recorded unconditionally on every
+            # YES/NO signal -- ext_n_signals is only ever set when the
+            # extremizing transform's own >=2 threshold fires (main.py),
+            # so n=0 and n=1 are both NULL there and indistinguishable.
+            # confluence_count is that same _count_agreeing_signals() value
+            # with no threshold gate, letting get_stats_by_confluence()
+            # compare 0 vs 1 vs 2+ agreeing sources against actual outcomes.
+            "confluence_count      INTEGER",
             # Cross-market/smart-money evidence at signal time -- previously
             # computed fresh every run for the prompt/report and discarded;
             # without these, "did Polymarket/consensus/smart-money agreement
@@ -186,6 +195,17 @@ def _init_db() -> None:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
         conn.execute("UPDATE signals SET source='paper' WHERE source IS NULL")
+        # backlog: brier-tracking. get_brier_score()/get_market_baseline_
+        # brier_score() only ever computed a single current-snapshot
+        # aggregate over all resolved signals to date -- nothing persisted
+        # a point-in-time value, so there was no way to see whether
+        # calibration is improving or degrading across runs. log_run()
+        # now snapshots both onto each run row; brier_n is None (not 0)
+        # for any run logged before this existed, or any run where no
+        # signal had resolved yet -- distinguishing "not measured" from
+        # "measured zero signals resolved."
+        for col in ("brier_scorer REAL", "brier_market REAL", "brier_n INTEGER"):
+            _add_col(conn, col, table="runs")
         # db-audit-2026-08: contract_type/resolution_date/logged_under were
         # never read or written by any code path (confirmed against every
         # INSERT INTO signals in this file) -- dead schema from an earlier
@@ -298,11 +318,11 @@ def log_signal(signal: dict) -> None:
                  whale_max_trade_size,category,
                  ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
                  confidence_downgraded,second_pass,
-                 ext_estimate,ext_edge,ext_n_signals,ext_alpha,
+                 ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -349,6 +369,7 @@ def log_signal(signal: dict) -> None:
                 _to_float(signal.get("ext_edge")),
                 _to_int(signal.get("ext_n_signals")),
                 _to_float(signal.get("ext_alpha")),
+                _to_int(signal.get("confluence_count")),
                 _to_float(signal.get("poly_price")),
                 _to_float(signal.get("poly_price_gap")),
                 _to_float(signal.get("consensus_gap")),
@@ -382,11 +403,11 @@ def log_pass(signal: dict) -> None:
                  whale_max_trade_size,category,
                  ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
                  confidence_downgraded,second_pass,
-                 ext_estimate,ext_edge,ext_n_signals,ext_alpha,
+                 ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -439,6 +460,7 @@ def log_pass(signal: dict) -> None:
                 _to_float(signal.get("ext_edge")),
                 _to_int(signal.get("ext_n_signals")),
                 _to_float(signal.get("ext_alpha")),
+                _to_int(signal.get("confluence_count")),
                 _to_float(signal.get("poly_price")),
                 _to_float(signal.get("poly_price_gap")),
                 _to_float(signal.get("consensus_gap")),
@@ -515,8 +537,9 @@ def log_run(run_data: dict) -> None:
             conn.execute("""
                 INSERT OR REPLACE INTO runs
                 (run_id,timestamp,markets_scanned,signals_generated,
-                 whale_flags,model_used,tokens_used,cost_usd,runtime_ms)
-                VALUES (?,?,?,?,?,?,?,?,?)
+                 whale_flags,model_used,tokens_used,cost_usd,runtime_ms,
+                 brier_scorer,brier_market,brier_n)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 run_data.get("run_id", ""),
                 run_data.get("timestamp", ""),
@@ -527,6 +550,9 @@ def log_run(run_data: dict) -> None:
                 _to_int(run_data.get("tokens_used")),
                 _to_float(run_data.get("cost_usd")),
                 _to_int(run_data.get("runtime_ms")),
+                _to_float(run_data.get("brier_scorer")),
+                _to_float(run_data.get("brier_market")),
+                _to_int(run_data.get("brier_n")),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log run: {e}")
@@ -1484,6 +1510,48 @@ def get_market_baseline_brier_score() -> dict:
     return {"brier_score": round(brier, 4), "n": len(rows), "label": label}
 
 
+def get_brier_history() -> list[dict]:
+    """
+    backlog: brier-tracking. Returns the per-run cumulative Brier snapshots
+    log_run() writes onto the runs table, oldest first -- the actual
+    "over time" view get_brier_score()/get_market_baseline_brier_score()
+    can't provide on their own, since those two only ever compute the
+    CURRENT aggregate at call time.
+
+    Each entry: {run_id, timestamp, brier_scorer, brier_market, n}. Runs
+    logged before this existed (or where brier_n was never recorded because
+    log_run() failed, or 0 signals had resolved yet) have brier_n IS NULL
+    and are excluded -- a missing snapshot is not the same as a genuine
+    "0 signals resolved at this point" data point, which br_n=0 would be.
+    Consecutive runs frequently share the same values (the underlying
+    resolved-signal population barely changes run to run) -- that's a real
+    feature of a slow-resolving market, not a computation bug.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id, timestamp, brier_scorer, brier_market, brier_n
+                FROM runs
+                WHERE brier_n IS NOT NULL
+                ORDER BY timestamp ASC
+                """
+            ).fetchall()
+    except Exception:
+        return []
+
+    return [
+        {
+            "run_id":       r["run_id"],
+            "timestamp":    r["timestamp"],
+            "brier_scorer": r["brier_scorer"],
+            "brier_market": r["brier_market"],
+            "n":            r["brier_n"],
+        }
+        for r in rows
+    ]
+
+
 def get_market_drift_stats() -> dict:
     """
     Aggregate CLV-style drift stats (GOAL_subscriber_report.md Phase 4) over
@@ -2154,6 +2222,77 @@ def get_stats_by_watchlist() -> dict:
             result[k]["win_rate"]  = result[k]["wins"] / n * 100
             result[k]["total_pnl"] = pnl_sum[k]
             result[k]["avg_edge"]  = edge_sum[k] / edge_n[k] if edge_n[k] else None
+
+    return result
+
+
+def get_stats_by_confluence() -> dict:
+    """
+    backlog: confluence-detection. Win rate/Brier for paper signals grouped
+    by confluence_count (how many independent sources -- Polymarket,
+    consensus cross-market signal, smart-money watchlist -- agreed with
+    Claude's own direction at scan time; see main.py's
+    _count_agreeing_signals()).
+
+    Buckets: "0" (no corroboration), "1" (one agreeing source), "2+" (the
+    same >=2 threshold main.py's extremizing transform itself uses to
+    decide the estimate is worth adjusting). Rows with confluence_count
+    NULL (logged before this field existed) are excluded, not coerced to 0
+    -- unlike ext_n_signals, confluence_count is recorded unconditionally
+    going forward, so NULL genuinely means "not measured", not "zero".
+
+    Returns dict with keys '0', '1', '2+'; each has:
+      total, wins, win_rate, total_pnl, avg_edge, brier
+    Only includes resolved paper signals with direction YES or NO.
+    """
+    result = {k: {"total": 0, "wins": 0, "win_rate": None,
+                  "total_pnl": None, "avg_edge": None, "brier": None}
+              for k in ("0", "1", "2+")}
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT confluence_count, our_estimate, direction, result,
+                       pnl_if_traded, edge
+                FROM signals
+                WHERE ({_NO_PASS})
+                  AND result IS NOT NULL AND result != ''
+                  AND direction IN ('YES','NO')
+                  AND confluence_count IS NOT NULL
+                """
+            ).fetchall()
+    except Exception:
+        return result
+
+    pnl_sum   = {k: 0.0 for k in result}
+    edge_sum  = {k: 0.0 for k in result}
+    edge_n    = {k: 0   for k in result}
+    brier_sum = {k: 0.0 for k in result}
+    brier_n   = {k: 0   for k in result}
+
+    for r in rows:
+        n = r["confluence_count"]
+        k = "0" if n == 0 else ("1" if n == 1 else "2+")
+        result[k]["total"] += 1
+        if r["result"] == "WIN":
+            result[k]["wins"] += 1
+        if r["pnl_if_traded"] is not None:
+            pnl_sum[k] += float(r["pnl_if_traded"])
+        if r["edge"] is not None:
+            edge_sum[k] += float(r["edge"])
+            edge_n[k]   += 1
+        bc = brier_component(r["our_estimate"], r["direction"], r["result"])
+        if bc is not None:
+            brier_sum[k] += bc
+            brier_n[k]   += 1
+
+    for k in result:
+        n = result[k]["total"]
+        if n:
+            result[k]["win_rate"]  = result[k]["wins"] / n * 100
+            result[k]["total_pnl"] = pnl_sum[k]
+            result[k]["avg_edge"]  = edge_sum[k] / edge_n[k] if edge_n[k] else None
+            result[k]["brier"]     = brier_sum[k] / brier_n[k] if brier_n[k] else None
 
     return result
 
