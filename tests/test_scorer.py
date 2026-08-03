@@ -1486,6 +1486,207 @@ def test_score_via_cli_recovers_from_mixed_timeout_and_nonzero_exit():
     assert mock_run.call_count == 3
 
 
+# ─── _aggregate_multi_sample / multi-sample-scoring ──────────────────────────
+
+def _sample(ticker="KXTEST-01", market_price=0.30, our_estimate=0.50,
+            direction="YES", confidence="MED", reasoning="r", sources=None,
+            sources_checked=None):
+    s = {
+        "ticker": ticker, "market_price": market_price, "our_estimate": our_estimate,
+        "edge": round(abs(our_estimate - market_price), 4), "direction": direction,
+        "confidence": confidence, "reasoning": reasoning,
+        "sources_checked": sources_checked if sources_checked is not None else [],
+    }
+    if sources is not None:
+        s["sources"] = sources
+    return s
+
+
+def test_aggregate_multi_sample_unanimous_direction_averages_estimate():
+    """All 3 passes agree YES -- our_estimate is the plain mean of the 3."""
+    passes = [
+        [_sample(our_estimate=0.50)],
+        [_sample(our_estimate=0.60)],
+        [_sample(our_estimate=0.55)],
+    ]
+    out = scorer._aggregate_multi_sample(passes)
+    assert len(out) == 1
+    assert out[0]["direction"] == "YES"
+    assert out[0]["our_estimate"] == pytest.approx(0.55, abs=1e-6)
+    assert out[0]["n_samples"] == 3
+
+
+def test_aggregate_multi_sample_majority_vote_wins():
+    """3 YES / 2 NO -- YES wins; NO samples' estimates don't enter the mean."""
+    passes = [
+        [_sample(our_estimate=0.50, direction="YES")],
+        [_sample(our_estimate=0.52, direction="YES")],
+        [_sample(our_estimate=0.54, direction="YES")],
+        [_sample(our_estimate=0.10, direction="NO")],
+        [_sample(our_estimate=0.12, direction="NO")],
+    ]
+    out = scorer._aggregate_multi_sample(passes)[0]
+    assert out["direction"] == "YES"
+    assert out["our_estimate"] == pytest.approx((0.50 + 0.52 + 0.54) / 3, abs=1e-6)
+    assert out["n_samples"] == 3
+
+
+def test_aggregate_multi_sample_even_split_ties_break_to_pass():
+    """2 YES / 2 NO is a genuine tie -- conservative default is PASS, not a
+    coin-flip pick of either side."""
+    passes = [
+        [_sample(direction="YES")],
+        [_sample(direction="YES")],
+        [_sample(direction="NO")],
+        [_sample(direction="NO")],
+    ]
+    out = scorer._aggregate_multi_sample(passes)[0]
+    assert out["direction"] == "PASS"
+
+
+def test_aggregate_multi_sample_pass_majority_stays_pass():
+    passes = [
+        [_sample(direction="PASS", our_estimate=0.31)],
+        [_sample(direction="PASS", our_estimate=0.29)],
+        [_sample(direction="YES", our_estimate=0.55)],
+    ]
+    out = scorer._aggregate_multi_sample(passes)[0]
+    assert out["direction"] == "PASS"
+    assert out["n_samples"] == 2
+    # our_estimate averaged only over the 2 agreeing PASS samples
+    assert out["our_estimate"] == pytest.approx((0.31 + 0.29) / 2, abs=1e-6)
+
+
+def test_aggregate_multi_sample_edge_recomputed_from_aggregate_estimate():
+    """edge must match the AGGREGATED our_estimate vs market_price, not any
+    single pass's self-reported edge (which won't match the mean)."""
+    passes = [
+        [_sample(market_price=0.30, our_estimate=0.50)],
+        [_sample(market_price=0.30, our_estimate=0.70)],
+    ]
+    out = scorer._aggregate_multi_sample(passes)[0]
+    assert out["our_estimate"] == pytest.approx(0.60, abs=1e-6)
+    assert out["edge"] == pytest.approx(0.30, abs=1e-6)
+
+
+def test_aggregate_multi_sample_confidence_and_reasoning_from_representative_sample():
+    """confidence/reasoning aren't invented -- taken from whichever agreeing
+    sample's own our_estimate is closest to the aggregate mean."""
+    passes = [
+        [_sample(our_estimate=0.40, confidence="LOW", reasoning="low-conf take")],
+        [_sample(our_estimate=0.60, confidence="HIGH", reasoning="high-conf take")],
+    ]
+    out = scorer._aggregate_multi_sample(passes)[0]
+    # mean is 0.50 -- both samples are equidistant (0.10 each); min() picks
+    # the first-seen on an exact tie, i.e. the LOW/0.40 sample.
+    assert out["our_estimate"] == pytest.approx(0.50, abs=1e-6)
+    assert out["confidence"] in ("LOW", "HIGH")
+    assert out["reasoning"] in ("low-conf take", "high-conf take")
+
+
+def test_aggregate_multi_sample_sources_unioned_and_deduped():
+    passes = [
+        [_sample(sources=[{"url": "https://a.com", "title": "A"}])],
+        [_sample(sources=[{"url": "https://a.com", "title": "A dup"},
+                           {"url": "https://b.com", "title": "B"}])],
+    ]
+    out = scorer._aggregate_multi_sample(passes)[0]
+    urls = [s["url"] for s in out["sources"]]
+    assert urls == ["https://a.com", "https://b.com"]
+
+
+def test_aggregate_multi_sample_sources_checked_unioned_and_deduped():
+    passes = [
+        [_sample(sources_checked=["Reuters: x"])],
+        [_sample(sources_checked=["Reuters: x", "AP: y"])],
+    ]
+    out = scorer._aggregate_multi_sample(passes)[0]
+    assert out["sources_checked"] == ["Reuters: x", "AP: y"]
+
+
+def test_aggregate_multi_sample_ticker_missing_from_some_passes():
+    """A ticker Claude only returned in 2 of 3 passes is still aggregated,
+    over just the passes that included it -- no requirement to see it N times."""
+    passes = [
+        [_sample(ticker="KXA-01", our_estimate=0.40),
+         _sample(ticker="KXB-01", our_estimate=0.60)],
+        [_sample(ticker="KXA-01", our_estimate=0.44)],
+        [_sample(ticker="KXB-01", our_estimate=0.64)],
+    ]
+    out = {s["ticker"]: s for s in scorer._aggregate_multi_sample(passes)}
+    assert out["KXA-01"]["n_samples"] == 2
+    assert out["KXA-01"]["our_estimate"] == pytest.approx(0.42, abs=1e-6)
+    assert out["KXB-01"]["n_samples"] == 2
+    assert out["KXB-01"]["our_estimate"] == pytest.approx(0.62, abs=1e-6)
+
+
+def test_aggregate_multi_sample_result_passes_validation():
+    """The aggregated dict must still satisfy _validate_scores's required
+    fields -- it flows right back into the same downstream path a
+    single-pass score_markets() result does."""
+    from core.llm import _validate_scores
+    passes = [[_sample()], [_sample(our_estimate=0.52)]]
+    out = scorer._aggregate_multi_sample(passes)
+    _validate_scores(out)  # must not raise
+
+
+# ─── score_markets: multi_sample_n wiring ─────────────────────────────────────
+
+def test_score_markets_default_multi_sample_n_calls_backend_once(monkeypatch):
+    """multi_sample_n absent/1 takes the exact original single-call path."""
+    from unittest.mock import patch
+    m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
+    config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10}}
+    with patch("core.scorer._score_via_cli", return_value=[_sample()]) as mock_cli:
+        result, token_info = scorer.score_markets([m], config)
+    assert mock_cli.call_count == 1
+    assert token_info == {}
+    assert result[0]["ticker"] == "KXTEST-01"
+
+
+def test_score_markets_multi_sample_n_calls_cli_backend_n_times(monkeypatch):
+    from unittest.mock import patch
+    m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
+    config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10,
+                          "multi_sample_n": 5}}
+    responses = [[_sample(our_estimate=0.50 + i * 0.01)] for i in range(5)]
+    with patch("core.scorer._score_via_cli", side_effect=responses) as mock_cli:
+        result, token_info = scorer.score_markets([m], config)
+    assert mock_cli.call_count == 5
+    assert token_info == {}
+    assert len(result) == 1
+    assert result[0]["n_samples"] == 5
+
+
+def test_score_markets_multi_sample_n_aggregates_token_info_for_api_backend():
+    from unittest.mock import patch
+    m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
+    config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10,
+                          "multi_sample_n": 3},
+              "llm": {"backend": "api"}}
+    tok = {"input_tokens": 100, "output_tokens": 50,
+           "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+           "cost_usd": 0.01}
+    with patch("core.scorer._score_via_api", return_value=([_sample()], tok)) as mock_api:
+        result, token_info = scorer.score_markets([m], config)
+    assert mock_api.call_count == 3
+    assert token_info["input_tokens"] == 300
+    assert token_info["output_tokens"] == 150
+    assert token_info["cost_usd"] == pytest.approx(0.03, abs=1e-9)
+
+
+def test_score_markets_multi_sample_n_one_explicit_same_as_default(monkeypatch):
+    """multi_sample_n=1 explicitly set behaves identically to it being absent."""
+    from unittest.mock import patch
+    m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
+    config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10,
+                          "multi_sample_n": 1}}
+    with patch("core.scorer._score_via_cli", return_value=[_sample()]) as mock_cli:
+        result, token_info = scorer.score_markets([m], config)
+    assert mock_cli.call_count == 1
+    assert token_info == {}
+
+
 # ─── rescore_single_market (GOAL_phase2-6_decisions.md Decision 1) ───────────
 #
 # One market per API call so its web_search_tool_result set -- and therefore
