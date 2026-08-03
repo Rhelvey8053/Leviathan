@@ -328,6 +328,32 @@ def main():
     else:
         print("  No resolved data.")
 
+    # Confluence detection: 0 vs 1 vs 2+ independent agreeing sources
+    print()
+    print(_rule("="))
+    print("BY CONFLUENCE  (does agreement across independent sources predict wins?)")
+    print(_rule("-"))
+    print()
+    cf = logger.get_stats_by_confluence()
+    cf_rows = [
+        {"flag_path": "0 agreeing sources",  **cf["0"]},
+        {"flag_path": "1 agreeing source",   **cf["1"]},
+        {"flag_path": "2+ agreeing sources", **cf["2+"]},
+    ]
+    cf_rows = [r for r in cf_rows if r.get("total", 0) > 0]
+    if cf_rows:
+        _print_table(cf_rows, key_label="Confluence", key_col="flag_path", unit_size=unit_size)
+        c0_wr = cf["0"]["win_rate"]
+        c2_wr = cf["2+"]["win_rate"]
+        if c0_wr is not None and c2_wr is not None:
+            delta   = c2_wr - c0_wr
+            verdict = "confluence predictive (2+ sources beat 0)" if delta > 5 else (
+                      "confluence underperforms (2+ sources worse than 0)" if delta < -5 else
+                      "no meaningful difference yet")
+            print(f"\n  2+ sources vs 0 sources win-rate: {c2_wr:.0f}% vs {c0_wr:.0f}%  --> {verdict}")
+    else:
+        print("  No resolved data yet (confluence_count field added recently).")
+
     # PASS rate by flag path (false-positive detector)
     print()
     print(_rule("="))

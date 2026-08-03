@@ -906,8 +906,15 @@ def main():
         # (Satopää et al. 2014; Good Judgment Project validated this empirically.)
         _dir = signal.get("direction", "PASS")
         _est = float(signal.get("our_estimate") or 0)
+        if _dir in ("YES", "NO"):
+            # backlog: confluence-detection. Recorded unconditionally (unlike
+            # ext_n_signals below, which is only set once the extremizing
+            # transform's own >=2 threshold fires) so get_stats_by_confluence()
+            # can compare 0 vs 1 vs 2+ agreeing sources against real outcomes,
+            # not just the subset that already cleared a different threshold.
+            signal["confluence_count"] = _count_agreeing_signals(m, _dir)
         if _dir in ("YES", "NO") and 0.05 < _est < 0.95:
-            _n = _count_agreeing_signals(m, _dir)
+            _n = signal.get("confluence_count", _count_agreeing_signals(m, _dir))
             _alpha = 1.30 if _n >= 3 else (1.15 if _n >= 2 else 1.0)
             if _alpha > 1.0:
                 _ext = _extremize(_est, _alpha)
@@ -1026,6 +1033,14 @@ def main():
             sig["leviathan_score"] = report.compute_leviathan_score(sig)
             logger.log_signal(sig)
         run_meta["runtime_ms"] = int((time.time() - start_time) * 1000)
+        # backlog: brier-tracking. Snapshot the current cumulative Brier
+        # scores onto this run row so calibration quality can be tracked
+        # across runs, not just read as a single current-moment aggregate.
+        _brier      = logger.get_brier_score()
+        _brier_mkt  = logger.get_market_baseline_brier_score()
+        run_meta["brier_scorer"] = _brier.get("brier_score")
+        run_meta["brier_market"] = _brier_mkt.get("brier_score")
+        run_meta["brier_n"]      = _brier.get("n")
         logger.log_run(run_meta)
         print(f"      Logged {len(new_signals)} new, {len(repeat_signals)} repeat signal(s)")
     except Exception as e:
