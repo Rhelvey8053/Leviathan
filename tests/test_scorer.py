@@ -1273,6 +1273,23 @@ def test_pre_claude_lv_gate_returns_empty_when_all_markets_too_weak():
     assert token_info == {}
 
 
+def test_pre_claude_lv_gate_whale_detected_clears_previously_failing_market():
+    """whale-flag-lv-guarantee (2026-08-04): a market that fails the gate on
+    its own (LV 19, see _weak_market) now clears it once whale_detected is
+    added (+4 -> LV 23), instead of silently dropping out before ever
+    reaching Claude -- previously whale_detected only added anything when
+    ob_flag was also set, so a whale-only flag on a weak market got zero
+    benefit from the flag at all."""
+    from unittest.mock import patch
+    m = _weak_market(whale_data={"whale_detected": True})
+    lv = __import__("core.report", fromlist=["compute_leviathan_score"]).compute_leviathan_score(m)
+    assert lv >= 20, f"pre-condition: whale_detected should raise LV to >=20, got {lv}"
+    config = {"scoring": {"min_pre_claude_lv": 20, "max_markets_per_run": 10}}
+    with patch("core.scorer._score_via_cli", return_value=[]) as mock_cli:
+        scorer.score_markets([m], config)
+    mock_cli.assert_called_once()  # gate passed -- reached the CLI batch step
+
+
 def test_pre_claude_lv_gate_disabled_when_zero():
     """When min_pre_claude_lv=0, gate is bypassed and all markets reach the batch step."""
     m = _weak_market()

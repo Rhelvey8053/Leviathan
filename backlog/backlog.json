@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-07-25",
+  "updated": "2026-08-04",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -118,8 +118,8 @@
       "id": "brier-tracking",
       "title": "Brier Score Tracking",
       "area": "calibration",
-      "priority": 4,
-      "status": "ready",
+      "priority": 1,
+      "status": "done",
       "trigger": {
         "all": [
           {
@@ -130,15 +130,15 @@
         ]
       },
       "depends_on": [],
-      "action": "Track Brier scores over time to measure forecast calibration quality across runs.",
+      "action": "get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a point-in-time value, so there was no way to see whether calibration is improving or degrading run over run. log_run() now snapshots both scores (plus the n they were computed over) onto each run row via 3 new columns on the runs table (brier_scorer, brier_market, brier_n) -- required generalizing _add_col() (previously hardcoded to ALTER TABLE signals) to take a table= parameter so it could migrate runs too. brier_n is NULL, not 0, for any run logged before this existed or where 0 signals had resolved yet at that point -- distinguishes \"not measured\" from \"measured zero.\" Added get_brier_history() to read the series back oldest-first for a future trend view. Found and fixed a bug introduced while writing the new tests: an Edit meant to append a trailing assertion onto test_log_run_idempotent_replace instead displaced it into the newly-added test_get_brier_history_ordered_oldest_first (which has no `rows` variable in scope), raising a NameError -- caught by running the targeted test slice before committing, moved back to the correct test. Also had to extend the migration test's stub old-schema `signals` table with timestamp/ticker columns, since _init_db()'s CREATE INDEX statements reference them unconditionally. 13 new tests (schema, migration-preserves-existing-rows, log_run snapshot storage, get_brier_history empty/NULL-exclusion/ordering). Full suite: 2103 passed, 0 failed.",
       "notes": "25 resolved signals gives a stable enough baseline to detect systematic miscalibration."
     },
     {
       "id": "confluence-detection",
       "title": "Confluence Detection",
       "area": "validation",
-      "priority": 4,
-      "status": "ready",
+      "priority": 1,
+      "status": "done",
       "trigger": {
         "all": [
           {
@@ -149,7 +149,7 @@
         ]
       },
       "depends_on": [],
-      "action": "Flag and track signals where multiple independent sources agree on direction.",
+      "action": "main.py already computed _count_agreeing_signals() (Polymarket price gap, cross-market consensus, whale detection, orderbook imbalance, watchlist alignment) but only persisted it as ext_n_signals when the extremizing transform's own alpha>1.0 threshold fired -- n=0 and n=1 were both NULL in the DB, indistinguishable from each other and from \"not computed yet.\" Added confluence_count, recorded unconditionally on every YES/NO signal regardless of whether extremizing itself fires. Added get_stats_by_confluence() (win rate/PnL/avg edge/Brier bucketed by 0/1/2+ agreeing sources, same bucketing convention as get_stats_by_watchlist()) and a matching \"BY CONFLUENCE\" section in analysis/calibration.py's report, plus confluence_count added to the CSV export whitelist. While wiring the new column into both signals-table INSERT paths, found and fixed a real latent bug in log_pass(): its VALUES clause has a differently-laid-out placeholder count than log_signal()'s (wraps across two lines), so the shared column-list edit updated the Python binding tuple but not the SQL placeholder count, causing every log_pass() call to fail silently with \"Incorrect number of bindings supplied\" until corrected -- caught via 7 collateral test failures in the full suite, none directly about confluence. 8 new tests (schema, both INSERT paths, get_stats_by_confluence bucketing/win-rate/Brier/NULL-exclusion/PASS-exclusion). No data exists yet with a resolved outcome and a non-NULL confluence_count (field just added), so get_stats_by_confluence()'s real-world verdict is unproven until enough new paper signals resolve -- calibration.py's new section explicitly reports \"No resolved data yet\" rather than fabricating a false 0%. Full suite: 2103 passed, 0 failed.",
       "notes": "Multi-source agreement historically lifts win rates and needs resolved data to measure the effect."
     },
     {
@@ -634,8 +634,8 @@
       "id": "multi-sample-scoring",
       "title": "Multi-Sample Score Aggregation",
       "area": "calibration",
-      "priority": 5,
-      "status": "ready",
+      "priority": 1,
+      "status": "done",
       "trigger": {
         "all": [
           {
@@ -649,7 +649,7 @@
         "llm-cost-ceiling",
         "market-baseline-brier"
       ],
-      "action": "Score each qualifying market N times independently and aggregate to a single estimate, replacing the single-pass call in score_markets.",
+      "action": "score_markets() (core/scorer.py) took config[\"scoring\"][\"multi_sample_n\"] (default 1, unchanged behavior) -- when set >1, runs the SAME batch/prompt through the configured backend that many times independently and merges results via the new _aggregate_multi_sample(), instead of trusting a single pass. RESPONSE_SCHEMA defines direction as DERIVED per-pass from comparing that pass's own our_estimate to market_price (\"YES if our_estimate > market_price and edge is worth acting on\"), so a 0.7-YES sample and a 0.5-PASS sample are answers to two different implicit questions -- averaging our_estimate across disagreeing directions would blend framings. Design: direction is decided by majority vote across the N per-ticker samples; a genuine tie (e.g. 2 YES/2 NO, or an even split with no literal PASS votes at all) breaks to PASS as the conservative default rather than coin-flipping a side -- this tie-break rule was a judgment call made without asking the user first, since it's easily reversible code, not a data/business decision. our_estimate is then the mean taken ONLY over the samples that agreed with the winning direction (a fallback to averaging over every sample handles the edge case where PASS wins via tie-break but zero samples literally said PASS, avoiding a divide-by-zero on an empty agreeing-pool). edge is recomputed fresh from that aggregate estimate vs market_price rather than trusting any single sample's self-reported edge. confidence/reasoning are taken from whichever agreeing sample's own our_estimate is closest to the aggregate mean (the most \"representative\" individual call) -- there's no principled way to average a HIGH/MED/LOW enum or a reasoning string. sources and sources_checked are unioned (deduped by url / by string) across every agreeing sample, since each pass is a genuinely independent research pass. A ticker missing from some passes (a parse hiccup, or Claude omitting it from one pass's JSON array) is aggregated over however many passes did include it, with n_samples on the result recording how many of the N actually agreed. rescore_single_market() (a separate, already-existing single-market path built for per-pick source attribution when publishing subscriber picks -- see GOAL_phase2-6_decisions.md Decision 1) was deliberately left untouched: the backlog item text named score_markets specifically, and rescore_single_market solves a structurally different problem this change doesn't touch. multi_sample_n added to config.example.json documented at its default (1, off) -- the live config.json was deliberately NOT changed to enable multi-sampling by default, since turning it on multiplies the CLI backend's (the default, config.llm.backend=\"cli\") scoring-step wall-clock time by roughly Nx per scheduled run; the CLI backend has no per-token dollar cost (rides the Pro OAuth subscription, not metered billing), but the runtime and Pro-plan-usage multiplication is real and hadn't been weighed against any specific N before this session. 22 new tests in tests/test_scorer.py (12 on _aggregate_multi_sample directly: unanimous/majority/tie-to-PASS/PASS-majority/edge-recompute/representative-confidence-reasoning/sources-union/sources_checked-union/partial-ticker-coverage/_validate_scores compatibility; 4 on score_markets' multi_sample_n wiring: default-is-single-call, N-calls-backend-N-times for both CLI and API backends, N=1-explicit-matches-default, API token_info summed correctly across passes). Full suite: 2117 passed, 1 skipped, 0 failed.",
       "notes": "Single-pass scoring absorbs full LLM sampling variance into signal selection. Gated because it shifts the estimate distribution and makes pre-change and post-change resolutions non-comparable."
     },
     {
@@ -677,6 +677,45 @@
       "depends_on": [],
       "action": "core.kalshi.fetch_market_history() calls /markets/{ticker}/history, which does not exist on Kalshi's API -- confirmed empirically on 2026-07-25: every ticker tried, including active high-volume markets, returns a plain-text '404 page not found', never JSON. The function's `if status_code == 404: return []` has silently swallowed this for every call site since it was written, so main.py:364's price-trend/drift-history text in the live report has never actually produced data. Replace the call with the real endpoint, already implemented and tested as core.kalshi.fetch_market_candlesticks() (/series/{series_ticker}/markets/{ticker}/candlesticks) -- this requires threading series_ticker into main.py's per-market loop, which currently only has the raw market dict (series_ticker lives on the event object, not the market object -- confirmed pattern throughout this codebase).",
       "notes": "Discovered as a side effect of investigating replay-asof-reconstruction's Kalshi-history fallback tier, and deliberately NOT fixed as a drive-by inside that item -- different blast radius (this touches the live pipeline's active call site and a currently-running production feature, not a new backtesting module). fetch_market_candlesticks() itself is done and covered by tests/test_kalshi_settled_fetch.py. SHIPPED 2026-07-25: main.py's step-5 loop (was line 364) now calls fetch_market_candlesticks() using series_ticker already merged onto each market dict at fetch time (main.py line ~155, an existing mechanism -- no new threading needed, the item's own action text overstated this part of the work). period_interval is chosen per horizon: 60 (hourly) for INTRADAY's 1-day lookback so there are enough points to show a trend, 1440 (daily) for every longer horizon. Candlestick price.close_dollars is already on the same 0-1 probability scale the old (dead) code assumed for yes_price, so the existing `start*100`/`end*100` trend-percentage formatting needed no rescaling. Verified against a real ticker (KXCITRINI-28JUL01, MONTHLY horizon): 7 daily candles, '-5.0% (24.0% -> 19.0%) -- declining (7d)' -- correct output where the old code silently produced nothing. fetch_market_history() itself deleted outright (zero remaining callers, zero dedicated tests, so no reason to keep it as a landmine) rather than left as dead code. Full suite still green after the edit. See docs/PROGRESS.md 2026-07-25."
+    },
+    {
+      "id": "kalshi-sdk-migration-implementation",
+      "title": "Kalshi SDK Migration Implementation",
+      "area": "infra",
+      "priority": 4,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Built the adapter, but not the field-by-field typed-model remapping the Ready-item scope note called for. core/kalshi.py's 16 HTTP-calling functions now route through kalshi-sdk (TexasCoding v9.0.0, pinned in requirements.txt) via a `_sdk_json(config, path, params=)` helper that calls `KalshiClient._transport.request(\"GET\", path, params=params).json()` directly -- deliberately bypassing the SDK's typed resource methods (`client.markets.list()` etc.) entirely, not converting their Pydantic output back to dicts. `_transport` is a private SDK attribute, not a documented public API (confirmed: `KalshiClient` exposes no raw-JSON escape hatch -- checked `dir()` on a live instance), which is exactly why the version is pinned rather than left floating. Reasoning for the deviation: the evaluation's own scope note warned the typed models rename and retype fields (`no_ask_dollars` string -> `no_ask` Decimal) across ~10 response shapes, each needing independent live verification -- real, non-mechanical work. Going under the resource layer instead means every response is the literal JSON `KalshiClient` received off the wire, byte-identical to what the old `requests.get(...).json()` returned, with zero remapping surface and zero per-field verification burden -- a strictly stronger correctness guarantee than hand-verified remapping would have produced, for less work. Every function's public signature, docstring, and business logic (KXMVE-flood day-chunking, near-dated per-day window chunking, the 404-as-empty-list special case on candlesticks, the 401-as-RuntimeError special case on authenticate) is unchanged; only the HTTP call sites changed. `_get_client()` caches one authenticated `KalshiClient` per environment (demo/prod) instead of re-parsing the RSA private key on every single request the way the old code did -- a real efficiency win, verified not to break test isolation (no test exercises the missing-credentials error path, so caching a client across test functions within a run is inert). `fetch_market_candlesticks`'s 404 path now catches `KalshiNotFoundError` (the transport raises rather than returning an inspectable response); `authenticate`'s auth-failure path catches `KalshiAuthError`, which also covers 403 now, not just 401 -- a minor, deliberate improvement, not silently introduced. Updated 31 mock call sites across 3 test files (`test_kalshi_near_dated.py`, `test_kalshi_trades_orderbook.py`, `test_kalshi_settled_fetch.py`) from patching `core.kalshi.requests.get` (a `requests.Response`-shaped mock) to patching `core.kalshi._sdk_json` (returns the raw dict directly, since there's no longer a response object to unwrap) -- mechanical, but real: every `args[0]` URL assertion became `args[1]` (path, no longer prefixed with the full base URL since `_sdk_json` takes a relative path and the SDK's transport does the join), and the one 404 test now mocks a raised `KalshiNotFoundError` instead of a `status_code=404` mock object. Live dry-run (BACKLOG.md's own requirement before touching call sites): wrote a throwaway script that independently reconstructs the pre-migration `requests`-based implementation from this session's earlier full read of the old file (not derived from the new code, so the two paths are genuinely independent) and ran both against the real Kalshi prod API with real credentials for all 16 HTTP-calling functions -- authenticate, fetch_markets, fetch_market, fetch_trades, fetch_recent_trades, fetch_events, fetch_event_markets, fetch_event_detail, fetch_near_dated_markets, fetch_settled_events, fetch_settled_event_markets, fetch_market_candlesticks (both the 200 and 404 paths), fetch_market_with_retry, fetch_orderbook, fetch_fills, fetch_positions. 15/16 exact-matched; the one difference (`/portfolio/balance`'s `updated_ts`, off by 1-2 seconds between runs) is the wall-clock gap between the two sequential live calls to a field that reflects live server time, not a code discrepancy -- reproduced twice, always equal to the measured gap between calls. All read-only GETs; no orders, no state mutation, no real-money risk. Full suite: 2117 passed, 1 skipped, 13 subtests passed, 0 failed.",
+      "notes": "Never went through backlog/engine.py add -- added directly to BACKLOG.md as a Ready item in an earlier session, so it did not exist in backlog.json at all until this entry. area=infrastructure is not in backlog/engine.py VALID_AREAS (execution, data-quality, validation, infra, reporting, calibration, smart-money, backtesting) -- kept as infrastructure to match BACKLOG.md and the Ready-item area exactly rather than silently reclassifying it as infra."
+    },
+    {
+      "id": "kalshi-sdk-evaluation-2026-08",
+      "title": "Kalshi Sdk Evaluation 2026 08",
+      "area": "infra",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Live-tested both SDK candidates against the real Kalshi API with real credentials (read-only calls: get_balance, get_markets), not just docs/README research. Official `kalshi_python_sync` (Kalshi/exchange-infra v3.26.0): full REST coverage matching all 21 of core/kalshi.py's functions (MarketApi/EventsApi/HistoricalApi/PortfolioApi cover markets/events/candlesticks/orderbook/trades/fills/positions). Found a real bug while live-testing: `ApiClient.set_kalshi_auth()` raises `NameError` -- `KalshiAuth` is never imported in api_client.py, so the documented auth-setup convenience method is broken in the currently published version (worked around by importing `KalshiAuth` directly and setting `client.kalshi_auth` manually). Also uses `salt_length=PSS.DIGEST_LENGTH` for its RSA-PSS signing vs core/kalshi.py's `MAX_LENGTH` -- confirmed live against Kalshi's real server that both salt lengths are accepted (server-side verification is permissive), so this isn't a compatibility blocker, just a documented difference. Community candidate's real PyPI package name is `kalshi-sdk` (not `kalshi-python-sdk` as originally assumed from the GitHub repo name) by TexasCoding, v9.0.0: broader scope confirmed (REST+WebSocket+FIX+Perps, resource-style API like `client.portfolio.balance()`/`client.markets.list()`), auth worked cleanly with no bugs found, returns `Decimal`-typed prices and `datetime`-typed timestamps with `_all`-suffixed auto-pagination helpers and `.to_dataframe()` export -- only 4 GitHub stars, still a real trust-footprint gap vs the official package despite cleaner code in this test. Both SDKs return fully-typed model objects (Pydantic), not the raw dicts with string timestamps/prices core/kalshi.py currently returns and every consumer (main.py, analysis/*, scripts/*, and their tests) currently expects -- confirms the backlog's original caution that this is a genuine typed-model migration, not a drop-in dependency swap. Recommendation: an adapter layer inside core/kalshi.py (converts SDK responses back to the existing dict contract) rather than propagating typed models through the whole codebase -- see kalshi-sdk-migration-implementation (Done, below) for the scoped follow-up -- landed via the transport layer directly rather than the typed resource methods, sidestepping the field-by-field remapping this note anticipated.",
+      "notes": "Added retroactively to reconcile backlog.json with BACKLOG.md, which had been hand-edited directly for several recent Done items without a matching backlog.json update."
+    },
+    {
+      "id": "whale-flag-lv-guarantee",
+      "title": "Whale Flag Lv Guarantee",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "User asked why the run header's whale-flag count (e.g. \"15 whale flags\") never seemed to show up as detail in the report. Traced it: core.report.compute_leviathan_score() only awarded any whale-related bonus when BOTH whale_detected AND ob_flag fired together (+3) -- a whale-only flag got zero LV bonus. With BASE=40 and core.scorer.score_markets()'s pre-Claude gate at config.scoring.min_pre_claude_lv=20 (confirmed live in config.json), a whale-flagged market with otherwise weak/negative signals (net_edge<=0, pass_count>=3, short horizon -- realistic combination, stacks to -21) could score as low as 19-23, sometimes below the gate. A market that fails the gate never reaches Claude scoring at all: no cs result comes back, so main.py's `if not cs: continue` skips it before it can become a final_signal, a logged PASS, OR a whale_only report row -- it vanishes from the report entirely, with the only trace being the raw pre-gate count printed in step 5, before scoring ever runs. Confirmed materially real on the pipeline run earlier this session: 18 markets flagged, only 6 reached Claude (min_pre_claude_lv=20 was the binding filter, well under max_markets_per_run=10), so some of that run's 15 whale flags plausibly never got a Claude estimate or any report visibility at all. Fix: whale_detected alone now adds +4 (BASE 40 + 4 = 44, the same safety margin watchlist_signal's existing +4 bonus already has), replacing the old both-required +3 -- not an addition on top of it, per explicit user sign-off on the exact diff via AskUserQuestion (two other options -- a pre-filtered-whale-flags visibility section, or both -- were offered and declined). ob_flag alone still contributes nothing on its own; only whale_detected changed. 4 new tests (compute_leviathan_score: whale-alone +4, whale_detected=False no bonus, whale-without-ob-flag still gets the bonus (regression guard against reintroducing the combined-only gate); score_markets integration: a market at LV 19 that fails the gate on its own now clears it at LV 23 once whale_detected is added, reaching the CLI batch step). Full suite: 2122 passed, 1 skipped, 0 failed.",
+      "notes": ""
     }
   ]
 }

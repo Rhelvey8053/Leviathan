@@ -1,16 +1,24 @@
-import base64
 import os
 import time
 from datetime import datetime, timedelta, timezone
-import requests
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from dotenv import load_dotenv
+
+from kalshi import KalshiClient
+from kalshi.auth import KalshiAuth
+from kalshi.config import KalshiConfig
+from kalshi.errors import KalshiAuthError, KalshiNotFoundError
 
 load_dotenv()
 
 DEMO_BASE_URL = "https://demo-api.kalshi.co/trade-api/v2"
 PROD_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+
+# kalshi-sdk-migration-implementation: pinned in requirements.txt. _sdk_json()
+# below reaches into KalshiClient._transport (a private attribute, not part of
+# the SDK's public contract) so a future SDK upgrade can silently change or
+# remove it -- the pin means that only happens on a deliberate version bump
+# with re-verification, not an unattended `pip install -U`.
+_clients: dict[str, KalshiClient] = {}
 
 
 def _get_base_url(config: dict) -> str:
@@ -18,7 +26,10 @@ def _get_base_url(config: dict) -> str:
     return PROD_BASE_URL if env == "prod" else DEMO_BASE_URL
 
 
-def _load_private_key():
+def _load_auth() -> KalshiAuth:
+    key_id = os.getenv("KALSHI_KEY_ID")
+    if not key_id:
+        raise ValueError("KALSHI_KEY_ID not set in environment")
     raw = os.getenv("KALSHI_PRIVATE_KEY", "")
     if not raw:
         raise ValueError("KALSHI_PRIVATE_KEY not set in environment")
@@ -26,37 +37,52 @@ def _load_private_key():
     if "-----BEGIN" not in pem:
         # Raw base64 body without PEM headers — wrap it
         pem = f"-----BEGIN RSA PRIVATE KEY-----\n{pem.strip()}\n-----END RSA PRIVATE KEY-----"
-    return serialization.load_pem_private_key(pem.encode(), password=None)
+    return KalshiAuth.from_pem(key_id, pem)
 
 
-def _auth_headers(method: str, path: str) -> dict:
+def _get_client(config: dict) -> KalshiClient:
     """
-    Generates Kalshi RSA signing auth headers.
-    path: full API path e.g. '/trade-api/v2/portfolio/balance'
+    Returns a cached, authenticated KalshiClient for this config's
+    environment (demo/prod), constructing it on first use. Caching is safe
+    here (unlike computing auth headers per-request, which the old
+    requests-based implementation did): KALSHI_KEY_ID/KALSHI_PRIVATE_KEY are
+    loaded once via load_dotenv() at import time and never change for the
+    life of a single `python main.py` run, and the SDK signs each request
+    fresh at call time regardless (KalshiAuth.sign_request() reads a
+    timestamp per call) -- only the parsed RSA key object and the httpx
+    connection pool are reused, which is a real efficiency win over
+    re-parsing the PEM on every single API call.
     """
-    key_id = os.getenv("KALSHI_KEY_ID")
-    if not key_id:
-        raise ValueError("KALSHI_KEY_ID not set in environment")
-
-    ts_ms = str(int(time.time() * 1000))
-    private_key = _load_private_key()
-
-    msg = f"{ts_ms}{method.upper()}{path}".encode("utf-8")
-    pss = asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()), salt_length=asym_padding.PSS.MAX_LENGTH)
-    sig = private_key.sign(msg, pss, hashes.SHA256())
-    sig_b64 = base64.b64encode(sig).decode()
-
-    return {
-        "KALSHI-ACCESS-KEY": key_id,
-        "KALSHI-ACCESS-TIMESTAMP": ts_ms,
-        "KALSHI-ACCESS-SIGNATURE": sig_b64,
-        "Content-Type": "application/json",
-    }
+    env = config.get("environment", "demo")
+    client = _clients.get(env)
+    if client is None:
+        kconfig = KalshiConfig.production() if env == "prod" else KalshiConfig.demo()
+        client = KalshiClient(auth=_load_auth(), config=kconfig)
+        _clients[env] = client
+    return client
 
 
-def _vpath(path: str) -> str:
-    """Returns versioned path for signature: /trade-api/v2/..."""
-    return f"/trade-api/v2{path}"
+def _sdk_json(config: dict, path: str, *, params: dict | None = None) -> dict:
+    """
+    Issues a GET request through kalshi-sdk's transport and returns the raw
+    JSON dict — deliberately NOT going through the SDK's typed resource
+    methods (client.markets.list(), client.portfolio.balance(), etc.), which
+    parse responses into Pydantic models with renamed/retyped fields
+    (kalshi-sdk-evaluation-2026-08 found e.g. our "no_ask_dollars" (string)
+    becomes the model's "no_ask" (Decimal), across ~10 distinct response
+    shapes). Every caller in this codebase (main.py, analysis/*, scripts/*,
+    and their tests) expects the original dict-shaped/string-typed Kalshi API
+    contract, so this goes through the same transport (RSA-PSS auth signing,
+    exponential-backoff retry on transient errors, host validation, response
+    size caps — all real hardening the old hand-rolled requests.get() calls
+    never had) but stops short of the pydantic layer, making the returned
+    JSON byte-identical to before. Verified via live dry-run diff against
+    the old implementation for every function in this module — see
+    BACKLOG.md, kalshi-sdk-migration-implementation.
+    """
+    client = _get_client(config)
+    resp = client._transport.request("GET", path, params=params)
+    return resp.json()
 
 
 def authenticate(config: dict) -> dict:
@@ -64,27 +90,19 @@ def authenticate(config: dict) -> dict:
     Validates credentials by hitting /portfolio/balance.
     Fails loudly if auth is invalid — don't proceed with bad auth.
     """
-    base_url = _get_base_url(config)
-    path = "/portfolio/balance"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        timeout=10,
-    )
-    if resp.status_code == 401:
+    try:
+        data = _sdk_json(config, "/portfolio/balance")
+    except KalshiAuthError as e:
         raise RuntimeError(
-            f"Kalshi authentication failed (401). Body: {resp.text}. "
+            f"Kalshi authentication failed ({e.status_code}). {e}. "
             f"Environment: {config.get('environment', 'demo')}"
-        )
-    resp.raise_for_status()
-    data = resp.json()
+        ) from e
     print(f"  [kalshi] Authenticated. Balance: {data}")
     return data
 
 
 def fetch_markets(config: dict, status: str = "open", limit: int = 200) -> list[dict]:
     """Returns open markets, paginating up to max_fetch from config."""
-    base_url = _get_base_url(config)
     max_fetch = config.get("markets", {}).get("max_fetch", limit)
     categories = config.get("markets", {}).get("categories", [])
     path = "/markets"
@@ -100,14 +118,7 @@ def fetch_markets(config: dict, status: str = "open", limit: int = 200) -> list[
         if categories:
             params["category"] = categories[0]
 
-        resp = requests.get(
-            f"{base_url}{path}",
-            headers=_auth_headers("GET", _vpath(path)),
-            params=params,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = _sdk_json(config, path, params=params)
 
         page = data.get("markets", [])
         if not page:
@@ -123,15 +134,9 @@ def fetch_markets(config: dict, status: str = "open", limit: int = 200) -> list[
 
 def fetch_market(config: dict, ticker: str) -> dict:
     """Returns single market with full detail including order book."""
-    base_url = _get_base_url(config)
     path = f"/markets/{ticker}"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json().get("market", {})
+    data = _sdk_json(config, path)
+    return data.get("market", {})
 
 
 def fetch_trades(config: dict, ticker: str, limit: int = 0) -> list[dict]:
@@ -149,7 +154,6 @@ def fetch_trades(config: dict, ticker: str, limit: int = 0) -> list[dict]:
                  taker_side, taker_outcome_side, taker_book_side,
                  created_time, is_block_trade, trade_id}
     """
-    base_url = _get_base_url(config)
     path     = "/markets/trades"
     lookback = limit or config.get("whales", {}).get("lookback_trades", 100)
     trades   = []
@@ -158,14 +162,7 @@ def fetch_trades(config: dict, ticker: str, limit: int = 0) -> list[dict]:
         params = {"ticker": ticker, "limit": min(100, lookback - len(trades))}
         if cursor:
             params["cursor"] = cursor
-        resp = requests.get(
-            f"{base_url}{path}",
-            headers=_auth_headers("GET", _vpath(path)),
-            params=params,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = _sdk_json(config, path, params=params)
         page = data.get("trades", [])
         if not page:
             break
@@ -183,7 +180,6 @@ def fetch_recent_trades(config: dict, limit: int = 500) -> list[dict]:
     Each trade: {ticker, count_fp, yes_price_dollars, taker_side,
                  created_time, is_block_trade, trade_id}
     """
-    base_url = _get_base_url(config)
     path     = "/markets/trades"
     trades   = []
     cursor   = None
@@ -191,14 +187,7 @@ def fetch_recent_trades(config: dict, limit: int = 500) -> list[dict]:
         params = {"limit": min(100, limit - len(trades))}
         if cursor:
             params["cursor"] = cursor
-        resp = requests.get(
-            f"{base_url}{path}",
-            headers=_auth_headers("GET", _vpath(path)),
-            params=params,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data  = resp.json()
+        data  = _sdk_json(config, path, params=params)
         page  = data.get("trades", [])
         if not page:
             break
@@ -216,7 +205,6 @@ def fetch_events(config: dict, status: str = "open") -> list[dict]:
     that dominates the default /markets ordering.
     Sorted by last_updated_ts desc as a proxy for recent activity.
     """
-    base_url = _get_base_url(config)
     path = "/events"
     max_fetch = config.get("markets", {}).get("max_events", 100)
 
@@ -228,14 +216,7 @@ def fetch_events(config: dict, status: str = "open") -> list[dict]:
         if cursor:
             params["cursor"] = cursor
 
-        resp = requests.get(
-            f"{base_url}{path}",
-            headers=_auth_headers("GET", _vpath(path)),
-            params=params,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = _sdk_json(config, path, params=params)
 
         page = data.get("events", [])
         if not page:
@@ -255,16 +236,12 @@ def fetch_event_markets(config: dict, event_ticker: str) -> list[dict]:
     Returns open markets for a specific event ticker.
     Uses /markets?event_ticker= filter — events do not embed markets directly.
     """
-    base_url = _get_base_url(config)
     path = "/markets"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
+    data = _sdk_json(
+        config, path,
         params={"status": "open", "event_ticker": event_ticker, "limit": 200},
-        timeout=10,
     )
-    resp.raise_for_status()
-    return resp.json().get("markets", [])
+    return data.get("markets", [])
 
 
 def fetch_event_detail(config: dict, event_ticker: str) -> dict:
@@ -275,15 +252,9 @@ def fetch_event_detail(config: dict, event_ticker: str) -> dict:
     doesn't carry them (confirmed empirically) the way fetch_events()'s
     per-event loop already attaches them from the event object.
     """
-    base_url = _get_base_url(config)
     path = f"/events/{event_ticker}"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json().get("event", {})
+    data = _sdk_json(config, path)
+    return data.get("event", {})
 
 
 def fetch_near_dated_markets(
@@ -341,7 +312,6 @@ def fetch_near_dated_markets(
     two fields main.py's events-catalog loop already attaches from the
     event object it already has in hand.
     """
-    base_url = _get_base_url(config)
     path = "/markets"
     now = datetime.now(timezone.utc)
     exclude_prefixes = tuple(
@@ -374,14 +344,7 @@ def fetch_near_dated_markets(
             }
             if cursor:
                 params["cursor"] = cursor
-            resp = requests.get(
-                f"{base_url}{path}",
-                headers=_auth_headers("GET", _vpath(path)),
-                params=params,
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            data = _sdk_json(config, path, params=params)
             page = data.get("markets", [])
             pages += 1
             chunk_pages += 1
@@ -431,7 +394,6 @@ def fetch_settled_events(config: dict, max_fetch: int = 2000) -> list[dict]:
     codebase's docs was never actually checked against the files on disk
     and was off by three weeks).
     """
-    base_url = _get_base_url(config)
     path = "/events"
 
     events = []
@@ -440,14 +402,7 @@ def fetch_settled_events(config: dict, max_fetch: int = 2000) -> list[dict]:
         params = {"status": "settled", "limit": 200}
         if cursor:
             params["cursor"] = cursor
-        resp = requests.get(
-            f"{base_url}{path}",
-            headers=_auth_headers("GET", _vpath(path)),
-            params=params,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = _sdk_json(config, path, params=params)
 
         page = data.get("events", [])
         if not page:
@@ -467,16 +422,12 @@ def fetch_settled_event_markets(config: dict, event_ticker: str) -> list[dict]:
     hardcoded to status='open' for the live scan path and is left
     unchanged so existing callers keep their current behavior.
     """
-    base_url = _get_base_url(config)
     path = "/markets"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
+    data = _sdk_json(
+        config, path,
         params={"status": "settled", "event_ticker": event_ticker, "limit": 200},
-        timeout=10,
     )
-    resp.raise_for_status()
-    return resp.json().get("markets", [])
+    return data.get("markets", [])
 
 
 def fetch_market_candlesticks(
@@ -506,18 +457,15 @@ def fetch_market_candlesticks(
     guessed — it does not live on the raw market object (same rule as
     fetch_settled_events()'s event/market split above).
     """
-    base_url = _get_base_url(config)
     path = f"/series/{series_ticker}/markets/{ticker}/candlesticks"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        params={"start_ts": start_ts, "end_ts": end_ts, "period_interval": period_interval},
-        timeout=15,
-    )
-    if resp.status_code == 404:
+    try:
+        data = _sdk_json(
+            config, path,
+            params={"start_ts": start_ts, "end_ts": end_ts, "period_interval": period_interval},
+        )
+    except KalshiNotFoundError:
         return []
-    resp.raise_for_status()
-    return resp.json().get("candlesticks", [])
+    return data.get("candlesticks", [])
 
 
 def fetch_market_with_retry(config: dict, ticker: str) -> dict:
@@ -526,17 +474,11 @@ def fetch_market_with_retry(config: dict, ticker: str) -> dict:
     is missing or equals the ticker (title-scraping-fix guard).
     Returns the market dict from the API response.
     """
-    base_url = _get_base_url(config)
     path = f"/markets/{ticker}"
 
     def _fetch_once():
-        resp = requests.get(
-            f"{base_url}{path}",
-            headers=_auth_headers("GET", _vpath(path)),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return resp.json().get("market", {})
+        data = _sdk_json(config, path)
+        return data.get("market", {})
 
     market = _fetch_once()
     title = market.get("title") or ""
@@ -558,15 +500,8 @@ def fetch_orderbook(config: dict, ticker: str) -> dict:
     function assumed a nonexistent "orderbook" envelope key and silently
     computed zero depth for every market).
     """
-    base_url = _get_base_url(config)
-    path     = f"/markets/{ticker}/orderbook"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    path = f"/markets/{ticker}/orderbook"
+    return _sdk_json(config, path)
 
 
 def fetch_fills(config: dict) -> list[dict]:
@@ -574,7 +509,6 @@ def fetch_fills(config: dict) -> list[dict]:
     GET /portfolio/fills — returns all real trade fills, paginated via cursor.
     Note: Kalshi only exposes recent fills; older history may not be available.
     """
-    base_url = _get_base_url(config)
     path = "/portfolio/fills"
     fills = []
     cursor = None
@@ -583,14 +517,7 @@ def fetch_fills(config: dict) -> list[dict]:
         params = {"limit": 100}
         if cursor:
             params["cursor"] = cursor
-        resp = requests.get(
-            f"{base_url}{path}",
-            headers=_auth_headers("GET", _vpath(path)),
-            params=params,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = _sdk_json(config, path, params=params)
         page = data.get("fills", [])
         if not page:
             break
@@ -608,16 +535,8 @@ def fetch_positions(config: dict) -> list[dict]:
     """
     GET /portfolio/positions — returns current open positions.
     """
-    base_url = _get_base_url(config)
     path = "/portfolio/positions"
-    resp = requests.get(
-        f"{base_url}{path}",
-        headers=_auth_headers("GET", _vpath(path)),
-        params={"limit": 100},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    data = _sdk_json(config, path, params={"limit": 100})
     positions = data.get("market_positions", data.get("positions", []))
     if not positions:
         print("  [kalshi] fetch_positions: no positions returned")

@@ -160,11 +160,35 @@ def test_evaluate_triggers_two_conditions_both_required(backlog_data):
     results = evaluate_triggers(backlog_data, metrics_partial)
     assert results["auto-calibration-loop"] is False
 
+
+def test_evaluate_triggers_stays_locked_with_undone_dependency():
+    """
+    Both trigger conditions can be met and the item must still stay locked
+    if any depends_on id isn't "done" -- a synthetic backlog, not the
+    backlog_data fixture (real backlog.json), since real items' done/not-done
+    status legitimately changes over time (kalshi-sdk-migration-implementation,
+    2026-08-04: reconciling backlog.json's stale done-status for
+    brier-tracking/confluence-detection/multi-sample-scoring broke this
+    test's prior version, which had relied on auto-calibration-loop's real
+    dependency brier-tracking staying perpetually not-done as fixture data).
+    """
+    backlog = {
+        "items": [
+            {"id": "dep-a", "status": "done", "trigger": {"all": []}, "depends_on": []},
+            {"id": "dep-b", "status": "locked",
+             "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 999}]},
+             "depends_on": []},
+            {"id": "gated-item", "status": "blocked",
+             "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 30},
+                                  {"metric": "resolved_count_per_category_max", "op": ">=", "value": 15}]},
+             "depends_on": ["dep-a", "dep-b"]},
+        ]
+    }
     metrics_full = {"resolved_count": 30, "resolved_count_per_category_max": 15,
                     "resolved_count_per_wallet_max": 0, "fills_count": 0}
-    results = evaluate_triggers(backlog_data, metrics_full)
-    # Still False because depends_on [sample-size-gates, brier-tracking] are not "done"
-    assert results["auto-calibration-loop"] is False
+    results = evaluate_triggers(backlog, metrics_full)
+    # Own trigger conditions are both met, but dep-b is still locked (not done).
+    assert results["gated-item"] is False
 
 
 def test_evaluate_triggers_blocked_stays_locked_even_if_trigger_passes(backlog_data):

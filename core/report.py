@@ -356,7 +356,7 @@ def compute_leviathan_score(s: dict) -> int:
       + Convergence:   ≥3 sources +10, 2 sources +5
       + Persistence:   3+ consistent days +5, 2 days +2
       + Smart money:   watchlist aligned +4
-      + Whale + OB:    both firing +3
+      + Whale:         whale_detected +4 (regardless of ob_flag)
       - Short horizon: INTRADAY/WEEKLY -5
       - PASS history:  pass_count ≥3 -8, ≥2 -3
 
@@ -389,9 +389,19 @@ def compute_leviathan_score(s: dict) -> int:
     if s.get("watchlist_signal") and wl_dir in ("YES", "NO"):
         pts += 4
 
+    # whale-flag-lv-guarantee (2026-08-04): previously required ob_flag too
+    # (a corroboration requirement, not a bug at the time), which meant a
+    # whale-only flag never got any LV bonus at all -- with BASE=40 and
+    # min_pre_claude_lv=20 in core/scorer.py's pre-Claude gate, a whale flag
+    # with weak/negative other signals (e.g. net_edge<=0 and pass_count>=3)
+    # could silently drop below the gate and never reach Claude scoring, so
+    # it never became a signal, a logged PASS, or a whale_only report row --
+    # its only trace was the raw pre-gate count in the run header. Flat +4
+    # (matching watchlist_signal's bonus) makes whale_detected alone clear
+    # the gate with the same safety margin watchlist already had.
     whale = s.get("whale_data") or {}
-    if whale.get("whale_detected") and s.get("ob_flag"):
-        pts += 3
+    if whale.get("whale_detected"):
+        pts += 4
 
     ws = s.get("whale_streak", 0)
     if ws >= 3:   pts += 5

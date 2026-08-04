@@ -1125,6 +1125,33 @@ def test_leviathan_score_persistence_2_adds_2():
     assert report.compute_leviathan_score(s) == 42
 
 
+def test_leviathan_score_whale_detected_adds_4():
+    """whale_detected alone (no ob_flag) adds +4 -- whale-flag-lv-guarantee,
+    2026-08-04: previously required ob_flag too (+3), so a whale-only flag
+    got no LV bonus at all and could silently drop below
+    core.scorer's min_pre_claude_lv gate before ever reaching Claude."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", whale_data={"whale_detected": True})
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_leviathan_score_whale_detected_false_no_bonus():
+    """whale_data present but whale_detected=False adds nothing."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", whale_data={"whale_detected": False})
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base)
+
+
+def test_leviathan_score_whale_without_ob_flag_still_gets_bonus():
+    """Regression guard: the bonus no longer requires ob_flag=True alongside
+    whale_detected (that combined-only gate was the actual bug)."""
+    base = _signal(confidence="LOW")
+    whale_only = _signal(confidence="LOW", whale_data={"whale_detected": True}, ob_flag=False)
+    whale_and_ob = _signal(confidence="LOW", whale_data={"whale_detected": True}, ob_flag=True)
+    assert report.compute_leviathan_score(whale_only) == report.compute_leviathan_score(base) + 4
+    assert report.compute_leviathan_score(whale_and_ob) == report.compute_leviathan_score(base) + 4
+
+
 def test_leviathan_score_clamps_to_100():
     """Score never exceeds 100."""
     s = _signal(

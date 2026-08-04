@@ -3,3 +3,4 @@ python-dotenv
 cryptography
 anthropic
 mcp[cli]==1.28.1
+kalshi-sdk==9.0.0

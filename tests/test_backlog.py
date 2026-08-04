@@ -42,8 +42,20 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_43_items(backlog_data):
-    assert len(backlog_data["items"]) == 43
+def test_parses_and_46_items(backlog_data):
+    """
+    46, not the original 43: kalshi-sdk-migration-implementation and
+    kalshi-sdk-evaluation-2026-08 (2026-08-04) were both real, completed
+    Done items that had only ever been hand-added to BACKLOG.md directly,
+    never to backlog.json -- added here to close that gap so a future
+    backlog/checker.py regenerate of BACKLOG.md doesn't silently delete
+    their writeups (see also the brier-tracking/confluence-detection/
+    multi-sample-scoring status reconciliation in the same commit).
+    whale-flag-lv-guarantee (also 2026-08-04, same-session follow-up) was
+    added to both files together from the start, avoiding a repeat of the
+    same gap.
+    """
+    assert len(backlog_data["items"]) == 46
 
 
 def test_all_ids_unique(backlog_data):
