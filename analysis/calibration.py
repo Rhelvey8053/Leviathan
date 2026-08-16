@@ -186,7 +186,7 @@ def main():
             delta    = short_wr - long_wr
             verdict  = "short outperforms" if delta > 5 else (
                        "long outperforms" if delta < -5 else "no meaningful difference")
-            print(f"\n  Short (≤7d) vs Long (>7d): {short_wr:.0f}% vs {long_wr:.0f}%  → {verdict}")
+            print(f"\n  Short (<=7d) vs Long (>7d): {short_wr:.0f}% vs {long_wr:.0f}%  -> {verdict}")
     else:
         print("  No resolved data.")
 
@@ -211,7 +211,7 @@ def main():
             verdict = "overrides outperform (justified)" if delta > 5 else (
                       "overrides underperform (revert to heuristic)" if delta < -5 else
                       "no meaningful difference")
-            print(f"\n  Override vs Aligned win-rate delta: {delta:+.0f}pp  → {verdict}")
+            print(f"\n  Override vs Aligned win-rate delta: {delta:+.0f}pp  -> {verdict}")
     else:
         print("  No resolved data.")
 
@@ -274,7 +274,7 @@ def main():
         _print_table(ch_rows, key_label="Close Horizon", key_col="flag_path", unit_size=unit_size)
         print()
         print("  Key question #6: Do shorter-horizon signals (urgent/short) have")
-        print("  higher win rates than long-horizon signals — or vice versa?")
+        print("  higher win rates than long-horizon signals -- or vice versa?")
     else:
         print("  No resolved data yet (close_time field added recently).")
 
@@ -460,7 +460,7 @@ def main():
     print("    6. Do urgent (<1d) or short (1-7d) signals have better win rates than long (30d+)?")
     print("       (Long-horizon mispricings may reflect structural anchoring vs. short-horizon is just noise)")
     print("    7. Do LV-band-A signals have higher win rates than band-D signals?")
-    print("       (Validates composite scoring rubric — if not, reweight the rubric components)")
+    print("       (Validates composite scoring rubric -- if not, reweight the rubric components)")
     print("    8. Does whale detection add win rate above the no-whale baseline?")
     print("       (If whale signals do NOT outperform, the whale scan cost is not justified)")
     print("    9. Does watchlist/smart money alignment predict wins above the base rate?")
