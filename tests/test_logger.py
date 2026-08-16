@@ -910,6 +910,60 @@ def test_log_signal_close_time_none_when_absent(tmp_db):
     assert row["close_time"] is None
 
 
+# ─── volume / open_interest (strategy-review, 2026-08-16) ─────────────────────
+
+def test_log_signal_stores_volume_and_open_interest(tmp_db):
+    """Already fetched onto the market dict for filtering/scoring in
+    main.py -- previously discarded before logging, so "did edge cluster
+    in illiquid markets" could never be answered from historical data."""
+    logger.log_signal({
+        "ticker": "KXVOL1", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rvol1",
+        "volume": 1250.0, "open_interest": 340.0,
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT volume, open_interest FROM signals WHERE ticker='KXVOL1'"
+        ).fetchone()
+    assert row["volume"] == 1250.0
+    assert row["open_interest"] == 340.0
+
+
+def test_log_signal_volume_none_when_absent(tmp_db):
+    logger.log_signal({
+        "ticker": "KXVOL2", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rvol2",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT volume, open_interest FROM signals WHERE ticker='KXVOL2'"
+        ).fetchone()
+    assert row["volume"] is None
+    assert row["open_interest"] is None
+
+
+def test_log_pass_stores_volume_and_open_interest(tmp_db):
+    """Same field, the PASS-direction INSERT path -- must not silently
+    drop it the way whale_detected once did on this same path."""
+    logger.log_pass({
+        "ticker": "KXVOL3", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15,
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rvol3",
+        "volume": 800.0, "open_interest": 200.0,
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT volume, open_interest FROM signals WHERE ticker='KXVOL3'"
+        ).fetchone()
+    assert row["volume"] == 800.0
+    assert row["open_interest"] == 200.0
+
+
 # ─── get_stats_by_close_horizon ───────────────────────────────────────────────
 
 def _insert_close_horizon(call_id, ts_iso, close_iso, result_val, pnl=0.5, edge=0.12):
@@ -1911,6 +1965,49 @@ def test_resolve_outcomes_leaves_market_drift_pp_null_when_late_price_missing(tm
             "SELECT market_drift_pp FROM signals WHERE call_id=?", (cid,)
         ).fetchone()
     assert row["market_drift_pp"] is None
+
+
+def test_resolve_outcomes_stamps_resolved_at(tmp_db):
+    """
+    Strategy-review (2026-08-16): resolved_at is distinct from `timestamp`
+    (signal creation) and `close_time` (the market's SCHEDULED close, which
+    settlement can lag) -- without it, time-to-resolution could only ever
+    be approximated, never measured. Set once here, the same call that
+    fills outcome/result/pnl_if_traded/market_drift_pp.
+    """
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+
+    before = datetime.now(timezone.utc)
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
+        logger.resolve_outcomes({})
+    after = datetime.now(timezone.utc)
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT resolved_at FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["resolved_at"] is not None
+    stamped = datetime.fromisoformat(row["resolved_at"])
+    assert before <= stamped <= after
+
+
+def test_resolve_outcomes_leaves_resolved_at_null_for_still_unresolved_rows(tmp_db):
+    """A row resolve_outcomes() doesn't touch (Kalshi market still open)
+    must not get a resolved_at stamp -- only rows actually resolved this
+    call should."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+
+    with patch("core.kalshi.fetch_market", return_value={"result": ""}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT resolved_at, result FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["result"] == ""
+    assert row["resolved_at"] is None
 
 
 def test_get_market_drift_stats_empty_db_returns_none_not_zero(tmp_db):

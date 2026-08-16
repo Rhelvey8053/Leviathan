@@ -42,9 +42,9 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_49_items(backlog_data):
+def test_parses_and_50_items(backlog_data):
     """
-    49, not the original 43: kalshi-sdk-migration-implementation and
+    50, not the original 43: kalshi-sdk-migration-implementation and
     kalshi-sdk-evaluation-2026-08 (2026-08-04) were both real, completed
     Done items that had only ever been hand-added to BACKLOG.md directly,
     never to backlog.json -- added here to close that gap so a future
@@ -52,14 +52,15 @@ def test_parses_and_49_items(backlog_data):
     their writeups (see also the brier-tracking/confluence-detection/
     multi-sample-scoring status reconciliation in the same commit).
     whale-flag-lv-guarantee, whale-only-none-direction-crash,
-    resolved-count-metric-desync, and whale-actionability-scorecard
-    (2026-08-04 through 2026-08-16, same-project follow-ups) were each
-    added to both files together from the start, avoiding a repeat of the
-    same gap. per-heuristic-scorecard and heuristic-sunsetting flipped
-    locked->ready in the same pass (resolved_count_per_category_max
-    cleared 15) without changing the total item count.
+    resolved-count-metric-desync, whale-actionability-scorecard, and
+    signal-csv-strategy-review-2026-08 (2026-08-04 through 2026-08-16,
+    same-project follow-ups) were each added to both files together from
+    the start, avoiding a repeat of the same gap. per-heuristic-scorecard
+    and heuristic-sunsetting flipped locked->ready in the same pass
+    (resolved_count_per_category_max cleared 15) without changing the
+    total item count.
     """
-    assert len(backlog_data["items"]) == 49
+    assert len(backlog_data["items"]) == 50
 
 
 def test_all_ids_unique(backlog_data):

@@ -836,6 +836,12 @@ def main():
             "price_drift":     m.get("price_drift"),
             "spread_wide":     m.get("spread_wide", False),
             "spread_pct":      m.get("spread_pct"),
+            # Already fetched onto `m` for filtering/scoring (core.scanner,
+            # core.scorer both read these) but never persisted before --
+            # without this, "did edge cluster in illiquid markets" can
+            # never be answered from historical data.
+            "volume":          m.get("volume_fp") or m.get("volume"),
+            "open_interest":   m.get("open_interest_fp") or m.get("open_interest"),
             "ob_flag":         m.get("ob_flag", False),
             "ob_imbalance":    m.get("ob_imbalance"),
             "ob_direction":    m.get("ob_direction"),
@@ -962,6 +968,8 @@ def main():
                     "price_drift":     m.get("price_drift"),
                     "spread_wide":     m.get("spread_wide", False),
                     "spread_pct":      m.get("spread_pct"),
+                    "volume":          m.get("volume_fp") or m.get("volume"),
+                    "open_interest":   m.get("open_interest_fp") or m.get("open_interest"),
                     "ob_flag":         m.get("ob_flag", False),
                     "ob_imbalance":    m.get("ob_imbalance"),
                     "ob_direction":    m.get("ob_direction"),

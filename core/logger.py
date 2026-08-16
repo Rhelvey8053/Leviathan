@@ -191,6 +191,25 @@ def _init_db() -> None:
             # calls. Signed toward the flagged direction: positive means
             # the market moved our way. See get_market_drift_stats().
             "market_drift_pp       REAL",
+            # signal-time market microstructure context (already fetched
+            # onto the market dict for filtering/scoring in main.py --
+            # volume_fp/open_interest_fp -- but never copied onto the
+            # logged signal, so "did edge cluster in illiquid markets"
+            # could never be answered from historical data). Column named
+            # without the _fp suffix since Power BI/CSV consumers read the
+            # already-dollar/contract-scaled value, matching category/
+            # whale_max_trade_size's naming convention above, not the raw
+            # Kalshi field name.
+            "volume                REAL",
+            "open_interest         REAL",
+            # When a signal actually resolved, distinct from `timestamp`
+            # (signal creation) and `close_time` (the market's SCHEDULED
+            # close, which settlement can lag) -- without this, time-to-
+            # resolution could only ever be approximated, never measured.
+            # Set once, in resolve_outcomes(), the same call that fills
+            # outcome/result/pnl_if_traded. NULL for every row logged
+            # before this existed and for anything still pending.
+            "resolved_at           TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -317,12 +336,13 @@ def log_signal(signal: dict) -> None:
                  net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker,
                  whale_max_trade_size,category,
                  ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
+                 volume,open_interest,
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -363,6 +383,8 @@ def log_signal(signal: dict) -> None:
                 signal.get("ob_direction"),
                 1 if signal.get("spread_wide") else 0,
                 _to_float(signal.get("spread_pct")),
+                _to_float(signal.get("volume")),
+                _to_float(signal.get("open_interest")),
                 1 if signal.get("confidence_downgraded") else 0,
                 1 if signal.get("second_pass") else 0,
                 _to_float(signal.get("ext_estimate")),
@@ -402,12 +424,13 @@ def log_pass(signal: dict) -> None:
                  net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker,
                  whale_max_trade_size,category,
                  ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
+                 volume,open_interest,
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -454,6 +477,8 @@ def log_pass(signal: dict) -> None:
                 signal.get("ob_direction"),
                 1 if signal.get("spread_wide") else 0,
                 _to_float(signal.get("spread_pct")),
+                _to_float(signal.get("volume")),
+                _to_float(signal.get("open_interest")),
                 1 if signal.get("confidence_downgraded") else 0,
                 1 if signal.get("second_pass") else 0,
                 _to_float(signal.get("ext_estimate")),
@@ -1019,10 +1044,11 @@ def resolve_outcomes(config: dict) -> int:
             with _db() as conn:
                 conn.execute(
                     "UPDATE signals SET outcome=?, result=?, pnl_if_traded=?, "
-                    "market_baseline_brier=?, stake_size_hypothetical=?, market_drift_pp=? "
+                    "market_baseline_brier=?, stake_size_hypothetical=?, market_drift_pp=?, "
+                    "resolved_at=? "
                     "WHERE call_id=?",
                     (outcome, "WIN" if win else "LOSS", pnl, baseline_brier, stake_size,
-                     drift_pp, row["call_id"])
+                     drift_pp, datetime.now(timezone.utc).isoformat(), row["call_id"])
                 )
             resolved_count += 1
         except Exception as e:

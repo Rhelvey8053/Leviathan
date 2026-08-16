@@ -2,14 +2,21 @@
 export_to_csv.py — Export leviathan.db tables to CSV for Power BI.
 
 Writes data/powerbi_export/signals.csv and data/powerbi_export/runs.csv.
-Uses stdlib only (csv + sqlite3) — no extra dependencies.
+stdlib only (csv + sqlite3 + datetime) plus one intra-project reuse:
+core.kalshi.kalshi_market_url() for the computed kalshi_url column, so the
+URL-building pattern has exactly one implementation (already relied on by
+core/report.py for the email's clickable links) rather than a second copy
+here that could drift from it. kalshi-sdk is already a hard requirement of
+this whole project via core/kalshi.py, so this adds no new dependency.
 Importable without side effects; runnable standalone via __main__.
 """
 
 import csv
 import os
 import sqlite3
+from datetime import datetime
 
+from core.kalshi import kalshi_market_url
 from core.logger import brier_component
 
 _ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,8 +29,9 @@ _STRING_COLS = frozenset({
     "result", "outcome", "direction", "confidence", "flag_path", "source",
     "time_horizon", "heuristic_direction", "heuristic_label",
     "whale_direction", "ticker", "title", "run_id", "call_id",
-    "close_time", "lv_band", "date", "timestamp",
+    "close_time", "lv_band", "date", "timestamp", "resolved_at",
     "category", "ob_direction", "consensus_dir", "smart_money_dir",
+    "event_ticker", "series_ticker", "kalshi_url",
 })
 
 # Sentinel strings that SQLite/Python can produce for missing data.
@@ -33,6 +41,7 @@ _NULL_STRINGS = frozenset({"None", "nan", "NaT"})
 _COMPUTED_COLS = frozenset({
     "is_resolved", "is_win", "confidence_rank", "horizon_rank",
     "date", "pnl_scaled", "lv_band", "brier_scorer", "brier_market",
+    "kalshi_url", "days_to_resolution",
 })
 
 # Analysis-relevant columns written to signals.csv, in display order.
@@ -83,6 +92,24 @@ WHITELIST = [
     # way every other whitelisted column does; they're read directly from
     # the DB by core/report.py's subscriber renderer instead.
     "market_drift_pp",
+    # Strategy-review findings (2026-08-16): volume/open_interest were
+    # already fetched onto the market dict for filtering/scoring in
+    # main.py but never persisted -- without them, "did edge cluster in
+    # illiquid markets" could never be answered from historical data.
+    # event_ticker/series_ticker were already columns in the DB (added for
+    # kalshi-event-ticker-capture) but excluded here, so a Power BI row
+    # had no way to link back to the real market the way the email report
+    # already can -- kalshi_url (computed below, via the exact same
+    # core.kalshi.kalshi_market_url() the email uses) closes that gap
+    # directly rather than making every dashboard reconstruct the URL
+    # itself from the two raw ticker fields. resolved_at (new column, set
+    # once in resolve_outcomes() alongside outcome/result) and the
+    # days_to_resolution computed from it answer "how long did this
+    # actually take," which close_time (the market's SCHEDULED close, not
+    # its actual settlement time) can only approximate.
+    "volume", "open_interest",
+    "event_ticker", "series_ticker", "kalshi_url",
+    "resolved_at", "days_to_resolution",
 ]
 
 _CONF_RANK    = {"HIGH": 0, "MED": 1, "LOW": 2}
@@ -174,6 +201,28 @@ def _add_computed_cols(row: dict) -> dict:
 
     component_market = brier_component(r.get("market_price"), direction, result)
     r["brier_market"] = round(component_market, 4) if component_market is not None else ""
+
+    # kalshi_url: same core.kalshi.kalshi_market_url() the email report
+    # uses -- None (missing series_ticker or event_ticker; both blank on
+    # rows logged before kalshi-event-ticker-capture) becomes "", never a
+    # guessed/partial URL.
+    url = kalshi_market_url(r.get("series_ticker"), r.get("event_ticker"))
+    r["kalshi_url"] = url or ""
+
+    # days_to_resolution: resolved_at (when resolve_outcomes() actually
+    # recorded the outcome) minus timestamp (when the signal was created),
+    # in days -- blank until both ends exist, i.e. blank for every
+    # unresolved row and every row logged before resolved_at existed.
+    r["days_to_resolution"] = ""
+    ts_raw  = r.get("timestamp")
+    res_raw = r.get("resolved_at")
+    if ts_raw and res_raw:
+        try:
+            ts  = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+            res = datetime.fromisoformat(str(res_raw).replace("Z", "+00:00"))
+            r["days_to_resolution"] = round((res - ts).total_seconds() / 86400, 2)
+        except (TypeError, ValueError):
+            pass
 
     return r
 
