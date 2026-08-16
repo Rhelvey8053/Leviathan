@@ -288,7 +288,7 @@
       "title": "Per-Heuristic Scorecard",
       "area": "reporting",
       "priority": 4,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": [
           {
@@ -299,7 +299,7 @@
         ]
       },
       "depends_on": [],
-      "action": "Build a per-heuristic win rate and PnL scorecard broken down by flag_path category.",
+      "action": "get_stats_by_heuristic_label() (core/logger.py) already existed -- win rate/P&L/avg_edge grouped by heuristic_label -- and was already wired into a real display in analysis/calibration.py's \"BY HEURISTIC LABEL\" section, but never reached either the daily or weekly email report; the only way to see it was manually running the analysis script. flag_path_stats (a coarser breakdown -- HEURISTIC/EDGE/DRIFT/WATCHLIST/etc, one bucket shared by ~30 different named heuristic rules in core.scanner) was already wired into compile_report/render_html/compile_weekly_digest/render_weekly_html; heuristic_label_stats is the finer-grained sibling and got the identical treatment, mirroring flag_path_stats' exact footprint -- added to compile_report (daily text) and both weekly digest renderers (compile_weekly_digest, render_weekly_html), matching flag_path_stats' own precedent of NOT appearing in render_html (the daily HTML, which stays concise/picks-focused by design; the more analytical breakdowns live in the daily text companion and the weekly summary). New \"Win Rate by Heuristic Label\" section (Label/Total/Wins/Win%/P&L columns, resolved-only, sorted by win rate descending) placed directly after the existing \"Win Rate by Signal Path\" section in every renderer it was added to. render_weekly_html had zero prior test coverage in this codebase at all (compile_weekly_digest's plain-text twin was tested, the HTML renderer wasn't) -- added a smoke test plus targeted coverage for the new section as part of this change, not a separate cleanup. 9 new tests, full suite green (2134 passed, 1 skipped, 0 failed). Live-verified against the real DB: 2 heuristic labels with resolved data today (mass layoffs 1/1 win, cabinet departure 0/2), section renders correctly in the daily report.",
       "notes": "15 resolved signals per category is the minimum for reliable category-level comparisons."
     },
     {

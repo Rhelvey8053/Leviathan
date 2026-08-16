@@ -2153,7 +2153,7 @@ def compile_report(
     signals, whale_only, stats, run_meta, config,
     all_filtered=None, new_signals=None, repeat_signals=None,
     smart_money_result=None, probe_stats=None, flag_path_stats=None,
-    lv_stats=None, db_path=None, now_utc=None,
+    lv_stats=None, db_path=None, now_utc=None, heuristic_label_stats=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
@@ -2416,6 +2416,25 @@ def compile_report(
                 wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
                 pnl_s = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
                 out.append(f"    {r['flag_path']:<14}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
+            out.append("")
+
+    # per-heuristic-scorecard: flag_path buckets multiple heuristic rules
+    # together (e.g. every HEURISTIC-flagged market shares one flag_path
+    # regardless of which of the ~30 named rules in core.scanner matched) --
+    # this is the finer-grained breakdown, already computed by
+    # get_stats_by_heuristic_label() but never surfaced anywhere besides a
+    # manually-run analysis/calibration.py before this.
+    if heuristic_label_stats:
+        resolved_labels = [r for r in heuristic_label_stats if r.get("total", 0) > 0]
+        if resolved_labels:
+            out.append("  Win Rate by Heuristic Label  (resolved only):")
+            out.append(f"    {'Label':<30}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L':>8}")
+            out.append(f"    {'-'*30}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}")
+            for r in resolved_labels:
+                wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+                pnl_s = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
+                label = _trunc(str(r.get("heuristic_label") or "?"), 30)
+                out.append(f"    {label:<30}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
             out.append("")
 
     if lv_stats:
@@ -2817,7 +2836,8 @@ def _week_whale_rows(week_signals: list[dict]) -> list[dict]:
 def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
                           flag_path_stats: list | None = None,
                           brier: dict | None = None,
-                          lv_stats: dict | None = None) -> str:
+                          lv_stats: dict | None = None,
+                          heuristic_label_stats: list | None = None) -> str:
     now_utc  = datetime.now(timezone.utc)
     week_ago = now_utc - timedelta(days=7)
     date_str = now_utc.strftime("%B %d, %Y")
@@ -2948,6 +2968,20 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
                 out.append(f"    {r['flag_path']:<14}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
             out.append("")
 
+    # per-heuristic-scorecard: see compile_report's identical section for why.
+    if heuristic_label_stats:
+        resolved_labels = [r for r in heuristic_label_stats if r.get("total", 0) > 0]
+        if resolved_labels:
+            out.append("  Win Rate by Heuristic Label  (resolved only):")
+            out.append(f"    {'Label':<30}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L':>8}")
+            out.append(f"    {'-'*30}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}")
+            for r in resolved_labels:
+                wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+                pnl_s = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
+                label = _trunc(str(r.get("heuristic_label") or "?"), 30)
+                out.append(f"    {label:<30}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>8}")
+            out.append("")
+
     if lv_stats:
         _BAND_ORDER = ("A", "B", "C", "D", "unscored")
         _lv_rows = [(b, lv_stats[b]) for b in _BAND_ORDER
@@ -3010,7 +3044,8 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
                        flag_path_stats: list | None = None,
                        brier: dict | None = None,
                        lv_stats: dict | None = None,
-                       now_utc: datetime | None = None) -> str:
+                       now_utc: datetime | None = None,
+                       heuristic_label_stats: list | None = None) -> str:
     """
     Renders the weekly digest as email-safe HTML matching the same visual
     system as render_html() (dark theme, IBM Plex Mono, table-based, inline
@@ -3098,6 +3133,45 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
           <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">P&amp;L</td>
         </tr>
         {flag_rows_html}
+      </table>
+    </td></tr>'''
+
+    # per-heuristic-scorecard: same rationale as compile_report's identical section.
+    heuristic_rows_html = ""
+    if heuristic_label_stats:
+        resolved_labels = [r for r in heuristic_label_stats if r.get("total", 0) > 0]
+        for r in resolved_labels:
+            wr_p = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+            pnl_p = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
+            heuristic_rows_html += f'''<tr>
+              <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 8px 8px 16px;border-bottom:1px solid #273246;">{_esc(_trunc(str(r.get("heuristic_label") or "?"), 30))}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{r['total']}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{r['wins']}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{_esc(wr_p)}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 16px 8px 8px;border-bottom:1px solid #273246;">{_esc(pnl_p)}</td>
+            </tr>'''
+
+    heuristic_section_html = ""
+    if heuristic_rows_html:
+        heuristic_section_html = f'''
+    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td class="px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Win Rate by Heuristic Label</td>
+        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
+      </tr></table>
+    </td></tr>
+    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
+        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
+          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Label</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Total</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Wins</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Win%</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">P&amp;L</td>
+        </tr>
+        {heuristic_rows_html}
       </table>
     </td></tr>'''
 
@@ -3265,6 +3339,7 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
       </table>
     </td></tr>
     {flag_section_html}
+    {heuristic_section_html}
 
     <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
 

@@ -415,6 +415,71 @@ def test_weekly_digest_flag_path_stats_absent_when_none():
     assert "Win Rate by Signal Path" not in digest
 
 
+def test_weekly_digest_heuristic_label_stats_shown_when_provided():
+    """per-heuristic-scorecard: the finer-grained breakdown flag_path buckets
+    together (many named heuristic rules share one flag_path)."""
+    heur_stats = [
+        {"heuristic_label": "PDUFA date",   "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90},
+        {"heuristic_label": "win-catchall", "total": 1, "wins": 0, "win_rate": 0.0,  "total_pnl": -1.00},
+    ]
+    digest = report.compile_weekly_digest([], _stats(), {}, heuristic_label_stats=heur_stats)
+    assert "Win Rate by Heuristic Label" in digest
+    assert "PDUFA date"   in digest
+    assert "win-catchall" in digest
+
+
+def test_weekly_digest_heuristic_label_stats_absent_when_none():
+    digest = report.compile_weekly_digest([], _stats(), {}, heuristic_label_stats=None)
+    assert "Win Rate by Heuristic Label" not in digest
+
+
+def test_weekly_digest_heuristic_label_stats_excludes_zero_total_rows():
+    """Rows with total=0 (a label with no resolved data yet) are filtered
+    out, matching flag_path_stats' identical convention."""
+    heur_stats = [{"heuristic_label": "untested rule", "total": 0, "wins": 0,
+                   "win_rate": None, "total_pnl": None}]
+    digest = report.compile_weekly_digest([], _stats(), {}, heuristic_label_stats=heur_stats)
+    assert "Win Rate by Heuristic Label" not in digest
+
+
+# ─── render_weekly_html (no prior test coverage for this function at all) ───
+
+def test_weekly_html_renders_without_crashing():
+    """Smoke test: render_weekly_html has no prior test coverage in this
+    codebase -- minimally confirm it produces well-formed-looking HTML
+    with default (all-None) optional args, since a typo in an f-string
+    section wouldn't be caught any other way."""
+    html = report.render_weekly_html([], _stats(), {})
+    assert html.startswith("<!DOCTYPE html>")
+    assert "</html>" in html
+
+
+def test_weekly_html_heuristic_label_stats_shown_when_provided():
+    heur_stats = [
+        {"heuristic_label": "PDUFA date", "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90},
+    ]
+    html = report.render_weekly_html([], _stats(), {}, heuristic_label_stats=heur_stats)
+    assert "Win Rate by Heuristic Label" in html
+    assert "PDUFA date" in html
+
+
+def test_weekly_html_heuristic_label_stats_absent_when_none():
+    html = report.render_weekly_html([], _stats(), {}, heuristic_label_stats=None)
+    assert "Win Rate by Heuristic Label" not in html
+
+
+def test_weekly_html_flag_and_heuristic_sections_both_render():
+    """Regression guard: the two sections sit back-to-back in the template
+    (`{flag_section_html}\\n{heuristic_section_html}`) -- confirm adding the
+    second didn't break the first."""
+    flag_stats = [{"flag_path": "EDGE", "total": 4, "wins": 3, "win_rate": 75.0, "total_pnl": 1.20}]
+    heur_stats = [{"heuristic_label": "PDUFA date", "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90}]
+    html = report.render_weekly_html([], _stats(), {}, flag_path_stats=flag_stats,
+                                      heuristic_label_stats=heur_stats)
+    assert "Win Rate by Signal Path" in html
+    assert "Win Rate by Heuristic Label" in html
+
+
 def test_weekly_digest_ticker_appears_in_markets_table():
     signals = [_week_row("KXUNIQUE-TEST")]
     digest = report.compile_weekly_digest(signals, _stats(), {})
@@ -626,6 +691,23 @@ def test_compile_report_flag_path_stats_section():
                                   flag_path_stats=fp_stats)
     assert "Win Rate by Signal Path" in body
     assert "EDGE" in body
+
+
+def test_compile_report_heuristic_label_stats_section():
+    """per-heuristic-scorecard: same section, daily report."""
+    heur_stats = [
+        {"heuristic_label": "PDUFA date", "total": 4, "wins": 3, "win_rate": 75.0, "total_pnl": 1.20},
+    ]
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  heuristic_label_stats=heur_stats)
+    assert "Win Rate by Heuristic Label" in body
+    assert "PDUFA date" in body
+
+
+def test_compile_report_heuristic_label_stats_absent_when_none():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  heuristic_label_stats=None)
+    assert "Win Rate by Heuristic Label" not in body
 
 
 def test_compile_report_short_term_watchlist_section():
