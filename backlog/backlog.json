@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-08-15",
+  "updated": "2026-08-16",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -741,6 +741,19 @@
       },
       "depends_on": [],
       "action": "backlog/checker.py::compute_metrics()'s resolved_count SQL diverged from core/logger.py::get_stats()['resolved'] (the number scripts/gate_notifier.py's actual gate-unlock emails use) two ways: no direction filter (counted PASS-direction rows, which resolve LOSS by construction -- see export-validation-pass-exclusion) and no source filter (counted real_fill/research_probe rows, tracked as separate populations from paper signals by design). Live data went 47 (buggy) -> 16 (direction fix alone) -> 13 (both fixes, exact match with get_stats()['resolved']). Caught by manually cross-checking BACKLOG.md's own regeneration metrics against gate_notifier's gate_state.json during a housekeeping pass after a 10-day gap; the source-filter half of the bug wasn't visible until the direction fix alone still left a 16-vs-13 gap, traced by breaking the resolved non-PASS rows down by source (paper=13, real_fill=2, research_probe=1). Practical effect before the fix: checker.py/BACKLOG.md's header and Locked/Ready gates could read edge-decay-analysis (resolved_count>=30) or calibration-curve (>=50) as closer to unlocking, or unlocked outright, than the codebase's own established \"resolved\" definition actually supports -- gate_notifier.py's separate, correct implementation meant no bad unlock *email* was ever sent, but BACKLOG.md itself would have misrepresented state to anyone reading the file directly. resolved_count_per_category_max was deliberately left untouched: its two implementations already agreed (neither excludes PASS), and unlike headline resolved_count there's a real argument PASS rows belong in a per-heuristic calibration scorecard, not just paper-trading P&L. Fix applied to both SQL filters (`AND direction != 'PASS' AND (source = 'paper' OR source IS NULL)`). Test fixture (tmp_db in tests/test_backlog_checker.py) gained a direction column plus PASS/real_fill/research_probe resolved rows to cover the exclusion directly; 1 new test, full suite green (2125 passed, 1 skipped, 0 failed).",
+      "notes": ""
+    },
+    {
+      "id": "whale-actionability-scorecard",
+      "title": "Whale Actionability Scorecard",
+      "area": "reporting",
+      "priority": 4,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "User asked what we're actually doing with whale-flag data beyond identifying it -- the report's WHALE ACTIVITY table just lists sightings (a market a whale traded, no track record attached), so there was no way to tell if following whale activity has predicted anything. Same gap as per-heuristic-scorecard: core/logger.py::get_stats_by_whale() (win rate/P&L/avg_edge for whale-flagged vs not, resolved YES/NO paper signals only) already existed and was already displayed in analysis/calibration.py, but never reached the actual email report. Added a \"Win Rate: Whale-Flagged vs Not\" section (Group/Total/Wins/Win%/P&L/AvgEdge, two rows, groups with zero resolved total omitted rather than printed as a bogus 0-row) to compile_report (daily text) and both weekly digest renderers, mirroring per-heuristic-scorecard's exact footprint and precedent (NOT added to render_html, the daily HTML, for the same reason). Also added a verdict line (win-rate delta between the two groups, \"whale flag predicts wins\" / \"underperforms\" / \"no meaningful difference yet\") -- same pattern as the existing LV-grade A-vs-D verdict line already in both renderers. Wired into main.py's three call sites (including the unsent-report fallback path, for consistency with every other stats param there). 9 new tests, full suite: 2144 passed, 1 skipped, 0 failed. Live-verified against the real DB: n=1 whale-flagged resolved signal right now (100% win rate, +$0.49) vs n=12 non-whale (33%, -$0.42) -- textbook too-small-to-mean-anything, but the section renders correctly and the plumbing is ready the moment more data exists.",
       "notes": ""
     }
   ]

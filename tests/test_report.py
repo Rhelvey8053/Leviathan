@@ -480,6 +480,81 @@ def test_weekly_html_flag_and_heuristic_sections_both_render():
     assert "Win Rate by Heuristic Label" in html
 
 
+# ─── whale-actionability-scorecard ────────────────────────────────────────
+
+def _whale_stats(w_total=3, w_wins=2, w_wr=66.7, w_pnl=1.20, w_edge=0.10,
+                  nw_total=5, nw_wins=1, nw_wr=20.0, nw_pnl=-0.85, nw_edge=0.05):
+    return {
+        "whale":    {"total": w_total, "wins": w_wins, "win_rate": w_wr,
+                     "total_pnl": w_pnl, "avg_edge": w_edge},
+        "no_whale": {"total": nw_total, "wins": nw_wins, "win_rate": nw_wr,
+                     "total_pnl": nw_pnl, "avg_edge": nw_edge},
+    }
+
+
+def test_weekly_digest_whale_stats_shown_when_provided():
+    """whale-actionability-scorecard: answers whether following whale
+    activity has actually predicted wins, not just listed sightings."""
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=_whale_stats())
+    assert "Win Rate: Whale-Flagged vs Not" in digest
+    assert "Whale-flagged" in digest
+    assert "No whale flag" in digest
+
+
+def test_weekly_digest_whale_stats_absent_when_none():
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=None)
+    assert "Win Rate: Whale-Flagged vs Not" not in digest
+
+
+def test_weekly_digest_whale_stats_absent_when_both_groups_empty():
+    empty = {"whale": {"total": 0}, "no_whale": {"total": 0}}
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=empty)
+    assert "Win Rate: Whale-Flagged vs Not" not in digest
+
+
+def test_weekly_digest_whale_stats_verdict_delta_shown():
+    """Both groups resolved -> the win-rate delta verdict line prints."""
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=_whale_stats())
+    assert "Whale vs no-whale win-rate delta:" in digest
+
+
+def test_weekly_digest_whale_stats_omits_group_with_zero_total():
+    """Only whale-flagged has data -- the no_whale row is skipped, not
+    printed as a bogus 0-total line."""
+    stats = {"whale": {"total": 2, "wins": 1, "win_rate": 50.0,
+                        "total_pnl": 0.10, "avg_edge": 0.05},
+             "no_whale": {"total": 0, "wins": 0, "win_rate": None,
+                           "total_pnl": None, "avg_edge": None}}
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=stats)
+    assert "Whale-flagged" in digest
+    assert "No whale flag" not in digest
+
+
+def test_weekly_html_whale_stats_shown_when_provided():
+    html = report.render_weekly_html([], _stats(), {}, whale_stats=_whale_stats())
+    assert "Win Rate: Whale-Flagged vs Not" in html
+    assert "Whale-flagged" in html
+    assert "No whale flag" in html
+
+
+def test_weekly_html_whale_stats_absent_when_none():
+    html = report.render_weekly_html([], _stats(), {}, whale_stats=None)
+    assert "Win Rate: Whale-Flagged vs Not" not in html
+
+
+def test_compile_report_whale_stats_section():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  whale_stats=_whale_stats())
+    assert "Win Rate: Whale-Flagged vs Not" in body
+    assert "Whale-flagged" in body
+
+
+def test_compile_report_whale_stats_absent_when_none():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  whale_stats=None)
+    assert "Win Rate: Whale-Flagged vs Not" not in body
+
+
 def test_weekly_digest_ticker_appears_in_markets_table():
     signals = [_week_row("KXUNIQUE-TEST")]
     digest = report.compile_weekly_digest(signals, _stats(), {})

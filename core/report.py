@@ -2154,6 +2154,7 @@ def compile_report(
     all_filtered=None, new_signals=None, repeat_signals=None,
     smart_money_result=None, probe_stats=None, flag_path_stats=None,
     lv_stats=None, db_path=None, now_utc=None, heuristic_label_stats=None,
+    whale_stats=None,
 ) -> str:
     threshold_rank = CONFIDENCE_ORDER.get(
         config.get("scoring", {}).get("confidence_threshold", "MED"), 1
@@ -2458,6 +2459,34 @@ def compile_report(
                 delta = a_d["win_rate"] - d_d["win_rate"]
                 arrow = "✓ scoring predicts win rate" if delta >= 10 else "⚠ grade delta small — review rubric"
                 out.append(f"    Grade A vs D delta: {delta:+.0f}pp  {arrow}")
+            out.append("")
+
+    # whale-actionability-scorecard: the WHALE ACTIVITY table above just
+    # lists sightings (a market a whale traded, no track record attached) --
+    # this answers the actual question, "has following whale activity been
+    # worth anything," by comparing resolved-signal win rate/P&L for
+    # whale-flagged vs non-whale-flagged, the same win-rate-by-bucket
+    # pattern already used for flag_path/heuristic_label/LV grade above.
+    if whale_stats:
+        _w  = whale_stats.get("whale", {})
+        _nw = whale_stats.get("no_whale", {})
+        if _w.get("total", 0) > 0 or _nw.get("total", 0) > 0:
+            out.append("  Win Rate: Whale-Flagged vs Not  (resolved only):")
+            out.append(f"    {'Group':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L':>8}  {'AvgEdge':>8}")
+            out.append(f"    {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}  {'-'*8}")
+            for label, d in (("Whale-flagged", _w), ("No whale flag", _nw)):
+                if d.get("total", 0) == 0:
+                    continue
+                wr_s  = f"{d['win_rate']:.0f}%" if d.get("win_rate") is not None else "—"
+                pnl_s = f"${d['total_pnl']:.2f}" if d.get("total_pnl") is not None else "—"
+                ae_s  = f"{d['avg_edge']*100:.1f}pp" if d.get("avg_edge") is not None else "—"
+                out.append(f"    {label:<16}  {d['total']:>5}  {d.get('wins',0):>4}  {wr_s:>6}  {pnl_s:>8}  {ae_s:>8}")
+            if _w.get("win_rate") is not None and _nw.get("win_rate") is not None:
+                delta = _w["win_rate"] - _nw["win_rate"]
+                verdict = "whale flag predicts wins" if delta >= 10 else (
+                          "whale flag underperforms -- no signal value shown yet" if delta <= -10 else
+                          "no meaningful difference yet")
+                out.append(f"    Whale vs no-whale win-rate delta: {delta:+.0f}pp  -> {verdict}")
             out.append("")
 
     # ── Run stats ─────────────────────────────────────────────────────────
@@ -2837,7 +2866,8 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
                           flag_path_stats: list | None = None,
                           brier: dict | None = None,
                           lv_stats: dict | None = None,
-                          heuristic_label_stats: list | None = None) -> str:
+                          heuristic_label_stats: list | None = None,
+                          whale_stats: dict | None = None) -> str:
     now_utc  = datetime.now(timezone.utc)
     week_ago = now_utc - timedelta(days=7)
     date_str = now_utc.strftime("%B %d, %Y")
@@ -2998,6 +3028,29 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
                 out.append(f"    {label:<10}  {d['total']:>5}  {d.get('wins',0):>4}  {wr_s:>6}  {ae_s:>8}")
             out.append("")
 
+    # whale-actionability-scorecard: see compile_report's identical section for why.
+    if whale_stats:
+        _w  = whale_stats.get("whale", {})
+        _nw = whale_stats.get("no_whale", {})
+        if _w.get("total", 0) > 0 or _nw.get("total", 0) > 0:
+            out.append("  Win Rate: Whale-Flagged vs Not  (resolved only):")
+            out.append(f"    {'Group':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {'P&L':>8}  {'AvgEdge':>8}")
+            out.append(f"    {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*8}  {'-'*8}")
+            for label, d in (("Whale-flagged", _w), ("No whale flag", _nw)):
+                if d.get("total", 0) == 0:
+                    continue
+                wr_s  = f"{d['win_rate']:.0f}%" if d.get("win_rate") is not None else "—"
+                pnl_s = f"${d['total_pnl']:.2f}" if d.get("total_pnl") is not None else "—"
+                ae_s  = f"{d['avg_edge']*100:.1f}pp" if d.get("avg_edge") is not None else "—"
+                out.append(f"    {label:<16}  {d['total']:>5}  {d.get('wins',0):>4}  {wr_s:>6}  {pnl_s:>8}  {ae_s:>8}")
+            if _w.get("win_rate") is not None and _nw.get("win_rate") is not None:
+                delta = _w["win_rate"] - _nw["win_rate"]
+                verdict = "whale flag predicts wins" if delta >= 10 else (
+                          "whale flag underperforms -- no signal value shown yet" if delta <= -10 else
+                          "no meaningful difference yet")
+                out.append(f"    Whale vs no-whale win-rate delta: {delta:+.0f}pp  -> {verdict}")
+            out.append("")
+
     out.append(_rule("="))
     out.append("Leviathan v1  ·  Weekly Summary  ·  For informational purposes only")
     out.append(_rule("="))
@@ -3045,7 +3098,8 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
                        brier: dict | None = None,
                        lv_stats: dict | None = None,
                        now_utc: datetime | None = None,
-                       heuristic_label_stats: list | None = None) -> str:
+                       heuristic_label_stats: list | None = None,
+                       whale_stats: dict | None = None) -> str:
     """
     Renders the weekly digest as email-safe HTML matching the same visual
     system as render_html() (dark theme, IBM Plex Mono, table-based, inline
@@ -3172,6 +3226,51 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
           <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">P&amp;L</td>
         </tr>
         {heuristic_rows_html}
+      </table>
+    </td></tr>'''
+
+    # whale-actionability-scorecard: see compile_report's identical section for why.
+    whale_stat_rows_html = ""
+    if whale_stats:
+        _w  = whale_stats.get("whale", {})
+        _nw = whale_stats.get("no_whale", {})
+        for label, d in (("Whale-flagged", _w), ("No whale flag", _nw)):
+            if d.get("total", 0) == 0:
+                continue
+            wr_p = f"{d['win_rate']:.0f}%" if d.get("win_rate") is not None else "—"
+            pnl_p = f"${d['total_pnl']:.2f}" if d.get("total_pnl") is not None else "—"
+            ae_p = f"{d['avg_edge']*100:.1f}pp" if d.get("avg_edge") is not None else "—"
+            whale_stat_rows_html += f'''<tr>
+              <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 8px 8px 16px;border-bottom:1px solid #273246;">{_esc(label)}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{d['total']}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{d.get('wins',0)}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{_esc(wr_p)}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{_esc(pnl_p)}</td>
+              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 16px 8px 8px;border-bottom:1px solid #273246;">{_esc(ae_p)}</td>
+            </tr>'''
+
+    whale_stat_section_html = ""
+    if whale_stat_rows_html:
+        whale_stat_section_html = f'''
+    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td class="px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Win Rate: Whale-Flagged vs Not</td>
+        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
+      </tr></table>
+    </td></tr>
+    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
+        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
+          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Group</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Total</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Wins</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Win%</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">P&amp;L</td>
+          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">AvgEdge</td>
+        </tr>
+        {whale_stat_rows_html}
       </table>
     </td></tr>'''
 
@@ -3340,6 +3439,7 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
     </td></tr>
     {flag_section_html}
     {heuristic_section_html}
+    {whale_stat_section_html}
 
     <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
 

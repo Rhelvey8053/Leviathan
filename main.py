@@ -1095,20 +1095,23 @@ def main():
                 _weekly_stats    = logger.get_stats()
                 _weekly_flag_cal = logger.get_stats_by_flag_path()
                 _weekly_heur_cal = logger.get_stats_by_heuristic_label()
+                _weekly_whale    = logger.get_stats_by_whale()
                 _weekly_brier    = logger.get_brier_score()
                 _weekly_lv       = logger.get_stats_by_leviathan_score()
                 weekly_body = report.compile_weekly_digest(week_sigs, _weekly_stats, config,
                                                           flag_path_stats=_weekly_flag_cal,
                                                           brier=_weekly_brier,
                                                           lv_stats=_weekly_lv,
-                                                          heuristic_label_stats=_weekly_heur_cal)
+                                                          heuristic_label_stats=_weekly_heur_cal,
+                                                          whale_stats=_weekly_whale)
                 weekly_html = None
                 try:
                     weekly_html = report.render_weekly_html(week_sigs, _weekly_stats, config,
                                                             flag_path_stats=_weekly_flag_cal,
                                                             brier=_weekly_brier,
                                                             lv_stats=_weekly_lv,
-                                                            heuristic_label_stats=_weekly_heur_cal)
+                                                            heuristic_label_stats=_weekly_heur_cal,
+                                                            whale_stats=_weekly_whale)
                 except Exception as e:
                     print(f"      [warn] Weekly HTML render failed, sending text-only: {e}")
                 report.send_report(weekly_body, [], 0, config,
@@ -1137,6 +1140,7 @@ def main():
         probe_stats      = logger.get_stats_probe()
         flag_path_stats  = logger.get_stats_by_flag_path()
         heuristic_stats  = logger.get_stats_by_heuristic_label()
+        whale_stats      = logger.get_stats_by_whale()
         lv_stats         = logger.get_stats_by_leviathan_score()
         # Shared now_utc: compile_report and render_html must render the same
         # run's date/time (and every other computed value) identically — see
@@ -1152,7 +1156,8 @@ def main():
                                       lv_stats=lv_stats,
                                       db_path=logger.DB_PATH,
                                       now_utc=report_now_utc,
-                                      heuristic_label_stats=heuristic_stats)
+                                      heuristic_label_stats=heuristic_stats,
+                                      whale_stats=whale_stats)
         html_body = None
         try:
             html_body = report.render_html(final_signals, whale_only, stats, run_meta, config,
@@ -1179,7 +1184,8 @@ def main():
                                          flag_path_stats=logger.get_stats_by_flag_path(),
                                          lv_stats=logger.get_stats_by_leviathan_score(),
                                          db_path=logger.DB_PATH,
-                                         heuristic_label_stats=logger.get_stats_by_heuristic_label())
+                                         heuristic_label_stats=logger.get_stats_by_heuristic_label(),
+                                         whale_stats=logger.get_stats_by_whale())
             print(body)
         except Exception:
             pass
