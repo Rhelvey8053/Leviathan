@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-08-04",
+  "updated": "2026-08-15",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -288,7 +288,7 @@
       "title": "Per-Heuristic Scorecard",
       "area": "reporting",
       "priority": 4,
-      "status": "locked",
+      "status": "ready",
       "trigger": {
         "all": [
           {
@@ -307,7 +307,7 @@
       "title": "Heuristic Sunsetting",
       "area": "calibration",
       "priority": 5,
-      "status": "locked",
+      "status": "ready",
       "trigger": {
         "all": [
           {
@@ -715,6 +715,32 @@
       },
       "depends_on": [],
       "action": "User asked why the run header's whale-flag count (e.g. \"15 whale flags\") never seemed to show up as detail in the report. Traced it: core.report.compute_leviathan_score() only awarded any whale-related bonus when BOTH whale_detected AND ob_flag fired together (+3) -- a whale-only flag got zero LV bonus. With BASE=40 and core.scorer.score_markets()'s pre-Claude gate at config.scoring.min_pre_claude_lv=20 (confirmed live in config.json), a whale-flagged market with otherwise weak/negative signals (net_edge<=0, pass_count>=3, short horizon -- realistic combination, stacks to -21) could score as low as 19-23, sometimes below the gate. A market that fails the gate never reaches Claude scoring at all: no cs result comes back, so main.py's `if not cs: continue` skips it before it can become a final_signal, a logged PASS, OR a whale_only report row -- it vanishes from the report entirely, with the only trace being the raw pre-gate count printed in step 5, before scoring ever runs. Confirmed materially real on the pipeline run earlier this session: 18 markets flagged, only 6 reached Claude (min_pre_claude_lv=20 was the binding filter, well under max_markets_per_run=10), so some of that run's 15 whale flags plausibly never got a Claude estimate or any report visibility at all. Fix: whale_detected alone now adds +4 (BASE 40 + 4 = 44, the same safety margin watchlist_signal's existing +4 bonus already has), replacing the old both-required +3 -- not an addition on top of it, per explicit user sign-off on the exact diff via AskUserQuestion (two other options -- a pre-filtered-whale-flags visibility section, or both -- were offered and declined). ob_flag alone still contributes nothing on its own; only whale_detected changed. 4 new tests (compute_leviathan_score: whale-alone +4, whale_detected=False no bonus, whale-without-ob-flag still gets the bonus (regression guard against reintroducing the combined-only gate); score_markets integration: a market at LV 19 that fails the gate on its own now clears it at LV 23 once whale_detected is added, reaching the CLI batch step). Full suite: 2122 passed, 1 skipped, 0 failed.",
+      "notes": ""
+    },
+    {
+      "id": "whale-only-none-direction-crash",
+      "title": "Whale Only None Direction Crash",
+      "area": "reporting",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Real production incident, same day as whale-flag-lv-guarantee shipped: a manually-triggered 2026-08-05 run (real Kalshi/Claude calls, same as any scheduled run) crashed inside compile_report() with `TypeError: object of type 'NoneType' has no len()` and sent no report at all (caught by main.py's step-8 except block, fell through to the unsent-report fallback, no email went out). Root cause: core.whales sets whale_direction=None (not absent from the dict) whenever whale_detected fires purely from volume-spike/block-trade activity with no clear directional lean -- independent of whale_detected itself. The WHALE ACTIVITY table's row-builder used `w.get(\"whale_direction\", \"?\")`, and dict.get(key, default) only substitutes the default for a MISSING key, not a present key whose value is None -- so None flowed into _render_table's _cell(), which unconditionally does `len(val)`. This exact shape had apparently never reached this render path before; whale-flag-lv-guarantee (shipped the same session) made a whale-only, no-clear-direction flag reaching this table far more likely by guaranteeing whale_detected clears the pre-Claude min_pre_claude_lv gate instead of silently dropping out beforehand -- the fix that closed one visibility gap opened this crash on the very next scheduled run. Fixed by switching to `w.get(key) or default` (the same None-safe pattern already used for this identical field in _week_whale_rows, just not in this table) for all three string fields in the row (ticker, whale_direction, title) -- ratio was already crash-safe (falsy-checked before formatting). 2 new tests (None whale_direction, None ticker/title), full suite green. Did not re-run the pipeline to recover the missed 2026-08-05 report as part of this fix -- that is a real-money-adjacent action (another live Kalshi/Claude run + a real email) left for explicit go-ahead, not bundled into a bug fix.",
+      "notes": ""
+    },
+    {
+      "id": "resolved-count-metric-desync",
+      "title": "Resolved Count Metric Desync",
+      "area": "infra",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "backlog/checker.py::compute_metrics()'s resolved_count SQL diverged from core/logger.py::get_stats()['resolved'] (the number scripts/gate_notifier.py's actual gate-unlock emails use) two ways: no direction filter (counted PASS-direction rows, which resolve LOSS by construction -- see export-validation-pass-exclusion) and no source filter (counted real_fill/research_probe rows, tracked as separate populations from paper signals by design). Live data went 47 (buggy) -> 16 (direction fix alone) -> 13 (both fixes, exact match with get_stats()['resolved']). Caught by manually cross-checking BACKLOG.md's own regeneration metrics against gate_notifier's gate_state.json during a housekeeping pass after a 10-day gap; the source-filter half of the bug wasn't visible until the direction fix alone still left a 16-vs-13 gap, traced by breaking the resolved non-PASS rows down by source (paper=13, real_fill=2, research_probe=1). Practical effect before the fix: checker.py/BACKLOG.md's header and Locked/Ready gates could read edge-decay-analysis (resolved_count>=30) or calibration-curve (>=50) as closer to unlocking, or unlocked outright, than the codebase's own established \"resolved\" definition actually supports -- gate_notifier.py's separate, correct implementation meant no bad unlock *email* was ever sent, but BACKLOG.md itself would have misrepresented state to anyone reading the file directly. resolved_count_per_category_max was deliberately left untouched: its two implementations already agreed (neither excludes PASS), and unlike headline resolved_count there's a real argument PASS rows belong in a per-heuristic calibration scorecard, not just paper-trading P&L. Fix applied to both SQL filters (`AND direction != 'PASS' AND (source = 'paper' OR source IS NULL)`). Test fixture (tmp_db in tests/test_backlog_checker.py) gained a direction column plus PASS/real_fill/research_probe resolved rows to cover the exclusion directly; 1 new test, full suite green (2125 passed, 1 skipped, 0 failed).",
       "notes": ""
     }
   ]

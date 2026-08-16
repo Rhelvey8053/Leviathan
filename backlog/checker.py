@@ -54,9 +54,21 @@ def compute_metrics(db_path=DEFAULT_DB) -> dict:
         try:
             cur = conn.cursor()
 
+            # resolved-count-metric-desync (2026-08-16): this SQL diverged
+            # from core.logger.get_stats()['resolved'] (the number
+            # scripts/gate_notifier.py's actual gate-unlock emails use) two
+            # ways -- (1) no direction filter, so PASS-direction rows (which
+            # resolve LOSS by construction, not a real call -- see
+            # export-validation-pass-exclusion) were counted, and (2) no
+            # source filter, so real_fill and research_probe rows (tracked
+            # separately from paper signals by design) were counted too.
+            # Both fixed to match get_stats()'s _PAPER + direction != 'PASS'
+            # filters exactly -- live data went from 47 (buggy) -> 16
+            # (direction fix only) -> 13 (matches get_stats() exactly).
             cur.execute(
                 "SELECT count(*) FROM signals "
-                "WHERE result != '' AND result IS NOT NULL"
+                "WHERE result != '' AND result IS NOT NULL AND direction != 'PASS' "
+                "AND (source = 'paper' OR source IS NULL)"
             )
             metrics["resolved_count"] = cur.fetchone()[0] or 0
 

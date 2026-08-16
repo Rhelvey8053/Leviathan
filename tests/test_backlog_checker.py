@@ -47,21 +47,30 @@ def tmp_db(tmp_path):
     conn = sqlite3.connect(db)
     conn.execute("""
         CREATE TABLE signals (
-            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT
+            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT,
+            direction TEXT
         )
     """)
-    # 4 resolved signals across two flag_paths
+    # 4 resolved (non-PASS, source=paper) signals across two flag_paths,
+    # plus rows resolved-count-metric-desync must exclude: a resolved PASS
+    # row (PASS resolves LOSS by construction, not a real call), a resolved
+    # real_fill row (real trade fills are tracked separately from paper
+    # signals by design), and a resolved research_probe row (a different
+    # experiment population, not paper signals either).
     conn.executemany(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?)",
         [
-            ("a1", "TICKER1", "WIN",  "EDGE",      "paper"),
-            ("a2", "TICKER2", "LOSS", "EDGE",      "paper"),
-            ("a3", "TICKER3", "WIN",  "HEURISTIC", "paper"),
-            ("a4", "TICKER4", "WIN",  "HEURISTIC", "paper"),
-            ("a5", "TICKER5", "",     "EDGE",      "paper"),       # pending
-            ("a6", "TICKER6", None,   "EDGE",      "paper"),       # pending
-            ("f1", "TICKER7", "",     None,         "real_fill"),  # fill, no result
-            ("f2", "TICKER8", "",     None,         "real_fill"),  # fill, no result
+            ("a1", "TICKER1",  "WIN",  "EDGE",      "paper",          "YES"),
+            ("a2", "TICKER2",  "LOSS", "EDGE",      "paper",          "NO"),
+            ("a3", "TICKER3",  "WIN",  "HEURISTIC", "paper",          "YES"),
+            ("a4", "TICKER4",  "WIN",  "HEURISTIC", "paper",          "NO"),
+            ("a5", "TICKER5",  "",     "EDGE",      "paper",          "YES"),  # pending
+            ("a6", "TICKER6",  None,   "EDGE",      "paper",          "NO"),   # pending
+            ("a7", "TICKER9",  "LOSS", "DRIFT",     "paper",          "PASS"), # resolved PASS -- excluded
+            ("f1", "TICKER7",  "",     None,        "real_fill",      ""),     # fill, no result
+            ("f2", "TICKER8",  "",     None,        "real_fill",      ""),     # fill, no result
+            ("f3", "TICKER10", "WIN",  None,        "real_fill",      "YES"),  # resolved real_fill -- excluded
+            ("p1", "TICKER11", "WIN",  None,        "research_probe", "YES"),  # resolved research_probe -- excluded
         ]
     )
     conn.commit()
@@ -82,15 +91,16 @@ def tmp_db_with_smf(tmp_path):
     conn = sqlite3.connect(db)
     conn.execute("""
         CREATE TABLE signals (
-            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT
+            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT,
+            direction TEXT
         )
     """)
     conn.execute("""
         CREATE TABLE smart_money_fills (wallet TEXT, resolved INTEGER)
     """)
     conn.executemany(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
-        [("s1", "T1", "WIN", "EDGE", "paper")] * 30
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?)",
+        [("s1", "T1", "WIN", "EDGE", "paper", "YES")] * 30
     )
     conn.executemany(
         "INSERT INTO smart_money_fills VALUES (?, ?)",
@@ -119,9 +129,25 @@ def tmp_backlog(tmp_path):
 
 def test_compute_metrics_correct_counts(tmp_db):
     m = compute_metrics(tmp_db)
-    assert m["resolved_count"] == 4              # WIN/LOSS only
-    assert m["resolved_count_per_category_max"] == 2  # HEURISTIC has 2
-    assert m["fills_count"] == 2
+    assert m["resolved_count"] == 4              # paper, WIN/LOSS, non-PASS only
+    assert m["resolved_count_per_category_max"] == 2  # NULL/EDGE/HEURISTIC tied at 2
+    assert m["fills_count"] == 3
+
+
+def test_compute_metrics_resolved_count_excludes_pass_and_non_paper_sources(tmp_db):
+    """
+    resolved-count-metric-desync (2026-08-16): resolved_count's SQL had two
+    gaps vs. core.logger.get_stats()['resolved'] (the number
+    scripts/gate_notifier.py's actual gate-unlock emails use) -- no
+    direction filter (a7, a resolved PASS row, would have counted; PASS
+    resolves LOSS by construction, not a real call) and no source filter
+    (f3/p1, resolved real_fill/research_probe rows, would have counted;
+    both are tracked as separate populations from paper signals by
+    design). Before this fix tmp_db's resolved_count would have been 7,
+    not 4.
+    """
+    m = compute_metrics(tmp_db)
+    assert m["resolved_count"] == 4
 
 
 def test_compute_metrics_missing_smf_returns_zero(tmp_db_no_smf):

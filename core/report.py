@@ -2315,11 +2315,27 @@ def compile_report(
         for w in whale_only:
             avg   = w.get("avg_trade_size", 0)
             ratio = f"{w.get('max_trade_size', 0)/avg:.1f}x" if avg else "—"
+            # whale-flag-lv-guarantee (2026-08-05 crash): whale_direction is
+            # explicitly None (not absent) whenever whales.detect_whale()
+            # finds unusual volume/block trades with no clear directional
+            # lean (core/whales.py sets whale_direction=None by default,
+            # independent of whale_detected) -- dict.get(key, default) only
+            # substitutes the default for a MISSING key, not a present key
+            # whose value is None, so this crashed _render_table's _cell()
+            # (`len(None)`) the first time a whale-only row with no
+            # determinable direction survived into the report. Whale flags
+            # reaching this table at all got much more likely once
+            # whale_detected started guaranteeing the min_pre_claude_lv gate
+            # (same commit) instead of silently dropping out beforehand --
+            # this exact shape apparently never actually reached this
+            # render path before. `or` (not the .get default) is the same
+            # None-safe pattern already used for this identical field in
+            # _week_whale_rows below.
             _wh_rows.append([
-                _trunc(w.get("ticker", ""), 22),
-                w.get("whale_direction", "?"),
+                _trunc(w.get("ticker") or "", 22),
+                w.get("whale_direction") or "?",
                 ratio,
-                _trunc(w.get("title", ""), 32),
+                _trunc(w.get("title") or "", 32),
             ])
         out.extend(_render_table(
             ["Ticker", "Direction", "Size vs Avg", "Title"],

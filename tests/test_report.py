@@ -547,6 +547,40 @@ def test_compile_report_whale_activity_listed():
     assert "YES" in body
 
 
+def test_compile_report_whale_activity_none_direction_does_not_crash():
+    """
+    Regression guard (real crash, 2026-08-05 live run): core.whales sets
+    whale_direction=None (not absent) whenever whale_detected fires from
+    volume/block-trade activity with no clear directional lean -- w.get(
+    "whale_direction", "?") only substitutes the default for a MISSING
+    key, not a present key whose value is None, so this used to reach
+    _render_table's _cell() as None and crash on len(None), meaning
+    compile_report() raised and the entire report (not just this section)
+    failed to send. Whale-only rows with no determinable direction became
+    much more likely to reach this table once whale_detected started
+    guaranteeing the min_pre_claude_lv gate (same session) instead of
+    silently dropping out beforehand.
+    """
+    whale = {
+        "ticker": "KXWHALE", "title": "Whale Market",
+        "whale_direction": None, "max_trade_size": 3000, "avg_trade_size": 600.0,
+    }
+    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "KXWHALE" in body
+    assert "?" in body
+
+
+def test_compile_report_whale_activity_none_ticker_and_title_do_not_crash():
+    """Same None-vs-missing gotcha, guarded for the other two .get() calls
+    in the same row -- ticker and title, both plausibly None upstream."""
+    whale = {
+        "ticker": None, "title": None,
+        "whale_direction": "YES", "max_trade_size": 3000, "avg_trade_size": 600.0,
+    }
+    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG)
+    assert "WHALE ACTIVITY" in body
+
+
 def test_compile_report_track_record_section():
     body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
     assert "TRACK RECORD" in body
