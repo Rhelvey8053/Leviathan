@@ -29,3 +29,4 @@ tools/LICENSE
 tools/README.md
 tools/etc/
 dashboard/.venv*/
+logs/
