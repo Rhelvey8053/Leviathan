@@ -13,14 +13,14 @@ See dashboard/data.py for the full data contract this app is built against.
 import datetime
 
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from data import DataLoadError, data_freshness, load_runs, load_signals
+from theme import CATEGORICAL_SEQUENCE, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header
 
 st.set_page_config(page_title="Leviathan Dashboard", page_icon=":material/query_stats:", layout="wide")
-
-st.title("Leviathan -- Overview")
+inject_css()
 
 try:
     signals = load_signals()
@@ -34,6 +34,7 @@ if signals.empty:
     st.stop()
 
 fresh_at = data_freshness()
+freshness_sub = ""
 if fresh_at is not None:
     age = datetime.datetime.now(datetime.timezone.utc) - fresh_at
     age_minutes = age.total_seconds() / 60
@@ -43,7 +44,10 @@ if fresh_at is not None:
         age_str = f"{age_minutes / 60:.1f} hr ago"
     else:
         age_str = f"{age_minutes / 1440:.1f} days ago"
-    st.caption(f"Data last exported: {fresh_at.strftime('%Y-%m-%d %H:%M UTC')} ({age_str})")
+    freshness_sub = f"data as of {fresh_at.strftime('%Y-%m-%d %H:%M UTC')} ({age_str})"
+
+page_header("Leviathan", freshness_sub)
+st.caption("Overview")
 
 col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -52,9 +56,17 @@ col1.metric("Active Signals", active_count)
 
 # TODO: markets_scanned in runs.csv is a Kalshi-only combined count -- no
 # separate Polymarket-scanned metric exists anywhere in the pipeline output.
+# Delta vs the prior run is a real, robust comparison (unlike the other
+# KPIs here, every run has a well-defined "previous run" to compare against).
 if not runs.empty:
-    latest_run = runs.sort_values("timestamp").iloc[-1]
-    col2.metric("Markets Scanned (Kalshi)", int(latest_run["markets_scanned"]))
+    runs_sorted = runs.sort_values("timestamp")
+    latest_run = runs_sorted.iloc[-1]
+    scanned_delta = None
+    if len(runs_sorted) >= 2:
+        prev_scanned = runs_sorted.iloc[-2]["markets_scanned"]
+        scanned_delta = int(latest_run["markets_scanned"] - prev_scanned)
+    col2.metric("Markets Scanned (Kalshi)", int(latest_run["markets_scanned"]),
+                delta=scanned_delta, delta_color="off")
 else:
     col2.metric("Markets Scanned (Kalshi)", "no data")
 
@@ -81,14 +93,35 @@ else:
 
 st.divider()
 
-st.subheader("Signals Generated Per Day")
-daily = signals.dropna(subset=["date"]).groupby(signals["date"].dt.date).size().reset_index(name="signal_count")
-daily.columns = ["date", "signal_count"]
-if daily.empty:
+st.subheader("Cumulative Bets & Resolutions")
+dated = signals.dropna(subset=["date"]).sort_values("date")
+if dated.empty:
     st.info("No dated signals to trend yet.")
 else:
-    fig = px.bar(daily, x="date", y="signal_count", labels={"date": "Date", "signal_count": "Signals"})
+    daily = dated.groupby(dated["date"].dt.date).agg(
+        new_bets=("call_id", "count"),
+        new_resolved=("is_resolved", "sum"),
+    ).reset_index()
+    daily["cum_bets"] = daily["new_bets"].cumsum()
+    daily["cum_resolved"] = daily["new_resolved"].cumsum()
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=daily["date"], y=daily["cum_bets"], name="Total bets",
+        mode="lines", line=dict(color=CATEGORICAL_SEQUENCE[0], width=2.5),
+        fill="tozeroy", fillcolor="rgba(21,101,192,0.08)",
+    ))
+    fig.add_trace(go.Scatter(
+        x=daily["date"], y=daily["cum_resolved"], name="Resolved",
+        mode="lines", line=dict(color=WIN_COLOR, width=2.5, dash="dot"),
+    ))
+    fig.update_layout(PLOTLY_TEMPLATE["layout"], height=340,
+                       xaxis_title="Date", yaxis_title="Cumulative count")
     st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        f"{int(daily['cum_bets'].iloc[-1])} total bets logged, "
+        f"{int(daily['cum_resolved'].iloc[-1])} resolved so far."
+    )
 
 st.caption(
     "signals.csv holds real bets only (direction YES/NO) -- PASS decisions "

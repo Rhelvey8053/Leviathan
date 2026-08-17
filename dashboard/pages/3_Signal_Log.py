@@ -7,9 +7,11 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data import DataLoadError, load_signals
+from theme import inject_css, page_header
 
 st.set_page_config(page_title="Leviathan -- Signal Log", layout="wide")
-st.title("Signal Log")
+inject_css()
+page_header("Signal Log", "")
 st.caption(
     "Each row is one real bet (direction YES/NO), carrying its own source/flag_path -- "
     "provenance is per-market, not batch-level. PASS decisions live in scan_log.csv, not here."
@@ -41,6 +43,21 @@ if search:
     mask = filtered["ticker"].str.contains(search, case=False, na=False) | filtered["title"].str.contains(search, case=False, na=False)
     filtered = filtered[mask]
 
+if filtered.empty:
+    st.info("No signals match the current filters.")
+    st.stop()
+
+n_total = len(filtered)
+n_resolved = int(filtered["is_resolved"].sum())
+n_wins = int((filtered["is_win"] == 1).sum())
+win_rate_str = f"{n_wins / n_resolved * 100:.0f}%" if n_resolved else "n/a"
+
+s1, s2, s3, s4 = st.columns(4)
+s1.metric("Bets in view", n_total)
+s2.metric("Resolved", n_resolved)
+s3.metric("Win rate", win_rate_str, help=f"n={n_resolved}" if n_resolved else "no resolved bets in view")
+s4.metric("Whale-flagged", int(filtered["whale_detected"].sum()))
+
 DEFAULT_COLS = [
     "date", "ticker", "title", "source", "direction", "confidence",
     "flag_path", "category", "edge", "net_edge", "leviathan_score",
@@ -49,15 +66,11 @@ DEFAULT_COLS = [
 default_cols = [c for c in DEFAULT_COLS if c in filtered.columns]
 chosen_cols = st.multiselect("Columns to show", list(filtered.columns), default=default_cols)
 
-if filtered.empty:
-    st.info("No signals match the current filters.")
-else:
-    st.write(f"{len(filtered)} signal(s)")
-    display_cols = chosen_cols or default_cols
-    st.dataframe(filtered[display_cols], use_container_width=True, hide_index=True)
-    st.download_button(
-        "Download filtered view as CSV",
-        data=filtered[display_cols].to_csv(index=False).encode("utf-8"),
-        file_name="leviathan_signals_filtered.csv",
-        mime="text/csv",
-    )
+display_cols = chosen_cols or default_cols
+st.dataframe(filtered[display_cols], use_container_width=True, hide_index=True)
+st.download_button(
+    "Download filtered view as CSV",
+    data=filtered[display_cols].to_csv(index=False).encode("utf-8"),
+    file_name="leviathan_signals_filtered.csv",
+    mime="text/csv",
+)

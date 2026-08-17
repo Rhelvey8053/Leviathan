@@ -8,9 +8,11 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data import CONFIDENCE_ORDER, DataLoadError, load_signals
+from theme import LOSS_COLOR, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header, small_n_badge
 
 st.set_page_config(page_title="Leviathan -- Signal Breakdown", layout="wide")
-st.title("Signal Breakdown")
+inject_css()
+page_header("Signal Breakdown", "analysis")
 
 try:
     signals = load_signals()
@@ -50,56 +52,123 @@ if legacy_n > 0:
         "leviathan_score/lv_band/flag_path are unavoidably blank for these, not a data-quality bug."
     )
 
+# ── Click-to-filter: detection path bar chart drives every chart below it ──
+# TODO: the spec asks for a Kalshi-vs-Polymarket source breakdown; no such
+# column exists (see dashboard/data.py contract). flag_path is the nearest
+# real proxy -- CROSS_MARKET is the Polymarket-corroborated path.
+st.subheader("By Detection Path (flag_path)")
+st.caption("Click a bar to filter every chart below by that detection path. Click it again, or the button, to clear.")
+fp_counts = filtered["flag_path"].fillna("(none)").value_counts()
+if fp_counts.empty:
+    st.info("No flag_path data for the current filter.")
+    view = filtered
+else:
+    fp_fig = px.bar(x=fp_counts.index, y=fp_counts.values, labels={"x": "flag_path", "y": "count"})
+    fp_fig.update_layout(PLOTLY_TEMPLATE["layout"], height=280)
+    fp_fig.update_traces(marker_color=PLOTLY_TEMPLATE["layout"]["colorway"][0])
+    event = st.plotly_chart(
+        fp_fig, use_container_width=True,
+        on_select="rerun", selection_mode="points", key="fp_click_chart",
+    )
+    selected_fp = None
+    points = (event or {}).get("selection", {}).get("points", [])
+    if points:
+        selected_fp = points[0].get("x")
+
+    col_sel, col_clear = st.columns([3, 1])
+    if selected_fp:
+        col_sel.caption(f"Filtering on flag_path = **{selected_fp}**")
+        view = filtered[filtered["flag_path"].fillna("(none)") == selected_fp]
+    else:
+        view = filtered
+    if col_clear.button("Clear selection"):
+        st.rerun()
+
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Edge Distribution")
-    edge_vals = filtered["edge"].dropna()
+    edge_vals = view["edge"].dropna()
     if edge_vals.empty:
         st.info("No edge data for the current filter.")
     else:
-        st.plotly_chart(px.histogram(edge_vals, nbins=30, labels={"value": "edge"}), use_container_width=True)
+        fig = px.histogram(edge_vals, nbins=30, labels={"value": "edge"})
+        fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=300)
+        st.plotly_chart(fig, use_container_width=True)
         st.caption("net_edge does not model fees -- shown as raw edge, not net EV.")
 
 with col2:
     st.subheader("Confidence Distribution")
-    conf_counts = filtered["confidence"].value_counts().reindex(CONFIDENCE_ORDER).fillna(0)
+    conf_counts = view["confidence"].value_counts().reindex(CONFIDENCE_ORDER).fillna(0)
     if conf_counts.sum() == 0:
         st.info("No confidence data for the current filter.")
     else:
-        st.plotly_chart(px.bar(x=conf_counts.index, y=conf_counts.values, labels={"x": "confidence", "y": "count"}), use_container_width=True)
+        fig = px.bar(x=conf_counts.index, y=conf_counts.values, labels={"x": "confidence", "y": "count"})
+        fig.update_layout(PLOTLY_TEMPLATE["layout"], height=300)
+        st.plotly_chart(fig, use_container_width=True)
 
-col3, col4 = st.columns(2)
-
-with col3:
-    # TODO: the spec asks for a Kalshi-vs-Polymarket source breakdown; no such
-    # column exists (see dashboard/data.py contract). flag_path is the
-    # nearest real proxy -- CROSS_MARKET is the Polymarket-corroborated path.
-    st.subheader("By Detection Path (flag_path)")
-    fp_counts = filtered["flag_path"].fillna("(none)").value_counts()
-    if fp_counts.empty:
-        st.info("No flag_path data for the current filter.")
-    else:
-        st.plotly_chart(px.bar(x=fp_counts.index, y=fp_counts.values, labels={"x": "flag_path", "y": "count"}), use_container_width=True)
-
-with col4:
-    st.subheader("By Category")
-    cat_counts = filtered["category"].fillna("Uncategorized").value_counts()
-    st.plotly_chart(px.bar(x=cat_counts.index, y=cat_counts.values, labels={"x": "category", "y": "count"}), use_container_width=True)
+st.subheader("By Category")
+cat_counts = view["category"].fillna("Uncategorized").value_counts()
+fig = px.bar(x=cat_counts.index, y=cat_counts.values, labels={"x": "category", "y": "count"})
+fig.update_layout(PLOTLY_TEMPLATE["layout"], height=300)
+st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
 st.subheader("CLV Drift (credibility signal)")
-drift = filtered["market_drift_pp"].dropna()
+drift = view["market_drift_pp"].dropna()
 if drift.empty:
     st.info("No CLV drift data for the current filter yet -- market_drift_pp is only populated for resolved signals (13/46 real bets across the full dataset right now).")
 else:
-    st.plotly_chart(px.histogram(drift, nbins=20, labels={"value": "market_drift_pp"}), use_container_width=True)
-    st.caption(f"n={len(drift)}. This is the primary credibility read -- not win rate.")
+    fig = px.histogram(drift, nbins=20, labels={"value": "market_drift_pp"})
+    fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=280)
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown(f"n={len(drift)}. {small_n_badge(len(drift))} This is the primary credibility read -- not win rate.", unsafe_allow_html=True)
 
-with st.expander("Secondary: win rate (not the primary credibility metric)"):
-    resolved = filtered[filtered["is_win"].notna()]
-    if resolved.empty:
-        st.info("No resolved signals in the current filter.")
-    else:
-        win_rate = resolved["is_win"].mean() * 100
-        st.write(f"Win rate: {win_rate:.1f}% (n={len(resolved)})")
+st.divider()
+st.subheader("Resolved Bets: Confidence & Edge vs Outcome")
+resolved = view[view["is_win"].notna()].copy()
+if resolved.empty:
+    st.info("No resolved bets in the current filter.")
+else:
+    resolved["outcome_label"] = resolved["is_win"].map({1.0: "WIN", 0.0: "LOSS"})
+    n_resolved = len(resolved)
+    st.markdown(
+        f"n={n_resolved} resolved bets in this filter. {small_n_badge(n_resolved)} "
+        "Individual outcomes shown, not a binned calibration curve -- too few resolved "
+        "bets yet for binning to mean anything.",
+        unsafe_allow_html=True,
+    )
+    outcome_colors = {"WIN": WIN_COLOR, "LOSS": LOSS_COLOR}
+
+    colA, colB = st.columns(2)
+    with colA:
+        est = resolved.dropna(subset=["our_estimate", "direction"]).copy()
+        if est.empty:
+            st.info("No our_estimate data among resolved bets in this filter.")
+        else:
+            est["predicted_p_win"] = est.apply(
+                lambda r: r["our_estimate"] if r["direction"] == "YES" else 1 - r["our_estimate"],
+                axis=1,
+            )
+            fig = px.strip(est, x="predicted_p_win", y="outcome_label", color="outcome_label",
+                            color_discrete_map=outcome_colors,
+                            labels={"predicted_p_win": "Predicted P(win)", "outcome_label": ""})
+            fig.add_vline(x=0.5, line_dash="dot", line_color="#9E9E9E")
+            fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=260)
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("Well-calibrated picks cluster right of 0.5 for WIN, left of 0.5 for LOSS.")
+
+    with colB:
+        ed = resolved.dropna(subset=["edge"])
+        if ed.empty:
+            st.info("No edge data among resolved bets in this filter.")
+        else:
+            fig = px.strip(ed, x="edge", y="outcome_label", color="outcome_label",
+                            color_discrete_map=outcome_colors,
+                            labels={"edge": "Edge", "outcome_label": ""})
+            fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=260)
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("net_edge does not model fees -- raw edge shown.")
+
+    win_rate = resolved["is_win"].mean() * 100
+    st.markdown(f"Win rate: **{win_rate:.1f}%** (n={n_resolved}) {small_n_badge(n_resolved)} -- secondary read, not the primary credibility metric above.", unsafe_allow_html=True)

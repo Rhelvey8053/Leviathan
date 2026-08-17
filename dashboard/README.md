@@ -67,12 +67,35 @@ moment is gone. Surfaced in the Signal Log's default columns and as a count
 on Signal Breakdown so it reads as "old data, expected gap" rather than a
 data-quality bug.
 
+## Interactivity & visual style
+
+`dashboard/theme.py` holds a shared color palette, Plotly template, and CSS
+so all three pages read as one product: styled KPI cards, a consistent
+win/loss color pairing everywhere, and a `small-n-badge` shown any time a
+chart is built on a thin sample rather than letting a nicer-looking chart
+imply more confidence than the data supports.
+
+Signal Breakdown's "By Detection Path" chart is click-to-filter: click a
+bar and every chart below it (edge/confidence distributions, category
+breakdown, CLV drift, the resolved-bets outcome strips) filters to that
+flag_path. Click the same bar again or use "Clear selection" to reset.
+Uses Streamlit's native `st.plotly_chart(..., on_select="rerun")` --
+confirmed present in the pinned Streamlit version's signature, and the
+empty-selection code path is exercised by the bare-mode smoke test, but
+the click interaction itself needs a real browser to fully verify.
+
+The resolved-bets section (Signal Breakdown) shows individual outcomes as
+strip plots rather than a binned reliability curve -- 13-16 resolved bets
+is too few for binning to mean anything without manufacturing false
+precision.
+
 ## Structure
 
 ```
 dashboard/
   app.py                    Overview page (entry point)
   data.py                   shared CSV loading + data contract
+  theme.py                  shared color palette, Plotly template, CSS
   pages/
     2_Signal_Breakdown.py
     3_Signal_Log.py
