@@ -42,9 +42,9 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_52_items(backlog_data):
+def test_parses_and_55_items(backlog_data):
     """
-    52, not the original 43: kalshi-sdk-migration-implementation and
+    55, not the original 43: kalshi-sdk-migration-implementation and
     kalshi-sdk-evaluation-2026-08 (2026-08-04) were both real, completed
     Done items that had only ever been hand-added to BACKLOG.md directly,
     never to backlog.json -- added here to close that gap so a future
@@ -62,8 +62,15 @@ def test_parses_and_52_items(backlog_data):
     signal-scan-log-split-2026-08 (2026-08-16) shipped as commits without
     a backlog entry at the time -- found and closed during a full-project
     audit the next day (2026-08-17), same gap pattern as the original 43->50 fix.
+    citations-provenance-grounding, net-edge-fee-depth-model, and
+    cross-venue-expansion (2026-08-17) came from a roadmap-reconciliation
+    handoff -- two of four originally-proposed items were added (one
+    narrowed after verifying net_edge's real fee handling first), one was
+    dropped as already-implemented (scorer-websearch-grounding: web search
+    is already live on both scoring backends), matching this file's own
+    "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 52
+    assert len(backlog_data["items"]) == 55
 
 
 def test_all_ids_unique(backlog_data):

@@ -794,6 +794,48 @@
       "depends_on": [],
       "action": "User opened signals.csv directly in Excel and found it looked mostly empty/broken. Root cause: 271 of 317 rows (85%) were PASS decisions (scanner looked, found no actionable edge) mixed into the same file as the 46 real bets, and PASS rows are structurally sparse on every signal-specific field since no edge/scoring was ever computed for them. Split core.export_to_csv's single signals.csv into two: signals.csv now holds only real bets (direction YES/NO), a new scan_log.csv holds every scan decision including PASS, same WHITELIST/column shape, for anyone who wants full scan history. export_csvs() return dict gained a scan_log key; main.py's post-export print line and the __main__ block updated to match. Also reorganized WHITELIST into logical column groups (identity/classification/pricing/scoring/sub-signals/outcome/provenance) instead of flat historical-append order. Separately, 27 of the 46 real bets turned out to be logged before leviathan_score existed as a tracked field (2026-04-13 to 2026-07-27) and can never be backfilled -- added a pre_scoring_era flag, deliberately scoped to real bets only after finding 4 unrelated recent PASS rows also missing a score for a different, possibly-still-live reason that a naive leviathan_score-is-null definition would have mislabeled as old data. Updated the dashboard (same day) to match: dropped now-redundant PASS filtering since signals.csv is bet-only by construction, surfaced pre_scoring_era on the Signal Log and as a count on Signal Breakdown. 7 new tests (PASS excluded from signals.csv / present in scan_log.csv, real bets in both, export_csvs return counts, pre_scoring_era true for the legacy bet / false for the scored bet / false for the unrelated PASS anomaly), full suite: 2166 passed, 1 skipped.",
       "notes": ""
+    },
+    {
+      "id": "citations-provenance-grounding",
+      "title": "Citations Provenance Grounding",
+      "area": "validation",
+      "priority": 2,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Ground scorer output in the market's supplied sources via the Anthropic Citations API, so each rationale claim carries a machine-checkable cited-text span (document index + char offset) rather than free-text provenance. Verified 2026-08-17 that this is genuinely new: web search itself is already active on both backends (core/llm.py's web_search_20250305 tool on the API path, core/scorer.py's --allowedTools WebSearch on the CLI path), and rescore_single_market() already exists specifically to avoid batch-level source misattribution (GOAL_phase2-6_decisions.md Decision 1) -- but neither path ties a specific reasoning claim to a specific cited span; sources are captured as a loose per-call list, not structured per-claim citations. Additive to the scorer; must not change signal selection. Pairs with price-blind-arm as scoring-integrity work.",
+      "notes": ""
+    },
+    {
+      "id": "net-edge-fee-depth-model",
+      "title": "Net Edge Fee Depth Model",
+      "area": "execution",
+      "priority": 4,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Narrowed 2026-08-17 after verifying net_edge's real fee handling before building anything: fees are already netted -- core/scanner.py:717 computes net_edge_after_fee = net_edge - fee_as_pp via core/fees.py's kalshi_fee(), and main.py:906-908 computes ev_after_fee_per_contract the same way at the configured unit_size, both already shipped (ev-per-contract, Done). What's genuinely unaddressed is executable order-book depth: core/scanner.py's compute_orderbook_signal() computes ob_bid_depth/ob_ask_depth/ob_imbalance, but only as a standalone directional signal -- it is never combined with net_edge_after_fee to ask whether the book can actually fill a stated stake without materially worse execution. Scope: filter positive-gross/negative-net phantom edges by checking whether ob_bid_depth/ob_ask_depth (whichever side the picked direction needs) covers the configured unit_size at a price consistent with the signal's own edge; if not, flag or discount the edge rather than trusting net_edge_after_fee at face value. Confirmed no overlap with slippage-tracking (Locked, resolved fills_count>=20 -- measures REALIZED post-trade fill-price slippage on real trades, ex-post) -- this is a pre-trade, ex-ante liquidity check at scan time, complementary not duplicate.",
+      "notes": ""
+    },
+    {
+      "id": "cross-venue-expansion",
+      "title": "Cross Venue Expansion",
+      "area": "data-quality",
+      "priority": 4,
+      "status": "blocked",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [
+        "net-edge-fee-depth-model",
+        "replay-instrument-validation"
+      ],
+      "action": "Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. Distinct from the existing CROSS_MARKET flag path (core/scorer.py), which is a two-venue (Kalshi/Polymarket) corroboration proxy, not a broad multi-venue aggregation layer. Vet aggregator reliability first -- several are commercial or scrapers, and Polymarket acquired the main independent aggregator, Dome, in early 2026, changing the vendor landscape this depends on. Waiting on: net-edge-fee-depth-model shipping (don't widen venue surface before the edge math itself is trustworthy) AND the replay corpus being populated (replay-instrument-validation unblocked -- currently gated on a human decision to approve real metered API spend, not a build; replay_signals has 0 rows against 12,600 available settled_markets as of 2026-08-17).",
+      "notes": ""
     }
   ]
 }
