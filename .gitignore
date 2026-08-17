@@ -28,3 +28,4 @@ tools/litestream.exe
 tools/LICENSE
 tools/README.md
 tools/etc/
+dashboard/.venv*/
