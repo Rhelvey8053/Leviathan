@@ -1090,7 +1090,7 @@ def main():
     try:
         from core.export_to_csv import export_csvs
         counts = export_csvs()
-        print(f"[export] CSVs updated — {counts['signals']} signals, {counts['runs']} runs")
+        print(f"[export] CSVs updated — {counts['signals']} signals, {counts['scan_log']} scan_log, {counts['runs']} runs")
     except Exception as e:
         print(f"[export] CSV update failed (non-fatal): {e}")
 

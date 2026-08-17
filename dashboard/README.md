@@ -2,8 +2,12 @@
 
 Local, free alternative to the Power BI dashboard. Reads the same CSV export
 the pipeline already writes (`data/powerbi_export/signals.csv` and
-`runs.csv`) -- no separate app state, no manual refresh. Additive only: does
-not modify `main.py` or anything under `core/`.
+`runs.csv`) -- no separate app state, no manual refresh.
+
+`signals.csv` holds only real bets (direction YES/NO) as of the 2026-08-16
+export cleanup -- PASS decisions (scanner looked, no signal, ~85% of rows
+before the cleanup) now live in a separate `scan_log.csv`, which this
+dashboard does not read.
 
 ## Run it (Windows, Command Prompt)
 
@@ -35,7 +39,7 @@ No secrets or machine-specific paths are hardcoded anywhere in `dashboard/`.
 
 See the comment block at the top of `dashboard/data.py` -- it lists every
 column the dashboard reads, its real dtype, and how populated it actually is
-in a real export (verified against a live 317-row `signals.csv` on
+in a real export (verified against a live 46-row `signals.csv` on
 2026-08-16, not assumed). Two things from the original spec don't map to
 real columns and are called out with `# TODO:` in the code instead of being
 faked:
@@ -52,9 +56,16 @@ faked:
   `core/scorer.py`, it just has 0 rows in the current snapshot.
 
 `volume`, `open_interest`, `resolved_at`, and `days_to_resolution` are real
-columns (added the same day as this dashboard) but are 0/317 populated right
+columns (added the same day as this dashboard) but are 0/46 populated right
 now, so no chart is built on them yet -- flagged with `# TODO:` in
 `dashboard/data.py` rather than shipping a permanently-empty chart.
+
+`pre_scoring_era` (new column, same cleanup) flags real bets logged before
+`leviathan_score` existed as a tracked field (2026-04-13 to 2026-07-27) --
+27 of the 46 real bets. Can't be backfilled; the market snapshot from that
+moment is gone. Surfaced in the Signal Log's default columns and as a count
+on Signal Breakdown so it reads as "old data, expected gap" rather than a
+data-quality bug.
 
 ## Structure
 

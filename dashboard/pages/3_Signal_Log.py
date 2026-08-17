@@ -10,7 +10,10 @@ from data import DataLoadError, load_signals
 
 st.set_page_config(page_title="Leviathan -- Signal Log", layout="wide")
 st.title("Signal Log")
-st.caption("Each row is one signal for one market, carrying its own source/flag_path -- provenance is per-market, not batch-level.")
+st.caption(
+    "Each row is one real bet (direction YES/NO), carrying its own source/flag_path -- "
+    "provenance is per-market, not batch-level. PASS decisions live in scan_log.csv, not here."
+)
 
 try:
     signals = load_signals()
@@ -41,7 +44,7 @@ if search:
 DEFAULT_COLS = [
     "date", "ticker", "title", "source", "direction", "confidence",
     "flag_path", "category", "edge", "net_edge", "leviathan_score",
-    "lv_band", "whale_detected", "is_resolved", "result",
+    "lv_band", "pre_scoring_era", "whale_detected", "is_resolved", "result",
 ]
 default_cols = [c for c in DEFAULT_COLS if c in filtered.columns]
 chosen_cols = st.multiselect("Columns to show", list(filtered.columns), default=default_cols)

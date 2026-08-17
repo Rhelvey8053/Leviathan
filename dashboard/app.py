@@ -45,11 +45,9 @@ if fresh_at is not None:
         age_str = f"{age_minutes / 1440:.1f} days ago"
     st.caption(f"Data last exported: {fresh_at.strftime('%Y-%m-%d %H:%M UTC')} ({age_str})")
 
-real_signals = signals[signals["direction"].isin(["YES", "NO"])]
-
 col1, col2, col3, col4, col5 = st.columns(5)
 
-active_count = int((real_signals["is_resolved"] == 0).sum())
+active_count = int((signals["is_resolved"] == 0).sum())
 col1.metric("Active Signals", active_count)
 
 # TODO: markets_scanned in runs.csv is a Kalshi-only combined count -- no
@@ -60,7 +58,7 @@ if not runs.empty:
 else:
     col2.metric("Markets Scanned (Kalshi)", "no data")
 
-edge_vals = real_signals["edge"].dropna()
+edge_vals = signals["edge"].dropna()
 if len(edge_vals) > 0:
     col3.metric("Median Edge", f"{edge_vals.median():+.3f}", help=f"Mean: {edge_vals.mean():+.3f}, n={len(edge_vals)}")
 else:
@@ -84,7 +82,7 @@ else:
 st.divider()
 
 st.subheader("Signals Generated Per Day")
-daily = real_signals.dropna(subset=["date"]).groupby(real_signals["date"].dt.date).size().reset_index(name="signal_count")
+daily = signals.dropna(subset=["date"]).groupby(signals["date"].dt.date).size().reset_index(name="signal_count")
 daily.columns = ["date", "signal_count"]
 if daily.empty:
     st.info("No dated signals to trend yet.")
@@ -93,6 +91,7 @@ else:
     st.plotly_chart(fig, use_container_width=True)
 
 st.caption(
-    "Active = is_resolved == 0 among YES/NO signals (PASS rows excluded). "
-    "Edge KPI excludes PASS rows too. net_edge does not model fees -- see net_edge_after_fee for that."
+    "signals.csv holds real bets only (direction YES/NO) -- PASS decisions "
+    "live in scan_log.csv, not read by this dashboard. "
+    "net_edge does not model fees -- see net_edge_after_fee for that."
 )

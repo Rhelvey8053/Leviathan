@@ -22,17 +22,15 @@ if signals.empty:
     st.warning("signals.csv exists but has no rows yet -- nothing to break down.")
     st.stop()
 
-real_signals = signals[signals["direction"].isin(["YES", "NO"])].copy()
-
 st.sidebar.header("Filters")
-sources = st.sidebar.multiselect("Source", sorted(real_signals["source"].dropna().unique()), default=list(real_signals["source"].dropna().unique()))
-min_date = real_signals["date"].min()
-max_date = real_signals["date"].max()
+sources = st.sidebar.multiselect("Source", sorted(signals["source"].dropna().unique()), default=list(signals["source"].dropna().unique()))
+min_date = signals["date"].min()
+max_date = signals["date"].max()
 date_range = st.sidebar.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-min_edge = st.sidebar.slider("Min |edge|", 0.0, float(real_signals["edge"].abs().max() or 0.1), 0.0, step=0.005)
+min_edge = st.sidebar.slider("Min |edge|", 0.0, float(signals["edge"].abs().max() or 0.1), 0.0, step=0.005)
 min_conf = st.sidebar.select_slider("Min confidence", options=CONFIDENCE_ORDER, value="LOW")
 
-filtered = real_signals[real_signals["source"].isin(sources)]
+filtered = signals[signals["source"].isin(sources)]
 if isinstance(date_range, tuple) and len(date_range) == 2:
     start, end = date_range
     filtered = filtered[(filtered["date"].dt.date >= start) & (filtered["date"].dt.date <= end)]
@@ -43,6 +41,14 @@ filtered = filtered[filtered["confidence"].map(conf_rank).fillna(-1) >= conf_ran
 if filtered.empty:
     st.info("No signals match the current filters.")
     st.stop()
+
+legacy_n = int(filtered["pre_scoring_era"].sum())
+if legacy_n > 0:
+    st.caption(
+        f"{legacy_n} of {len(filtered)} bets in this filter are pre-scoring-era "
+        "(logged before leviathan_score existed, 2026-04-13 to 2026-07-27) -- "
+        "leviathan_score/lv_band/flag_path are unavoidably blank for these, not a data-quality bug."
+    )
 
 col1, col2 = st.columns(2)
 
@@ -85,7 +91,7 @@ st.divider()
 st.subheader("CLV Drift (credibility signal)")
 drift = filtered["market_drift_pp"].dropna()
 if drift.empty:
-    st.info("No CLV drift data for the current filter yet -- market_drift_pp is only populated for resolved signals (13/317 across the full dataset right now).")
+    st.info("No CLV drift data for the current filter yet -- market_drift_pp is only populated for resolved signals (13/46 real bets across the full dataset right now).")
 else:
     st.plotly_chart(px.histogram(drift, nbins=20, labels={"value": "market_drift_pp"}), use_container_width=True)
     st.caption(f"n={len(drift)}. This is the primary credibility read -- not win rate.")
