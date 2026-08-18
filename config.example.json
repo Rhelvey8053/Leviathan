@@ -167,5 +167,28 @@
     "max_web_searches": 8,
     "daily_cost_ceiling_usd": 20.0,
     "_llm_notes": "daily_cost_ceiling_usd (goal llm-cost-ceiling) only applies to real metered spend via score_via_api/probe_via_api (core/llm.py) -- the main scan runs backend=cli against the Pro subscription with no per-token bill, so this ceiling protects research probes, eval re-scoring, and the future replay-runner, which will call the API path at volume. $20/day is a starting guess, not a measured figure; revisit once replay-runner exists and real per-market API cost is observed."
+  },
+  "monday": {
+    "enabled": true,
+    "api_token_env": "MONDAY_API_TOKEN",
+    "board_id": 18426940027,
+    "workspace_id": 17049665,
+    "dry_run_default": true,
+    "groups": {
+      "ready": "group_mm6an4ta",
+      "locked": "group_mm6att3n",
+      "blocked": "group_mm6a2f",
+      "done": "new_group43041"
+    },
+    "columns": {
+      "priority": "numeric_mm6ap21r",
+      "area": "text_mm6awm6b",
+      "detail": "long_text_mm6a113q",
+      "status": "project_status",
+      "backlog_id": "text_mm6b470y",
+      "completed_date": "date_mm6b6w9a"
+    },
+    "log_item_id": "<fill in Phase 3>",
+    "_monday_notes": "scripts/monday_sync.py, Phase 1 (docs/monday_sync_discovery.md). backlog.json stays the source of truth; monday is a view + progress log, one-way push in v1. MONDAY_API_TOKEN lives in .env only, never here. These ids are resolved live at runtime (get_board_schema()) and re-written into the real config.json on every --phase1 run -- values here are just the last-known-good snapshot for reference. board_id/workspace_id/group ids/column ids are not secrets (only the API token is); if the board is ever recreated these will need re-resolving, which --phase1 does automatically."
   }
 }
