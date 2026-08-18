@@ -30,13 +30,25 @@ Phases (see the original handoff for the full plan):
     section 8 for why historical dates are a separate, git-sourced task.
     Board items with no backlog_id at all are left completely untouched
     (unmanaged). --dry-run prints the full diff and writes nothing.
-  Phase 3+ (progress log, scheduling) - not yet built.
+  Phase 3 (this file implements `--phase3`) - progress log, layered onto
+    the same Phase 2 sync pass (phase2_sync(post_progress=True)), not a
+    separate mechanism. Posts one dated Updates-tab comment on every item
+    that was created, transitioned status/group, or was newly marked done
+    -- NOT on a routine content-only detail/priority/area sync, which
+    would just be noise. Creates (idempotently, matched by exact Name) one
+    pinned "Leviathan Sync Log" item in the To-Do group and posts exactly
+    one per-run summary line to it every run, including a no-op run
+    ("no changes") -- never silent, never more than one summary post.
+    log_item_id is resolved once and persisted into config.json.
+  Phase 4 (scheduling, runbook) - not yet built.
 
 Usage:
     python scripts/monday_sync.py --phase1              # live run
     python scripts/monday_sync.py --phase1 --dry-run    # preview, writes nothing
-    python scripts/monday_sync.py --phase2              # live run
+    python scripts/monday_sync.py --phase2              # live run (sync only)
     python scripts/monday_sync.py --phase2 --dry-run    # preview, writes nothing
+    python scripts/monday_sync.py --phase3              # live run (sync + progress log)
+    python scripts/monday_sync.py --phase3 --dry-run    # preview, writes nothing
 
 MONDAY_API_TOKEN must be set in .env (never committed -- see .gitignore).
 """
@@ -313,7 +325,8 @@ def phase1_setup(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dic
     return summary
 
 
-def _update_config_monday_section(board_id: int, schema: dict, backlog_id_col: str, completed_date_col: str) -> None:
+def _update_config_monday_section(board_id: int, schema: dict, backlog_id_col: str,
+                                   completed_date_col: str, log_item_id: str | None = None) -> None:
     """Persists resolved live ids into config.json's monday section (created
     if absent) -- section 5 of the handoff. config.json is gitignored; this
     never touches config.example.json."""
@@ -342,7 +355,7 @@ def _update_config_monday_section(board_id: int, schema: dict, backlog_id_col: s
             "backlog_id": backlog_id_col,
             "completed_date": completed_date_col,
         },
-        "log_item_id": cfg.get("monday", {}).get("log_item_id", "<fill in Phase 3>"),
+        "log_item_id": log_item_id or cfg.get("monday", {}).get("log_item_id", "<fill in Phase 3>"),
     }
     save_local_config(cfg)
     print("  [monday_sync] config.json 'monday' section updated with resolved ids")
@@ -513,14 +526,116 @@ def _log_summary(summary: dict, dry_run: bool) -> None:
     print(f"[monday_sync] {line}")
 
 
-def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dict:
+LOG_ITEM_TITLE = "Leviathan Sync Log"
+LOG_ITEM_GROUP = "To-Do"
+
+
+def _post_update(item_id: str, body: str) -> None:
+    gql(
+        """
+        mutation($item_id: ID!, $body: String!) {
+          create_update(item_id: $item_id, body: $body) { id }
+        }
+        """,
+        {"item_id": item_id, "body": body},
+    )
+    time.sleep(0.3)
+
+
+def ensure_log_item(board_id: int, schema: dict, board_items: list[dict], dry_run: bool) -> str:
+    """
+    Finds or creates the pinned "Leviathan Sync Log" item (handoff Phase 3).
+    Idempotent -- matches by exact Name, same as Phase 1's original
+    backlog_id bridge. Lives in the To-Do group (currently empty on the
+    real board -- the same group the handoff's own "Set up PM" template
+    item used, a reasonable home for a non-managed reference item; easy to
+    move later if that's ever wrong).
+    """
+    for it in board_items:
+        if it["name"] == LOG_ITEM_TITLE:
+            return it["id"]
+
+    if dry_run:
+        print(f"  [dry-run] would create pinned log item {LOG_ITEM_TITLE!r} in {LOG_ITEM_GROUP!r}")
+        return "<would-create-log-item>"
+
+    group_id = next((g["id"] for g in schema["groups"] if g["title"] == LOG_ITEM_GROUP), None)
+    if group_id is None:
+        raise RuntimeError(f"monday board is missing expected group {LOG_ITEM_GROUP!r}")
+    print(f"  [monday] creating pinned log item {LOG_ITEM_TITLE!r}")
+    data = gql(
+        """
+        mutation($board_id: ID!, $group_id: String!, $item_name: String!) {
+          create_item(board_id: $board_id, group_id: $group_id, item_name: $item_name) { id }
+        }
+        """,
+        {"board_id": str(board_id), "group_id": group_id, "item_name": LOG_ITEM_TITLE},
+    )
+    time.sleep(0.3)
+    return data["create_item"]["id"]
+
+
+def _transition_message(item: dict, changes: dict, newly_done: bool, created: bool) -> str | None:
+    """
+    Updates-tab message for a real state change, or None if this was a
+    content-only sync (detail/priority/area edit) not worth an individual
+    post -- handoff Phase 3 fires per-item posts on "create, status/group
+    transition, completion" only, not on every field sync.
+    """
+    today = date.today().isoformat()
+    if created:
+        return f"Created ({STATUS_TO_LABEL[item['status']]}) on {today}."
+
+    parts = []
+    if "status" in changes:
+        old, new = changes["status"]
+        line = f"{old} -> {new} on {today}."
+        conds = item.get("trigger", {}).get("all", [])
+        if item["status"] == "ready" and conds:
+            gate = "; ".join(f"{c['metric']} {c['op']} {c['value']}" for c in conds)
+            line += f" Gate cleared: {gate}."
+        parts.append(line)
+    elif "group" in changes:
+        old, new = changes["group"]
+        parts.append(f"Moved {old} -> {new} on {today}.")
+
+    if newly_done:
+        parts.append(f"Marked Done, Completed date stamped {today}.")
+
+    return " ".join(parts) if parts else None
+
+
+def _format_summary_line(summary: dict, transitioned: list, content_only: list) -> str:
+    today = date.today().isoformat()
+    if not summary["created"] and not summary["updated"]:
+        return f"{today}: no changes."
+    return (
+        f"{today}: created {len(summary['created'])}, "
+        f"updated {len(summary['updated'])} "
+        f"({len(transitioned)} transition{'s' if len(transitioned) != 1 else ''}, "
+        f"{len(content_only)} content-only), "
+        f"completed {len(summary['completed_stamped'])}."
+    )
+
+
+def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False,
+                post_progress: bool = False) -> dict:
     """
     One-way push sync (handoff Phase 2). Returns a summary dict:
     {created, updated, moved, completed_stamped, unmatched_board_items}
     (each a list of backlog_ids, except unmatched_board_items which is a
     list of board item Names).
+
+    post_progress=True additionally runs handoff Phase 3: posts a dated
+    Updates-tab comment on every item that was created, transitioned
+    status/group, or was newly marked done (not on content-only
+    detail/priority/area syncs), then posts exactly one summary line to
+    the pinned "Leviathan Sync Log" item -- "no changes" on a no-op run.
+    dry_run suppresses every post the same way it suppresses every other
+    write.
     """
-    print(f"[monday_sync] Phase 2 {'(dry-run) ' if dry_run else ''}-- board {board_id}")
+    print(f"[monday_sync] Phase 2 {'(dry-run) ' if dry_run else ''}"
+          f"{'+ Phase 3 progress log ' if post_progress else ''}-- board {board_id}")
 
     schema = get_board_schema(board_id)
     col_ids = _resolve_column_ids(schema)
@@ -529,6 +644,10 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dict
     bl = load_backlog(BACKLOG_PATH)
     bl_ids = {i["id"] for i in bl["items"]}
     board_items = get_all_items(board_id)
+
+    log_item_id = None
+    if post_progress:
+        log_item_id = ensure_log_item(board_id, schema, board_items, dry_run)
 
     by_backlog_id: dict[str, dict] = {}
     for bit in board_items:
@@ -548,6 +667,7 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dict
     ]
 
     created, updated, moved, completed_stamped = [], [], [], []
+    transitioned, content_only = [], []
 
     for item in bl["items"]:
         bid = item["id"]
@@ -558,9 +678,15 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dict
             exp = expected_fields(item)
             if dry_run:
                 print(f"  [dry-run] would CREATE {bid!r} in group {exp['group_title']!r}")
+                if post_progress:
+                    print(f"  [dry-run] would post creation update on {bid!r}")
             else:
-                _create_board_item(board_id, groups_by_title[exp["group_title"]], item, col_ids)
+                new_id = _create_board_item(board_id, groups_by_title[exp["group_title"]], item, col_ids)
+                if post_progress:
+                    msg = _transition_message(item, {}, False, created=True)
+                    _post_update(new_id, msg)
             created.append(bid)
+            transitioned.append(bid)
             continue
 
         if not changes:
@@ -569,17 +695,25 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dict
         exp = expected_fields(item)
         cur = current_fields(board_item, col_ids)
         newly_done = cur["status_label"] != "Done" and exp["status_label"] == "Done"
+        is_transition = "status" in changes or "group" in changes or newly_done
 
         if dry_run:
             extra = " + stamp Completed date" if newly_done else ""
             print(f"  [dry-run] would UPDATE {bid!r}: {changes}{extra}")
+            if post_progress and is_transition:
+                print(f"  [dry-run] would post transition update on {bid!r}")
         else:
             _apply_update(board_id, board_item["id"], col_ids, exp, changes, newly_done, groups_by_title)
+            if post_progress and is_transition:
+                msg = _transition_message(item, changes, newly_done, created=False)
+                if msg:
+                    _post_update(board_item["id"], msg)
         updated.append(bid)
         if "group" in changes:
             moved.append(bid)
         if newly_done:
             completed_stamped.append(bid)
+        (transitioned if is_transition else content_only).append(bid)
 
     summary = {
         "created": created, "updated": updated, "moved": moved,
@@ -587,6 +721,16 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dict
         "unmatched_board_items": unmatched_board_items,
     }
     _log_summary(summary, dry_run)
+
+    if post_progress:
+        summary_line = _format_summary_line(summary, transitioned, content_only)
+        if dry_run:
+            print(f"  [dry-run] would post summary to {LOG_ITEM_TITLE!r}: {summary_line!r}")
+        else:
+            _post_update(log_item_id, summary_line)
+            _update_config_monday_section(board_id, schema, col_ids["backlog_id"],
+                                          col_ids["completed_date"], log_item_id=log_item_id)
+
     return summary
 
 
@@ -630,6 +774,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Leviathan <-> monday.com sync")
     parser.add_argument("--phase1", action="store_true", help="Run Phase 1: board schema prep")
     parser.add_argument("--phase2", action="store_true", help="Run Phase 2: one-way push sync")
+    parser.add_argument("--phase3", action="store_true",
+                        help="Run Phase 2 sync + Phase 3 progress log (per-item updates, pinned summary)")
     parser.add_argument("--board-id", type=int, default=DEFAULT_BOARD_ID)
     parser.add_argument("--dry-run", action="store_true", help="Preview writes, write nothing")
     args = parser.parse_args()
@@ -638,8 +784,8 @@ def main() -> int:
         phase1_setup(board_id=args.board_id, dry_run=args.dry_run)
         return 0
 
-    if args.phase2:
-        phase2_sync(board_id=args.board_id, dry_run=args.dry_run)
+    if args.phase2 or args.phase3:
+        phase2_sync(board_id=args.board_id, dry_run=args.dry_run, post_progress=args.phase3)
         if not args.dry_run:
             verify_phase2(board_id=args.board_id)
         return 0

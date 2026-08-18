@@ -632,3 +632,230 @@ def test_verify_phase2_flags_mismatch(tmp_backlog2, monkeypatch):
         result = ms.verify_phase2(board_id=999)
     assert result["ok"] is False
     assert result["mismatches"][0]["backlog_id"] == "alpha"
+
+
+# ─── Phase 3: _transition_message / _format_summary_line ──────────────────
+
+def test_transition_message_for_created_item():
+    item = _bl_item(status="ready")
+    msg = ms._transition_message(item, {}, newly_done=False, created=True)
+    assert msg.startswith("Created (Ready)")
+
+
+def test_transition_message_for_status_change_includes_gate_when_freshly_ready():
+    item = _bl_item(status="ready",
+                     trigger={"all": [{"metric": "resolved_count", "op": ">=", "value": 25}]})
+    changes = {"status": ("Locked", "Ready")}
+    msg = ms._transition_message(item, changes, newly_done=False, created=False)
+    assert "Locked -> Ready" in msg
+    assert "Gate cleared: resolved_count >= 25" in msg
+
+
+def test_transition_message_for_status_change_no_gate_text_when_no_trigger():
+    item = _bl_item(status="ready", trigger={"all": []})
+    changes = {"status": ("Blocked", "Ready")}
+    msg = ms._transition_message(item, changes, newly_done=False, created=False)
+    assert "Blocked -> Ready" in msg
+    assert "Gate cleared" not in msg
+
+
+def test_transition_message_for_group_only_move():
+    item = _bl_item(status="ready")
+    changes = {"group": ("Blocked", "Ready")}
+    msg = ms._transition_message(item, changes, newly_done=False, created=False)
+    assert "Moved Blocked -> Ready" in msg
+
+
+def test_transition_message_includes_completion_note():
+    item = _bl_item(status="done")
+    changes = {"status": ("Ready", "Done"), "group": ("Ready", "Completed")}
+    msg = ms._transition_message(item, changes, newly_done=True, created=False)
+    assert "Marked Done" in msg
+    assert "Completed date stamped" in msg
+
+
+def test_transition_message_none_for_content_only_change():
+    """A pure detail/priority/area diff (no status/group/newly_done) isn't
+    a state change -- must not synthesize a message for it."""
+    item = _bl_item(status="ready")
+    msg = ms._transition_message(item, {"priority": ("1", 2)}, newly_done=False, created=False)
+    assert msg is None
+
+
+def test_format_summary_line_no_changes():
+    summary = {"created": [], "updated": [], "moved": [], "completed_stamped": [],
+               "unmatched_board_items": []}
+    line = ms._format_summary_line(summary, [], [])
+    assert "no changes" in line
+
+
+def test_format_summary_line_with_real_changes():
+    summary = {"created": ["a"], "updated": ["b", "c"], "moved": ["b"],
+               "completed_stamped": [], "unmatched_board_items": []}
+    line = ms._format_summary_line(summary, transitioned=["a", "b"], content_only=["c"])
+    assert "created 1" in line
+    assert "updated 2" in line
+    assert "2 transitions" in line
+    assert "1 content-only" in line
+
+
+# ─── Phase 3: ensure_log_item() ────────────────────────────────────────────
+
+def test_ensure_log_item_reuses_existing_by_name(monkeypatch):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    schema = _phase2_schema()
+    board_items = [{"id": "log-1", "name": ms.LOG_ITEM_TITLE,
+                    "group": {"id": "g_to-do", "title": "To-Do"}, "column_values": []}]
+    with patch("scripts.monday_sync.gql") as mock_gql:
+        log_id = ms.ensure_log_item(999, schema, board_items, dry_run=False)
+    assert log_id == "log-1"
+    mock_gql.assert_not_called()
+
+
+def test_ensure_log_item_creates_when_absent(monkeypatch):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    schema = _phase2_schema()
+    with patch("scripts.monday_sync.gql",
+               return_value={"create_item": {"id": "log-new"}}) as mock_gql, \
+         patch("scripts.monday_sync.time.sleep"):
+        log_id = ms.ensure_log_item(999, schema, [], dry_run=False)
+    assert log_id == "log-new"
+    mock_gql.assert_called_once()
+
+
+def test_ensure_log_item_dry_run_writes_nothing(monkeypatch):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    schema = _phase2_schema()
+    with patch("scripts.monday_sync.gql") as mock_gql:
+        log_id = ms.ensure_log_item(999, schema, [], dry_run=True)
+    assert log_id.startswith("<would-create")
+    mock_gql.assert_not_called()
+
+
+# ─── Phase 3: phase2_sync(post_progress=True) integration ─────────────────
+
+def test_phase3_posts_no_updates_on_no_op_run_but_posts_summary(tmp_backlog2, monkeypatch, tmp_path):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    log_item = {"id": "log-1", "name": ms.LOG_ITEM_TITLE,
+                "group": {"id": "g_to-do", "title": "To-Do"}, "column_values": []}
+    board_items = [
+        log_item,
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql, \
+         patch("scripts.monday_sync.time.sleep"):
+        ms.phase2_sync(board_id=999, dry_run=False, post_progress=True)
+
+    # exactly one call: the "no changes" summary post to the log item
+    assert mock_gql.call_count == 1
+    variables = mock_gql.call_args[0][1]
+    assert variables["item_id"] == "log-1"
+    assert "no changes" in variables["body"]
+
+
+def test_phase3_posts_transition_update_and_summary(tmp_backlog2, monkeypatch, tmp_path):
+    """beta transitions Blocked -> Ready -- must get its own Updates-tab
+    post AND be reflected in the summary; alpha/gamma are no-ops and must
+    not generate any per-item post."""
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    log_item = {"id": "log-1", "name": ms.LOG_ITEM_TITLE,
+                "group": {"id": "g_to-do", "title": "To-Do"}, "column_values": []}
+    board_items = [
+        log_item,
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Blocked", status_label="Blocked",  # wrong -- should be Ready
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql, \
+         patch("scripts.monday_sync.time.sleep"):
+        summary = ms.phase2_sync(board_id=999, dry_run=False, post_progress=True)
+
+    assert summary["updated"] == ["beta"]
+    # calls: beta's change_multiple_column_values, beta's move_item_to_group,
+    # beta's create_update, then the summary create_update -- 4 total.
+    assert mock_gql.call_count == 4
+    update_calls = [c for c in mock_gql.call_args_list
+                    if "create_update" in c[0][0]]
+    assert len(update_calls) == 2  # beta's transition post + the summary post
+    beta_post = update_calls[0][0][1]
+    assert beta_post["item_id"] == "item-1"  # _board_item's fixed id
+    assert "Blocked -> Ready" in beta_post["body"]
+    summary_post = update_calls[1][0][1]
+    assert summary_post["item_id"] == "log-1"
+    assert "1 transition" in summary_post["body"]
+    assert "0 content-only" in summary_post["body"]
+
+
+def test_phase3_dry_run_posts_nothing(tmp_backlog2, monkeypatch, tmp_path):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    board_items = []  # everything would be created
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql:
+        summary = ms.phase2_sync(board_id=999, dry_run=True, post_progress=True)
+
+    assert summary["created"] == ["alpha", "beta", "gamma"]
+    mock_gql.assert_not_called()
+
+
+def test_phase3_persists_log_item_id_to_config(tmp_backlog2, monkeypatch, tmp_path):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    log_item = {"id": "log-99", "name": ms.LOG_ITEM_TITLE,
+                "group": {"id": "g_to-do", "title": "To-Do"}, "column_values": []}
+    board_items = [
+        log_item,
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql, \
+         patch("scripts.monday_sync.time.sleep"):
+        ms.phase2_sync(board_id=999, dry_run=False, post_progress=True)
+
+    saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert saved["monday"]["log_item_id"] == "log-99"
