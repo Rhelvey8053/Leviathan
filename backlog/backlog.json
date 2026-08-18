@@ -903,19 +903,6 @@
       "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
     },
     {
-      "id": "graphify-skill-evaluation",
-      "title": "Graphify Skill Evaluation",
-      "area": "infra",
-      "priority": 6,
-      "status": "done",
-      "trigger": {
-        "all": []
-      },
-      "depends_on": [],
-      "action": "project shape changing to include a heterogeneous, non-code corpus (research papers, notes, screenshots) alongside the code, the way its own worked examples show real benefit. Evaluated 2026-08-02: Graphify-Labs/graphify (formerly safishamsi/graphify), a Claude Code `/graphify` skill that parses a folder into a local, queryable knowledge graph (tree-sitter AST + NetworkX/Leiden, runs entirely locally, no phone-home found). Legitimate on every technical signal checked -- PyPI package (`graphifyy`) matches the GitHub repo exactly, real multi-contributor history, CI configured, worked examples with committed input+output for independent verification, no typosquat risk. One residual, unresolved concern: 100k+ stars / 9.7k forks on a 4-month-old repo is an unusually fast growth rate that can't be confirmed organic from available signals. Not installed -- its own worked examples show the claimed \"71.5x fewer tokens\" benefit was on a heterogeneous 52-file corpus (code+papers+images), while its httpx example (single-language, single-repo, structurally the closest match to Leviathan) showed ~1x, i.e. no real benefit at Leviathan's current shape. Install footprint is also global (`~/.claude/CLAUDE.md`, `~/.claude/skills/`), not scoped to this project.",
-      "notes": "Backfilled 2026-08-17 from git history (commit 1a683a236) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
-    },
-    {
       "id": "heuristic-backtest-tool",
       "title": "Heuristic Backtest Tool",
       "area": "calibration",

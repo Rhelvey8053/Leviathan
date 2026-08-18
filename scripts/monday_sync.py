@@ -15,11 +15,28 @@ Phases (see the original handoff for the full plan):
     bridge, not the steady-state match strategy), verify the four groups
     and status labels exist. Idempotent: re-running with nothing to change
     makes zero writes.
-  Phase 2+ (one-way push sync, progress log, scheduling) - not yet built.
+  Phase 2 (this file implements `--phase2`) - one-way push sync,
+    local -> monday. Matches every backlog.json item to its board item by
+    backlog_id (the Phase 1 join key, not Name -- Name is no longer
+    trusted as a match key from here on). Creates any backlog.json item
+    with no board match; for existing matches, writes only the columns
+    that actually differ (status, group, priority, area, detail) --
+    never touches an item whose board state already agrees with
+    backlog.json. Stamps Completed date ONLY on a genuine fresh
+    ready/locked/blocked -> done transition observed in THIS run (i.e.
+    the board's own status before this write wasn't already "Done") --
+    never backdates or invents a completion date for an item that was
+    already done before the sync existed; see docs/monday_sync_discovery.md
+    section 8 for why historical dates are a separate, git-sourced task.
+    Board items with no backlog_id at all are left completely untouched
+    (unmanaged). --dry-run prints the full diff and writes nothing.
+  Phase 3+ (progress log, scheduling) - not yet built.
 
 Usage:
     python scripts/monday_sync.py --phase1              # live run
     python scripts/monday_sync.py --phase1 --dry-run    # preview, writes nothing
+    python scripts/monday_sync.py --phase2              # live run
+    python scripts/monday_sync.py --phase2 --dry-run    # preview, writes nothing
 
 MONDAY_API_TOKEN must be set in .env (never committed -- see .gitignore).
 """
@@ -29,6 +46,7 @@ import json
 import os
 import sys
 import time
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import requests
@@ -43,11 +61,17 @@ from backlog.engine import load_backlog
 
 CONFIG_PATH = ROOT / "config.json"
 BACKLOG_PATH = ROOT / "backlog" / "backlog.json"
+LOG_PATH = ROOT / "logs" / "monday_sync.log"
 API_URL = "https://api.monday.com/v2"
 API_VERSION = "2024-10"
 
 DEFAULT_BOARD_ID = 18426940027
 EXPECTED_GROUPS = {"Ready", "Locked", "Blocked", "Completed"}
+DETAIL_MAX_CHARS = 1500
+DETAIL_TRUNCATION_NOTE = "\n\n... [truncated for the board -- full text lives in backlog.json]"
+
+STATUS_TO_GROUP = {"ready": "Ready", "locked": "Locked", "blocked": "Blocked", "done": "Completed"}
+STATUS_TO_LABEL = {"ready": "Ready", "locked": "Locked", "blocked": "Blocked", "done": "Done"}
 EXPECTED_STATUS_LABELS = {"Ready", "Locked", "Blocked", "Done"}
 
 
@@ -324,15 +348,300 @@ def _update_config_monday_section(board_id: int, schema: dict, backlog_id_col: s
     print("  [monday_sync] config.json 'monday' section updated with resolved ids")
 
 
+# ─── Phase 2: one-way push sync ────────────────────────────────────────────
+
+def _gate_context(item: dict) -> str:
+    """Appends gate/depends_on context to a locked/blocked item's Detail
+    text, per the handoff's field mapping (section 6)."""
+    status = item.get("status")
+    if status == "locked":
+        conds = item.get("trigger", {}).get("all", [])
+        if conds:
+            gate = "; ".join(f"{c['metric']} {c['op']} {c['value']}" for c in conds)
+            return f"\n\nGate: {gate}"
+    elif status == "blocked":
+        deps = item.get("depends_on", [])
+        if deps:
+            return f"\n\nWaiting on: {', '.join(deps)}"
+    return ""
+
+
+def render_detail(item: dict) -> str:
+    text = (item.get("action") or "") + _gate_context(item)
+    if len(text) > DETAIL_MAX_CHARS:
+        keep = DETAIL_MAX_CHARS - len(DETAIL_TRUNCATION_NOTE)
+        text = text[:keep] + DETAIL_TRUNCATION_NOTE
+    return text
+
+
+def expected_fields(item: dict) -> dict:
+    return {
+        "status_label": STATUS_TO_LABEL[item["status"]],
+        "group_title": STATUS_TO_GROUP[item["status"]],
+        "priority": item["priority"],
+        "area": item["area"],
+        "detail": render_detail(item),
+    }
+
+
+def _resolve_column_ids(schema: dict) -> dict:
+    by_title = {c["title"]: c["id"] for c in schema["columns"]}
+    required = {"Status": "status", "Priority": "priority", "Area": "area",
+                "Detail": "detail", "backlog_id": "backlog_id", "Completed date": "completed_date"}
+    ids = {}
+    for title, key in required.items():
+        if title not in by_title:
+            raise RuntimeError(
+                f"monday board is missing expected column {title!r} -- run --phase1 first"
+            )
+        ids[key] = by_title[title]
+    return ids
+
+
+def current_fields(board_item: dict, col_ids: dict) -> dict:
+    cv_by_id = {cv["id"]: cv for cv in board_item["column_values"]}
+    return {
+        "status_label": cv_by_id.get(col_ids["status"], {}).get("text"),
+        "group_title": board_item["group"]["title"],
+        "priority": cv_by_id.get(col_ids["priority"], {}).get("text"),
+        "area": cv_by_id.get(col_ids["area"], {}).get("text"),
+        "detail": cv_by_id.get(col_ids["detail"], {}).get("text"),
+    }
+
+
+def _diff(item: dict, board_item: dict | None, col_ids: dict) -> dict:
+    """Returns {field: (old, new)} for fields that actually differ. Never
+    includes a field whose current value already matches -- the caller
+    uses an empty dict (and no fresh-done transition) as "nothing to do"."""
+    exp = expected_fields(item)
+    if board_item is None:
+        return {"_create": (None, exp)}
+
+    cur = current_fields(board_item, col_ids)
+    changes = {}
+    if cur["group_title"] != exp["group_title"]:
+        changes["group"] = (cur["group_title"], exp["group_title"])
+    if cur["status_label"] != exp["status_label"]:
+        changes["status"] = (cur["status_label"], exp["status_label"])
+    if cur["priority"] != str(exp["priority"]):
+        changes["priority"] = (cur["priority"], exp["priority"])
+    if (cur["area"] or "") != exp["area"]:
+        changes["area"] = (cur["area"], exp["area"])
+    if (cur["detail"] or "") != exp["detail"]:
+        changes["detail"] = (len(cur["detail"] or ""), len(exp["detail"]))
+    return changes
+
+
+def _create_board_item(board_id: int, group_id: str, item: dict, col_ids: dict) -> str:
+    exp = expected_fields(item)
+    cvs = {
+        col_ids["status"]: {"label": exp["status_label"]},
+        col_ids["priority"]: str(exp["priority"]),
+        col_ids["area"]: exp["area"],
+        col_ids["detail"]: exp["detail"],
+        col_ids["backlog_id"]: item["id"],
+    }
+    data = gql(
+        """
+        mutation($board_id: ID!, $group_id: String!, $item_name: String!, $column_values: JSON!) {
+          create_item(board_id: $board_id, group_id: $group_id, item_name: $item_name,
+            column_values: $column_values, create_labels_if_missing: true) { id }
+        }
+        """,
+        {"board_id": str(board_id), "group_id": group_id, "item_name": item["id"],
+         "column_values": json.dumps(cvs)},
+    )
+    time.sleep(0.3)
+    return data["create_item"]["id"]
+
+
+def _apply_update(board_id: int, item_id: str, col_ids: dict, exp: dict,
+                   changes: dict, newly_done: bool, groups_by_title: dict) -> None:
+    cvs = {}
+    if "status" in changes:
+        cvs[col_ids["status"]] = {"label": exp["status_label"]}
+    if "priority" in changes:
+        cvs[col_ids["priority"]] = str(exp["priority"])
+    if "area" in changes:
+        cvs[col_ids["area"]] = exp["area"]
+    if "detail" in changes:
+        cvs[col_ids["detail"]] = exp["detail"]
+    if newly_done:
+        cvs[col_ids["completed_date"]] = {"date": date.today().isoformat()}
+
+    if cvs:
+        gql(
+            """
+            mutation($board_id: ID!, $item_id: ID!, $column_values: JSON!) {
+              change_multiple_column_values(board_id: $board_id, item_id: $item_id,
+                column_values: $column_values, create_labels_if_missing: true) { id }
+            }
+            """,
+            {"board_id": str(board_id), "item_id": item_id, "column_values": json.dumps(cvs)},
+        )
+        time.sleep(0.3)
+
+    if "group" in changes:
+        gql(
+            """
+            mutation($item_id: ID!, $group_id: String!) {
+              move_item_to_group(item_id: $item_id, group_id: $group_id) { id }
+            }
+            """,
+            {"item_id": item_id, "group_id": groups_by_title[exp["group_title"]]},
+        )
+        time.sleep(0.3)
+
+
+def _log_summary(summary: dict, dry_run: bool) -> None:
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat()
+    line = (
+        f"{ts} {'[dry-run] ' if dry_run else ''}"
+        f"created={len(summary['created'])} updated={len(summary['updated'])} "
+        f"moved={len(summary['moved'])} completed_stamped={len(summary['completed_stamped'])} "
+        f"unmatched_board_items={len(summary['unmatched_board_items'])}"
+    )
+    if summary["created"]:
+        line += f" | created: {summary['created']}"
+    if summary["moved"]:
+        line += f" | moved: {summary['moved']}"
+    if summary["completed_stamped"]:
+        line += f" | completed_stamped: {summary['completed_stamped']}"
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    print(f"[monday_sync] {line}")
+
+
+def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False) -> dict:
+    """
+    One-way push sync (handoff Phase 2). Returns a summary dict:
+    {created, updated, moved, completed_stamped, unmatched_board_items}
+    (each a list of backlog_ids, except unmatched_board_items which is a
+    list of board item Names).
+    """
+    print(f"[monday_sync] Phase 2 {'(dry-run) ' if dry_run else ''}-- board {board_id}")
+
+    schema = get_board_schema(board_id)
+    col_ids = _resolve_column_ids(schema)
+    groups_by_title = {g["title"]: g["id"] for g in schema["groups"]}
+
+    bl = load_backlog(BACKLOG_PATH)
+    bl_ids = {i["id"] for i in bl["items"]}
+    board_items = get_all_items(board_id)
+
+    by_backlog_id: dict[str, dict] = {}
+    for bit in board_items:
+        for cv in bit["column_values"]:
+            if cv["id"] == col_ids["backlog_id"] and cv["text"]:
+                by_backlog_id[cv["text"]] = bit
+
+    # "unmatched" = no current backlog.json item claims this board item --
+    # covers both "never had a backlog_id" AND "had one from an earlier
+    # Phase 1/2 run but that id was since removed from backlog.json" (e.g.
+    # an item dropped back to unmanaged after a schema-fit decision). Either
+    # way, this sync must leave it completely untouched.
+    unmatched_board_items = [
+        bit["name"] for bit in board_items
+        if not any(cv["id"] == col_ids["backlog_id"] and cv["text"] in bl_ids
+                   for cv in bit["column_values"])
+    ]
+
+    created, updated, moved, completed_stamped = [], [], [], []
+
+    for item in bl["items"]:
+        bid = item["id"]
+        board_item = by_backlog_id.get(bid)
+        changes = _diff(item, board_item, col_ids)
+
+        if "_create" in changes:
+            exp = expected_fields(item)
+            if dry_run:
+                print(f"  [dry-run] would CREATE {bid!r} in group {exp['group_title']!r}")
+            else:
+                _create_board_item(board_id, groups_by_title[exp["group_title"]], item, col_ids)
+            created.append(bid)
+            continue
+
+        if not changes:
+            continue  # already matches -- idempotent no-op
+
+        exp = expected_fields(item)
+        cur = current_fields(board_item, col_ids)
+        newly_done = cur["status_label"] != "Done" and exp["status_label"] == "Done"
+
+        if dry_run:
+            extra = " + stamp Completed date" if newly_done else ""
+            print(f"  [dry-run] would UPDATE {bid!r}: {changes}{extra}")
+        else:
+            _apply_update(board_id, board_item["id"], col_ids, exp, changes, newly_done, groups_by_title)
+        updated.append(bid)
+        if "group" in changes:
+            moved.append(bid)
+        if newly_done:
+            completed_stamped.append(bid)
+
+    summary = {
+        "created": created, "updated": updated, "moved": moved,
+        "completed_stamped": completed_stamped,
+        "unmatched_board_items": unmatched_board_items,
+    }
+    _log_summary(summary, dry_run)
+    return summary
+
+
+def verify_phase2(board_id: int = DEFAULT_BOARD_ID) -> dict:
+    """
+    Read-back verification (handoff constraint #6: never report success off
+    mutation responses alone). Re-queries the board fresh and asserts every
+    backlog.json item's board state now matches. Returns
+    {ok: bool, mismatches: [{backlog_id, diff}]}.
+    """
+    schema = get_board_schema(board_id)
+    col_ids = _resolve_column_ids(schema)
+    bl = load_backlog(BACKLOG_PATH)
+    board_items = get_all_items(board_id)
+
+    by_backlog_id = {}
+    for bit in board_items:
+        for cv in bit["column_values"]:
+            if cv["id"] == col_ids["backlog_id"] and cv["text"]:
+                by_backlog_id[cv["text"]] = bit
+
+    mismatches = []
+    for item in bl["items"]:
+        board_item = by_backlog_id.get(item["id"])
+        if board_item is None:
+            mismatches.append({"backlog_id": item["id"], "diff": "missing from board"})
+            continue
+        changes = _diff(item, board_item, col_ids)
+        if changes:
+            mismatches.append({"backlog_id": item["id"], "diff": changes})
+
+    ok = not mismatches
+    print(f"[monday_sync] verify_phase2: {'OK' if ok else 'MISMATCHES FOUND'} "
+          f"({len(bl['items'])} items checked, {len(mismatches)} mismatched)")
+    for m in mismatches:
+        print(f"  {m['backlog_id']}: {m['diff']}")
+    return {"ok": ok, "mismatches": mismatches}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Leviathan <-> monday.com sync")
     parser.add_argument("--phase1", action="store_true", help="Run Phase 1: board schema prep")
+    parser.add_argument("--phase2", action="store_true", help="Run Phase 2: one-way push sync")
     parser.add_argument("--board-id", type=int, default=DEFAULT_BOARD_ID)
     parser.add_argument("--dry-run", action="store_true", help="Preview writes, write nothing")
     args = parser.parse_args()
 
     if args.phase1:
         phase1_setup(board_id=args.board_id, dry_run=args.dry_run)
+        return 0
+
+    if args.phase2:
+        phase2_sync(board_id=args.board_id, dry_run=args.dry_run)
+        if not args.dry_run:
+            verify_phase2(board_id=args.board_id)
         return 0
 
     parser.print_help()

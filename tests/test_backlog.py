@@ -42,8 +42,29 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_75_items(backlog_data):
+def test_parses_and_74_items(backlog_data):
     """
+    74, not 75: 19 of the 20 items backfilled during the monday.com sync
+    Phase 0 discovery (2026-08-17, docs/monday_sync_discovery.md) stuck --
+    graphify-skill-evaluation did not. It was backfilled with status
+    "blocked" but depends_on=[] (blocked on an external condition -- the
+    project's shape changing to include non-code files -- not on another
+    backlog item, which the schema has no field for). backlog/checker.py's
+    own evaluate_triggers()/compare_statuses() logic treats "blocked" as
+    meaning "depends_on is non-empty"; with it empty, trigger_ok and
+    deps_ok both come back vacuously True and the very next checker.py run
+    auto-promoted it to "ready" -- caught live during the monday-sync
+    Phase 2 dry-run-then-live workflow (the promotion actually happened
+    against the real backlog.json before this was caught). Per Reed's
+    explicit decision once this schema gap was surfaced: dropped back to
+    unmanaged rather than mis-representing it as "ready" (it was
+    evaluated and declined, not actionable) or inventing a fake
+    depends_on. Its board card already correctly shows Blocked from the
+    original one-time seed and is simply left alone by the sync (no
+    backlog_id match) -- restores the same state graphify-skill-evaluation
+    was recommended for in the original Phase 0 discovery doc, before the
+    all-20 backfill decision.
+
     75, not 55: the monday.com sync Phase 0 discovery (2026-08-17,
     docs/monday_sync_discovery.md) found the monday board -- seeded early
     on from a version of BACKLOG.md that still carried rich hand-written
@@ -96,7 +117,7 @@ def test_parses_and_75_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 75
+    assert len(backlog_data["items"]) == 74
 
 
 def test_all_ids_unique(backlog_data):

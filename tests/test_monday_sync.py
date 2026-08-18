@@ -275,3 +275,360 @@ def test_phase1_setup_dry_run_never_calls_gql_for_writes(tmp_backlog, monkeypatc
 
     assert summary["items_backfilled"] == 2
     mock_gql.assert_not_called()
+
+
+# ─── Phase 2: render_detail / expected_fields / _diff ──────────────────────
+
+def _bl_item(id="alpha", status="done", priority=1, area="calibration",
+             action="Did the thing.", trigger=None, depends_on=None):
+    return {
+        "id": id, "title": id.title(), "area": area, "priority": priority,
+        "status": status, "trigger": trigger or {"all": []},
+        "depends_on": depends_on or [], "action": action, "notes": "",
+    }
+
+
+def test_render_detail_plain_for_done_item():
+    item = _bl_item(status="done", action="Fixed the bug.")
+    assert ms.render_detail(item) == "Fixed the bug."
+
+
+def test_render_detail_appends_gate_for_locked_item():
+    item = _bl_item(status="locked", action="Do the thing.",
+                     trigger={"all": [{"metric": "resolved_count", "op": ">=", "value": 25}]})
+    detail = ms.render_detail(item)
+    assert detail.startswith("Do the thing.")
+    assert "Gate: resolved_count >= 25" in detail
+
+
+def test_render_detail_appends_waiting_on_for_blocked_item():
+    item = _bl_item(status="blocked", action="Do the thing.", depends_on=["other-item"])
+    detail = ms.render_detail(item)
+    assert "Waiting on: other-item" in detail
+
+
+def test_render_detail_truncates_long_action():
+    item = _bl_item(status="done", action="x" * 3000)
+    detail = ms.render_detail(item)
+    assert len(detail) <= ms.DETAIL_MAX_CHARS
+    assert "truncated" in detail
+
+
+def test_render_detail_no_truncation_under_cap():
+    item = _bl_item(status="done", action="short text")
+    assert "truncated" not in ms.render_detail(item)
+
+
+def test_expected_fields_maps_status_to_group_and_label():
+    assert ms.expected_fields(_bl_item(status="ready"))["group_title"] == "Ready"
+    assert ms.expected_fields(_bl_item(status="ready"))["status_label"] == "Ready"
+    assert ms.expected_fields(_bl_item(status="locked"))["group_title"] == "Locked"
+    assert ms.expected_fields(_bl_item(status="blocked"))["group_title"] == "Blocked"
+    assert ms.expected_fields(_bl_item(status="done"))["group_title"] == "Completed"
+    assert ms.expected_fields(_bl_item(status="done"))["status_label"] == "Done"
+
+
+COL_IDS = {"status": "c_status", "priority": "c_pri", "area": "c_area",
+           "detail": "c_detail", "backlog_id": "c_bid", "completed_date": "c_cd"}
+
+
+def _board_item(name="alpha", group_title="Completed", status_label="Done",
+                 priority="1", area="calibration", detail="Fixed the bug."):
+    return {
+        "id": "item-1", "name": name, "group": {"id": "g1", "title": group_title},
+        "column_values": [
+            {"id": COL_IDS["status"], "text": status_label, "value": None},
+            {"id": COL_IDS["priority"], "text": priority, "value": None},
+            {"id": COL_IDS["area"], "text": area, "value": None},
+            {"id": COL_IDS["detail"], "text": detail, "value": None},
+            {"id": COL_IDS["backlog_id"], "text": name, "value": None},
+        ],
+    }
+
+
+def test_diff_empty_when_board_already_matches():
+    item = _bl_item(status="done", priority=1, area="calibration", action="Fixed the bug.")
+    board_item = _board_item()
+    assert ms._diff(item, board_item, COL_IDS) == {}
+
+
+def test_diff_detects_status_and_group_change():
+    item = _bl_item(id="beta", status="ready", priority=1, area="validation", action="x")
+    board_item = _board_item(name="beta", group_title="Blocked", status_label="Blocked",
+                              priority="1", area="validation", detail="x")
+    changes = ms._diff(item, board_item, COL_IDS)
+    assert "status" in changes
+    assert "group" in changes
+    assert "priority" not in changes
+    assert "area" not in changes
+
+
+def test_diff_detects_priority_change():
+    item = _bl_item(priority=3)
+    board_item = _board_item(priority="1")
+    changes = ms._diff(item, board_item, COL_IDS)
+    assert changes["priority"] == ("1", 3)
+
+
+def test_diff_detects_area_change():
+    item = _bl_item(area="infra")
+    board_item = _board_item(area="infrastructure")
+    changes = ms._diff(item, board_item, COL_IDS)
+    assert changes["area"] == ("infrastructure", "infra")
+
+
+def test_diff_returns_create_marker_when_no_board_item():
+    item = _bl_item()
+    changes = ms._diff(item, None, COL_IDS)
+    assert "_create" in changes
+
+
+# ─── Phase 2: phase2_sync() integration (fully mocked) ─────────────────────
+
+def _phase2_schema():
+    return {
+        "name": "Leviathan",
+        "groups": [{"id": f"g_{t.lower()}", "title": t}
+                   for t in ("Ready", "Locked", "Blocked", "Completed", "To-Do")],
+        "columns": [
+            {"id": COL_IDS["status"], "title": "Status", "type": "status"},
+            {"id": COL_IDS["priority"], "title": "Priority", "type": "numbers"},
+            {"id": COL_IDS["area"], "title": "Area", "type": "text"},
+            {"id": COL_IDS["detail"], "title": "Detail", "type": "long_text"},
+            {"id": COL_IDS["backlog_id"], "title": "backlog_id", "type": "text"},
+            {"id": COL_IDS["completed_date"], "title": "Completed date", "type": "date"},
+        ],
+    }
+
+
+@pytest.fixture()
+def tmp_backlog2(tmp_path, monkeypatch):
+    path = tmp_path / "backlog.json"
+    data = {"updated": "2026-01-01", "items": [
+        _bl_item(id="alpha", status="done", priority=1, area="calibration", action="Fixed the bug."),
+        _bl_item(id="beta", status="ready", priority=2, area="validation", action="Do the thing."),
+        _bl_item(id="gamma", status="locked", priority=1, area="calibration", action="Wait for gate.",
+                 trigger={"all": [{"metric": "resolved_count", "op": ">=", "value": 25}]}),
+    ]}
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(ms, "BACKLOG_PATH", path)
+    return path
+
+
+def test_phase2_sync_no_writes_when_board_already_matches(tmp_backlog2, monkeypatch, tmp_path):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    log_path = tmp_path / "monday_sync.log"
+    monkeypatch.setattr(ms, "LOG_PATH", log_path)
+
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql:
+        summary = ms.phase2_sync(board_id=999, dry_run=False)
+
+    assert summary == {"created": [], "updated": [], "moved": [],
+                        "completed_stamped": [], "unmatched_board_items": []}
+    mock_gql.assert_not_called()
+    assert log_path.exists()
+
+
+def test_phase2_sync_creates_missing_item(tmp_backlog2, monkeypatch, tmp_path):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        # 'gamma' is missing entirely -- must be created
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql", return_value={"create_item": {"id": "new-1"}}) as mock_gql, \
+         patch("scripts.monday_sync.time.sleep"):
+        summary = ms.phase2_sync(board_id=999, dry_run=False)
+
+    assert summary["created"] == ["gamma"]
+    mock_gql.assert_called_once()
+
+
+def test_phase2_sync_updates_only_changed_field(tmp_backlog2, monkeypatch, tmp_path):
+    """beta's priority differs (board says 1, json says 2) -- must write
+    only priority, not touch status/group/area/detail which already match."""
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="1", area="validation", detail="Do the thing."),  # priority wrong
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql, \
+         patch("scripts.monday_sync.time.sleep"):
+        summary = ms.phase2_sync(board_id=999, dry_run=False)
+
+    assert summary["updated"] == ["beta"]
+    assert summary["moved"] == []  # group already correct, must not call move_item_to_group
+    mock_gql.assert_called_once()
+    written = json.loads(mock_gql.call_args[0][1]["column_values"])
+    assert written == {COL_IDS["priority"]: "2"}
+
+
+def test_phase2_sync_stamps_completed_date_only_on_fresh_transition(tmp_backlog2, monkeypatch, tmp_path):
+    """alpha is done in json; board currently shows it NOT done (still
+    Ready) -- this is a genuine fresh transition, so Completed date must
+    be stamped. Must not fire for items already Done on the board."""
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Ready", status_label="Ready",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql, \
+         patch("scripts.monday_sync.time.sleep"):
+        summary = ms.phase2_sync(board_id=999, dry_run=False)
+
+    assert summary["completed_stamped"] == ["alpha"]
+    # alpha's content-mutation call (the first of its two calls -- content
+    # then group move) must include the completed_date column.
+    written_values = json.loads(mock_gql.call_args_list[0][0][1]["column_values"])
+    assert COL_IDS["completed_date"] in written_values
+
+
+def test_phase2_sync_never_stamps_completed_date_for_already_done_item(tmp_backlog2, monkeypatch, tmp_path):
+    """A no-op item (already Done on the board) must never get a
+    completed_date write -- confirms no backdating on ordinary matches."""
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql:
+        summary = ms.phase2_sync(board_id=999, dry_run=False)
+
+    assert summary["completed_stamped"] == []
+
+
+def test_phase2_sync_dry_run_writes_nothing(tmp_backlog2, monkeypatch, tmp_path):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    board_items = []  # nothing matches -- everything would be created
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql:
+        summary = ms.phase2_sync(board_id=999, dry_run=True)
+
+    assert summary["created"] == ["alpha", "beta", "gamma"]
+    mock_gql.assert_not_called()
+
+
+def test_phase2_sync_leaves_unmanaged_board_items_untouched(tmp_backlog2, monkeypatch, tmp_path):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    monkeypatch.setattr(ms, "LOG_PATH", tmp_path / "monday_sync.log")
+
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+        {  # unmanaged: no backlog_id column value at all
+            "id": "item-pm", "name": "Set up PM", "group": {"id": "g_todo", "title": "To-Do"},
+            "column_values": [{"id": COL_IDS["status"], "text": None, "value": None}],
+        },
+    ]
+
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items), \
+         patch("scripts.monday_sync.gql") as mock_gql:
+        summary = ms.phase2_sync(board_id=999, dry_run=False)
+
+    assert summary["unmatched_board_items"] == ["Set up PM"]
+    mock_gql.assert_not_called()
+
+
+# ─── verify_phase2() ────────────────────────────────────────────────────────
+
+def test_verify_phase2_ok_when_everything_matches(tmp_backlog2, monkeypatch):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Completed", status_label="Done",
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items):
+        result = ms.verify_phase2(board_id=999)
+    assert result == {"ok": True, "mismatches": []}
+
+
+def test_verify_phase2_flags_mismatch(tmp_backlog2, monkeypatch):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    schema = _phase2_schema()
+    board_items = [
+        _board_item(name="alpha", group_title="Ready", status_label="Ready",  # wrong!
+                    priority="1", area="calibration", detail="Fixed the bug."),
+        _board_item(name="beta", group_title="Ready", status_label="Ready",
+                    priority="2", area="validation", detail="Do the thing."),
+        _board_item(name="gamma", group_title="Locked", status_label="Locked",
+                    priority="1", area="calibration",
+                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+    ]
+    with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
+         patch("scripts.monday_sync.get_all_items", return_value=board_items):
+        result = ms.verify_phase2(board_id=999)
+    assert result["ok"] is False
+    assert result["mismatches"][0]["backlog_id"] == "alpha"
