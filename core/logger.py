@@ -210,6 +210,21 @@ def _init_db() -> None:
             # outcome/result/pnl_if_traded. NULL for every row logged
             # before this existed and for anything still pending.
             "resolved_at           TEXT",
+            # backlog: net-edge-fee-depth-model. ob_bid_depth/ob_ask_depth are
+            # already computed by compute_orderbook_signal() but were never
+            # persisted (only the derived ob_imbalance/ob_flag/ob_direction
+            # were) -- without the raw depth, "did edge cluster in markets
+            # too thin to fill unit_size" can't be answered after the fact.
+            # liquidity_thin is the check itself: depth on the side this
+            # signal's direction needs was below the configured unit_size at
+            # scan time. Own column (not folded into confidence_downgraded)
+            # for the same reason second_pass/confidence_downgraded are
+            # separate -- one flag per distinct methodology reason, so later
+            # calibration analysis can tell them apart.
+            "ob_bid_depth          REAL",
+            "ob_ask_depth          REAL",
+            "liquidity_checked     INTEGER DEFAULT 0",
+            "liquidity_thin        INTEGER DEFAULT 0",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -340,9 +355,10 @@ def log_signal(signal: dict) -> None:
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
-                 smart_money_count,smart_money_dir,reasoning,sources)
+                 smart_money_count,smart_money_dir,reasoning,sources,
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -400,6 +416,10 @@ def log_signal(signal: dict) -> None:
                 signal.get("smart_money_dir"),
                 signal.get("reasoning") or "",
                 json.dumps(signal.get("sources") or []),
+                _to_float(signal.get("ob_bid_depth")),
+                _to_float(signal.get("ob_ask_depth")),
+                1 if signal.get("liquidity_checked") else 0,
+                1 if signal.get("liquidity_thin") else 0,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -428,9 +448,10 @@ def log_pass(signal: dict) -> None:
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
-                 smart_money_count,smart_money_dir,reasoning,sources)
+                 smart_money_count,smart_money_dir,reasoning,sources,
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -494,6 +515,10 @@ def log_pass(signal: dict) -> None:
                 signal.get("smart_money_dir"),
                 signal.get("reasoning") or "",
                 json.dumps(signal.get("sources") or []),
+                _to_float(signal.get("ob_bid_depth")),
+                _to_float(signal.get("ob_ask_depth")),
+                1 if signal.get("liquidity_checked") else 0,
+                1 if signal.get("liquidity_thin") else 0,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")

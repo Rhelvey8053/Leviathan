@@ -541,7 +541,8 @@ def _signal_block(s: dict, index: int = 0, unit_size: float = 10) -> list[str]:
 
     warn = []
     if s.get("second_pass"):           warn.append("[SECOND PASS — LOW CONVICTION]")
-    if s.get("confidence_downgraded"): warn.append("[conf downgraded: edge<10pp]")
+    if s.get("liquidity_thin"):        warn.append("[THIN LIQUIDITY]")
+    elif s.get("confidence_downgraded"): warn.append("[conf downgraded: edge<10pp]")
     if s.get("short_horizon"):         warn.append("[SHORT HORIZON 72h]")
 
     info = []

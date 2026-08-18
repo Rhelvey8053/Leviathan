@@ -646,6 +646,30 @@ def compute_orderbook_signal(orderbook: dict) -> dict:
     }
 
 
+def check_liquidity(direction: str, ob_bid_depth, ob_ask_depth, unit_size: int) -> dict:
+    """
+    Ex-ante check: does the order book actually have unit_size contracts
+    resting on the side this direction needs to fill against, or is
+    net_edge_after_fee pricing a trade off a top-of-book quote the visible
+    book can't actually absorb.
+
+    direction "YES" fills against the YES ask book (ob_ask_depth, summed
+    from no_dollars); direction "NO" fills against the YES bid book
+    (ob_bid_depth, summed from yes_dollars) -- same yes_dollars/no_dollars
+    mapping compute_orderbook_signal() uses above. Complements, not
+    duplicates, slippage-tracking (which measures realized post-trade fill
+    price on real trades, ex-post) -- this is pre-trade, at scan time.
+    """
+    if direction not in ("YES", "NO") or not unit_size or unit_size <= 0:
+        return {"liquidity_checked": False, "liquidity_thin": False}
+
+    depth = ob_ask_depth if direction == "YES" else ob_bid_depth
+    if depth is None:
+        return {"liquidity_checked": False, "liquidity_thin": False}
+
+    return {"liquidity_checked": True, "liquidity_thin": depth < unit_size}
+
+
 def score_market(market: dict, config: dict) -> dict:
     """
     Scores a single market for mispricing.

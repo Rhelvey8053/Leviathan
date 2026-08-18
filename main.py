@@ -845,6 +845,8 @@ def main():
             "ob_flag":         m.get("ob_flag", False),
             "ob_imbalance":    m.get("ob_imbalance"),
             "ob_direction":    m.get("ob_direction"),
+            "ob_bid_depth":    m.get("ob_bid_depth"),
+            "ob_ask_depth":    m.get("ob_ask_depth"),
             "time_horizon":    m.get("time_horizon", "MONTHLY"),
             "poly":            m.get("poly"),
             "ext_markets":     m.get("ext_markets", []),
@@ -906,6 +908,19 @@ def main():
             _fee = kalshi_fee(_mp_ev, _unit)
             _ev_ff = (float(_est_ev) - _mp_ev) * _unit if _dir_ev == "YES" else (_mp_ev - float(_est_ev)) * _unit
             signal["ev_after_fee_per_contract"] = round(_ev_ff - _fee, 4)
+
+        # backlog: net-edge-fee-depth-model. net_edge_after_fee prices the
+        # trade off the top-of-book quote only -- it has no idea whether the
+        # book can actually fill unit_size contracts on the side this
+        # direction needs. Downgrade confidence (same mechanism as the
+        # short-horizon corroboration gate above) rather than trusting the
+        # face-value edge when the book is too thin to support the stake.
+        _liq = scanner.check_liquidity(_dir_ev, signal.get("ob_bid_depth"), signal.get("ob_ask_depth"), _unit)
+        signal["liquidity_checked"] = _liq["liquidity_checked"]
+        signal["liquidity_thin"]    = _liq["liquidity_thin"]
+        if _liq["liquidity_thin"] and signal.get("confidence") in ("HIGH", "MED"):
+            signal["confidence"] = "MED" if signal["confidence"] == "HIGH" else "LOW"
+            signal["confidence_downgraded"] = True
 
         # Extremizing: when ≥2 independent sources agree with Claude's direction,
         # the true probability is more extreme than any single estimate suggests.
@@ -973,6 +988,8 @@ def main():
                     "ob_flag":         m.get("ob_flag", False),
                     "ob_imbalance":    m.get("ob_imbalance"),
                     "ob_direction":    m.get("ob_direction"),
+                    "ob_bid_depth":    m.get("ob_bid_depth"),
+                    "ob_ask_depth":    m.get("ob_ask_depth"),
                     "time_horizon":    m.get("time_horizon", "MONTHLY"),
                     "poly":            m.get("poly"),
                     "ext_markets":     m.get("ext_markets", []),
@@ -998,6 +1015,12 @@ def main():
                     "run_id":               run_id,
                     "second_pass":          True,
                 }
+                _liq2 = scanner.check_liquidity(
+                    signal.get("direction", "PASS"), signal.get("ob_bid_depth"),
+                    signal.get("ob_ask_depth"), config.get("betting", {}).get("unit_size", 10),
+                )
+                signal["liquidity_checked"] = _liq2["liquidity_checked"]
+                signal["liquidity_thin"]    = _liq2["liquidity_thin"]
                 final_signals.append(signal)
         if final_signals:
             print(f"      Second pass found {len(final_signals)} LOW confidence signal(s)")

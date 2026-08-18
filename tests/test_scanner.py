@@ -2478,3 +2478,46 @@ def test_compute_orderbook_signal_falls_back_to_yes_key_shape():
     result = scanner.compute_orderbook_signal(orderbook)
     assert result["ob_bid_depth"] == 100.0
     assert result["ob_ask_depth"] == 50.0
+
+
+# ── check_liquidity (backlog: net-edge-fee-depth-model) ─────────────────────
+
+def test_check_liquidity_yes_direction_uses_ask_depth():
+    # Buying YES fills against the ask book -- thin ask depth flags it
+    # even though bid depth is plenty.
+    result = scanner.check_liquidity("YES", ob_bid_depth=500, ob_ask_depth=3, unit_size=10)
+    assert result == {"liquidity_checked": True, "liquidity_thin": True}
+
+
+def test_check_liquidity_no_direction_uses_bid_depth():
+    result = scanner.check_liquidity("NO", ob_bid_depth=3, ob_ask_depth=500, unit_size=10)
+    assert result == {"liquidity_checked": True, "liquidity_thin": True}
+
+
+def test_check_liquidity_sufficient_depth_not_thin():
+    result = scanner.check_liquidity("YES", ob_bid_depth=5, ob_ask_depth=10, unit_size=10)
+    assert result == {"liquidity_checked": True, "liquidity_thin": False}
+
+
+def test_check_liquidity_exact_depth_not_thin():
+    # depth == unit_size can fully fill the stake -- not thin.
+    result = scanner.check_liquidity("YES", ob_bid_depth=0, ob_ask_depth=10, unit_size=10)
+    assert result["liquidity_thin"] is False
+
+
+def test_check_liquidity_pass_direction_not_checked():
+    result = scanner.check_liquidity("PASS", ob_bid_depth=1, ob_ask_depth=1, unit_size=10)
+    assert result == {"liquidity_checked": False, "liquidity_thin": False}
+
+
+def test_check_liquidity_missing_depth_not_checked():
+    # No order book was fetched for this market (fetch failed / not flagged) --
+    # absence of data must not be treated as "book is empty" (which would
+    # falsely thin-flag every market lacking an orderbook fetch).
+    result = scanner.check_liquidity("YES", ob_bid_depth=None, ob_ask_depth=None, unit_size=10)
+    assert result == {"liquidity_checked": False, "liquidity_thin": False}
+
+
+def test_check_liquidity_zero_unit_size_not_checked():
+    result = scanner.check_liquidity("YES", ob_bid_depth=5, ob_ask_depth=5, unit_size=0)
+    assert result == {"liquidity_checked": False, "liquidity_thin": False}
