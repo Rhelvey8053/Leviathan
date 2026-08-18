@@ -1009,6 +1009,10 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will Biden veto the tax reform bill?", 0.20),
     # Executive / appointments
     ("Will Trump sign an executive order on immigration?", 0.45),
+    # backlog: heuristic-sunsetting -- laddered weekly EO-count markets
+    # intercept before the generic 'executive order' rule above.
+    ("Will Mamdani sign above 0 executive orders between Jul 19, 2026 and Jul 25, 2026?", 0.20),
+    ("Will the President sign more than 1 Executive Orders between Jul 12, 2026 and Jul 18, 2026?", 0.20),
     ("Will the new Treasury Secretary be confirmed by the Senate?", 0.55),
     ("Will the Fed chair resign before 2027?", 0.20),
     ("Will Trump pardon Roger Stone?", 0.35),
@@ -1782,6 +1786,34 @@ def test_down_ballot_election_two_way_race_still_calibrated_at_original_rate():
     m = _market(title="Will Democratic win the House race for CA-37?")
     assert scanner.estimate_base_rate(m) == pytest.approx(0.52)
     assert scanner.get_heuristic_label(m) == "down-ballot election"
+
+
+def test_executive_order_periodic_count_intercepted_before_generic_rule():
+    """
+    backlog: heuristic-sunsetting. All 14 settled matches for the generic
+    'executive order' rule (0.45) turned out to be Kalshi's newer laddered
+    "more than N executive orders between <date> and <date>" weekly-count
+    markets, not the genuine one-off "sign an EO on topic X" markets 0.45
+    was calibrated for -- actual rate 21.4% (heuristic Brier 0.2239 vs a
+    naive population-rate baseline of 0.1686 for this specific group, i.e.
+    actively worse than just guessing the population rate). Split out via
+    the "executive order(s) between" phrasing, which never appears in a
+    genuine one-off topic market.
+    """
+    m = _market(title="Will Mamdani sign above 0 executive orders between Jul 19, 2026 and Jul 25, 2026?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.20)
+    assert scanner.get_heuristic_label(m) == "executive order (periodic count)"
+
+
+def test_executive_order_generic_rule_still_calibrated_at_original_rate():
+    """
+    Sanity check that the periodic-count sub-rule doesn't swallow genuine
+    one-off substantive EO markets, which have zero settled examples yet
+    and are left at the original, unverified-but-uncontradicted 0.45.
+    """
+    m = _market(title="Will Trump sign an executive order on immigration?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.45)
+    assert scanner.get_heuristic_label(m) == "executive order"
 
 
 def test_heuristic_label_on_score_market_result():

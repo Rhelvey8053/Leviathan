@@ -219,6 +219,22 @@ _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['continuing resolution', 'omnibus bill', 'appropriations bill', 'government funding bill', 'spending bill', 'federal budget', 'budget resolution', 'budget deal', 'budget agreement', 'pass the budget', 'budget bill', 'budget deadline'], 0.4, 'budget/spending legislation'),
     (['pass the senate', 'pass the house', 'pass congress', 'pass in the senate', 'pass in the house', 'pass into law', 'signed into law', 'sign into law', 'pass the bill', 'passes the bill', 'pass legislation', 'become law', 'enacted into law', 'senate pass', 'house pass', 'senate approve', 'house approve', 'senate vote on', 'house vote on'], 0.35, 'legislative passage'),
     (['national emergency', 'declare a national emergency', 'declare an emergency', 'emergency declaration', 'invoke emergency powers', 'state of emergency', 'invoke the national emergencies act', 'invokes emergency powers', 'emergency powers act'], 0.25, 'national emergency'),
+    # backlog: heuristic-sunsetting. Split 2026-08-18 after the flat 0.45
+    # rate was found to actively underperform the naive population-rate
+    # baseline (0.2239 heuristic Brier vs 0.1686 label-specific naive
+    # Brier at n=14) -- all 14 settled matches were Kalshi's newer
+    # "more than N executive orders in this week" laddered-count markets
+    # (Mamdani/President), not the genuine one-off "sign an EO on topic X"
+    # markets the 0.45 rate was written for (zero of which have settled
+    # yet, so that rate is unverified but not contradicted either -- left
+    # unchanged below). Every laddered-count title observed uses "executive
+    # order(s) between <start> and <end>" phrasing, which never appears in
+    # a one-off topic market -- intercepts here before the generic rule.
+    # Blended actual rate across all 14 (12 "more than/above 0" + 2 harder
+    # "more than 1"/"more than 2" thresholds, both NO) was 21.4%; the two
+    # thresholds aren't split further since n=2 on the harder bucket is too
+    # thin to fit a distinct number without just encoding noise.
+    (['executive orders between', 'executive order between'], 0.20, 'executive order (periodic count)'),
     (['executive order', 'sign an executive order', 'issue an executive order'], 0.45, 'executive order'),
     (['senate confirmation', 'confirmed by the senate', 'cabinet nomination', 'confirmed as secretary', 'confirmed as director', 'confirmed as ambassador'], 0.55, 'senate confirmation'),
     (["member of trump's cabinet", 'trump cabinet member', 'member of the cabinet leave', 'cabinet member leave', 'leave the cabinet', 'depart from the cabinet'], 0.65, 'cabinet departure'),
