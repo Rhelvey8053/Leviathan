@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-08-16",
+  "updated": "2026-08-17",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -836,6 +836,266 @@
       ],
       "action": "Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. Distinct from the existing CROSS_MARKET flag path (core/scorer.py), which is a two-venue (Kalshi/Polymarket) corroboration proxy, not a broad multi-venue aggregation layer. Vet aggregator reliability first -- several are commercial or scrapers, and Polymarket acquired the main independent aggregator, Dome, in early 2026, changing the vendor landscape this depends on. Waiting on: net-edge-fee-depth-model shipping (don't widen venue surface before the edge math itself is trustworthy) AND the replay corpus being populated (replay-instrument-validation unblocked -- currently gated on a human decision to approve real metered API spend, not a build; replay_signals has 0 rows against 12,600 available settled_markets as of 2026-08-17).",
       "notes": ""
+    },
+    {
+      "id": "ci-kalshi-auth-env-2026-08",
+      "title": "Ci Kalshi Auth Env 2026 08",
+      "area": "infra",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "3 GitHub Actions CI runs failed on tests.yml (added earlier this session) -- traced via the failure-notification emails to a separate, pre-existing automated \"smart money scan\" commit process pushing directly to origin, unrelated to any code change this session. Three independent, stacked root causes, each masking the next until fixed in turn -- fixing one just exposed the next failure underneath. (1) 31 tests in test_kalshi_near_dated.py/test_kalshi_settled_fetch.py/test_kalshi_trades_orderbook.py reach core.kalshi._auth_headers()/_load_private_key(), which unconditionally raise ValueError if KALSHI_KEY_ID/KALSHI_PRIVATE_KEY aren't set -- locally supplied by a gitignored .env, absent on a clean CI checkout. These tests already mock the actual HTTP call and only need auth-header generation to not crash, not a real credential -- fixed with one autouse pytest fixture in tests/conftest.py generating a throwaway RSA key and setting both env vars via monkeypatch for every test. (2) requirements.txt's unpinned `mcp[cli]` resolves to whatever is newest at install time -- a fresh install now pulls mcp==2.0.0 (a different publisher, \"LF Projects\" vs the prior \"Anthropic, PBC\" release) which removed the mcp.server.fastmcp import path mcp_server/server.py depends on, crashing pytest collection outright. Pinned to mcp[cli]==1.28.1, the version already proven working. (3) After both of those, the real CI run still failed, now in ~4-26s -- far too fast for an actual test run (local collection alone takes 8-32s). Docker/WSL weren't usable in this sandboxed environment to reproduce Linux directly, so root-caused via a static-analysis script cross-referencing every first-party import in the codebase against actual files on disk: main.py unconditionally does `import winsound` (a Windows-only stdlib module with no Linux equivalent at all) for a cosmetic end-of-run audio notification, and tests/test_blind_arm_main.py imports main directly -- guaranteed ModuleNotFoundError during collection on any Linux runner, before a single test executes. Fixed by gating both the import and its one usage behind `sys.platform == \"win32\"`. Each of the first two fixes was independently verified as real and necessary (31 genuinely-failing tests; a genuinely-incompatible dependency resolution) via clean-room/fresh-venv reproduction, but neither was what the real CI logs showed failing, since collection aborted before either code path was ever reached -- the winsound fix was the one that actually mattered for getting a green run, but the other two remain real fixes worth keeping. Final verification: real GitHub Actions run on commit 6d6a7ac passed end to end, \"Run tests\" step taking a realistic 35s (vs the previous two attempts' suspicious 4-26s instant failures), confirming an actual full suite execution rather than another masked collection crash.",
+      "notes": "Backfilled 2026-08-17 from git history (commit 93b4499ec) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "db-audit-2026-08",
+      "title": "Db Audit 2026 08",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Full audit of all 5 tables (signals, runs, settled_markets, replay_signals, blind_scores) for missing/inconsistent data. runs and settled_markets were essentially clean (settled_markets had 7 rows blank on category, one event family, backfilled from Kalshi's /series/{ticker} endpoint -- category lives on the series object, not the event object, confirmed empirically). signals (271 rows) had two real wiring bugs and a schema/reality mismatch: (1) heuristic_label was computed in the same scanner.score_market() call as base_rate/flag_path but never copied into main.py's two signal-dict-construction blocks, so it persisted on 2 of 271 rows despite ~218 having a base_rate -- fixed by adding it alongside the other m.get(...) copies. (2) Claude's cited sources were silently discarded on every CLI-scored row: the CLI's own JSON schema returns \"sources_checked\" (self-reported headline/URL strings), but logger.py and report.py both read \"sources\" (the shape the API backend's _extract_web_search_sources sets, [{\"url\",\"title\"}]) -- nothing renamed one to the other. Fixed in scorer.py's _score_via_cli() by normalizing sources_checked into the same dict shape right after parsing, so no downstream consumer needed to change. (3) An initial grep-based \"5 dead columns\" claim was wrong and corrected before any schema change: segment (used by log_probe for research_probe rows) and signal_call_id/direction_aligned (correctly computed by pull_real_fills(), just never applied to the 7 legacy real_fill rows, which all predate it or have no paper-signal candidate at all) are actively used -- only contract_type/resolution_date/logged_under (0 read or write sites across all 5 INSERT INTO signals statements) were genuinely dead; dropped via an existence-checked ALTER TABLE DROP COLUMN in _init_db() (SQLite has no DROP COLUMN IF EXISTS, unlike Postgres/MySQL). While verifying the 7 legacy real_fill rows were safe to backfill, found pull_real_fills() itself had two latent bugs never triggered in production (it's never been called outside tests): its ticker-match had no timestamp ordering (would match a paper signal logged AFTER a real trade as if the trade acted on it -- caught live via KXIMPEACHCABINET-26JUL01, a real NO fill at 02:51 vs a paper YES signal at 06:20 the same day), and it minted a random uuid as call_id instead of Kalshi's own stable fill_id/trade_id, so INSERT OR IGNORE could never actually dedupe a re-run. Both fixed; did not backfill the 7 legacy rows (6 have no paper-signal candidate at all, the 7th's only candidate is chronologically after the fill) and did not run pull_real_fills() live (would capture 5 real fills not yet in the ledger -- a separate decision touching real PnL rows, not requested). DB backed up (data/db_backups/leviathan.db.bak_audit_20260801_213801) before any ALTER/UPDATE. 8 new/updated tests across test_logger.py and test_scorer.py, full suite green (2064 passed).",
+      "notes": "Backfilled 2026-08-17 from git history (commit 61507d243) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "down-ballot-election-recalibration",
+      "title": "Down Ballot Election Recalibration",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "\"down-ballot election\" (n=43, gap +0.287, predicted 52% vs actual 23.3%) was a mixed population, not a single miscalibration. Grouping the 43 real settled-market matches by event_ticker: 23/43 (53%) trace to KXGOVCA-26 (\"Who will win the governorship in California?\", 23 named candidates, 0 YES -- the same many-way-field shape as sports-award/win-catchall), the remaining 20 spread across 10 structurally different 2-candidate general-election-race tickers (KXHOUSERACE-CA*, HOUSECA40-26: \"Will Republican/Democrat win the House race for CA-37?\"), each a genuine fair head-to-head between exactly 2 named parties. Split via the distinct \"governorship\" noun form (vs \"governor\", used in the genuine 2-way titles) intercepting before the existing rule, rate set to 0.04 matching first-named-storm/sports-award precedent. The 2-way sub-population needed no change -- its measured 50% already matched the original 0.52 closely, confirming it was never actually miscalibrated; only the many-way field was dragging the combined gap. Full-corpus diff: exactly 23 titles changed, zero regressions elsewhere. 2 new tests, full suite green (2089 passed). Backtest after: label's own gap +0.287 -> +0.040 (many-way) / +0.020 (2-way); overall heuristic-table Brier 0.0824 -> 0.0795, directional accuracy 89.0% -> 90.1%.",
+      "notes": "Backfilled 2026-08-17 from git history (commit f33f9f7bf) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "export-validation-pass-exclusion",
+      "title": "Export Validation Pass Exclusion",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "core.export_to_csv._print_validation's Resolved/Wins/Losses/Win-Rate counts included PASS-direction rows, which resolve_outcomes() always grades LOSS by construction (direction == outcome can never be true for direction='PASS') -- silently dragging down the printed win-rate/PnL summary. Excluded PASS rows to match the direction != 'PASS' convention every core.logger.get_stats* function already uses.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "ext-signal-activation",
+      "title": "Ext Signal Activation",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Investigated: ext_estimate/ext_edge/ext_n_signals/ext_alpha are 100% blank not due to a bug but because their >=2-agreeing-signals trigger has never once been met -- reconstructed _count_agreeing_signals against all 27 historical YES/NO paper signals: 15 at n=0, 12 at n=1, zero at n>=2. No code change made: loosening the threshold to fire on a single weak corroborating signal would apply the Satop\u00e4\u00e4 et al. extremizing transform outside its statistical justification (it corrects for info-dilution when averaging multiple independent forecasts -- there's no \"averaging\" with only one). The real lever is signal richness elsewhere (whale-detection recall, watchlist coverage), not this threshold -- closing as understood, not a plumbing fix.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "graphify-skill-evaluation",
+      "title": "Graphify Skill Evaluation",
+      "area": "infra",
+      "priority": 6,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "project shape changing to include a heterogeneous, non-code corpus (research papers, notes, screenshots) alongside the code, the way its own worked examples show real benefit. Evaluated 2026-08-02: Graphify-Labs/graphify (formerly safishamsi/graphify), a Claude Code `/graphify` skill that parses a folder into a local, queryable knowledge graph (tree-sitter AST + NetworkX/Leiden, runs entirely locally, no phone-home found). Legitimate on every technical signal checked -- PyPI package (`graphifyy`) matches the GitHub repo exactly, real multi-contributor history, CI configured, worked examples with committed input+output for independent verification, no typosquat risk. One residual, unresolved concern: 100k+ stars / 9.7k forks on a 4-month-old repo is an unusually fast growth rate that can't be confirmed organic from available signals. Not installed -- its own worked examples show the claimed \"71.5x fewer tokens\" benefit was on a heterogeneous 52-file corpus (code+papers+images), while its httpx example (single-language, single-repo, structurally the closest match to Leviathan) showed ~1x, i.e. no real benefit at Leviathan's current shape. Install footprint is also global (`~/.claude/CLAUDE.md`, `~/.claude/skills/`), not scoped to this project.",
+      "notes": "Backfilled 2026-08-17 from git history (commit 1a683a236) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "heuristic-backtest-tool",
+      "title": "Heuristic Backtest Tool",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "New analysis/heuristic_backtest.py: free (no LLM/API cost) calibration study of core.scanner's title-keyword heuristic table against the settled_markets corpus (12,600 real Kalshi resolutions) -- distinct from the metered replay-runner pipeline (still Blocked), since this only needs title+result, both already fetched. Reports overall Brier vs a naive population-rate baseline, directional accuracy, and a per-heuristic-label breakdown; writes reports/heuristic_backtest.md. 12 new tests. Immediately surfaced two real, statistically solid findings -- see win-catchall-recalibration and heuristic_label-vs-base_rate-desync below.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "heuristic_label-vs-base_rate-desync",
+      "title": "Heuristic Label Vs Base Rate Desync",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "core.scanner.estimate_base_rate() and get_heuristic_label() were two independently-ordered pattern lists (195 vs 479 entries) that had drifted apart. Replaced both with a single shared module-level table, _HEURISTIC_RULES: list[tuple[keywords, rate, label]], that both functions now iterate identically -- structurally impossible to re-desync going forward, not just a one-time re-sync. Built via AST-extraction of the original two lists (not manual retyping, to avoid transcription error at this scale), cross-referenced programmatically, and validated against the full 12,600-row settled_markets corpus before touching source: 0 rate regressions for any title that already had a rate, 632 previously-unlabeled matches now correctly labeled (matches the audit's own count exactly). Caught and excluded one bad orphan keyword ('spacex', bare substring) that would have mislabeled 43 IPO/sector-assignment titles as \"SpaceX launch\" -- confirmed via the same full-corpus diff before it shipped. Also caught and fixed one test (test_scanner.py) that had encoded the desync bug as an expected value, disagreeing with a separate existing test of the same title's base_rate. File went from ~2200 to 783 lines. Full suite green (2053 passed). Splitting the \"?\" bucket this fix eliminates surfaced a new finding -- see show-renewal-recalibration.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "hurricane-recalibration",
+      "title": "Hurricane Recalibration",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Investigated: unlike the three prior ladder/many-way fixes, \"hurricane\" (n=29, gap +0.416, predicted 45% vs actual 3.4%) was a genuine MIXED bag of two structurally distinct sub-patterns, confirmed by grouping all 29 real matches by event_ticker -- no overlap between them. (1) Category ladder: \"Will [Storm] become a Category N hurricane?\", all 5 matches on one ticker (KXHURCAT-26BERTHA), 0/5 YES -- same ladder artifact as price-threshold/production-delivery-milestone (many rungs for one storm's peak intensity resolve together). Unlike those two, the bare word \"hurricane\" still appears in these titles, so simple keyword removal doesn't exclude them from the generic rule -- they had to be intercepted with their own explicit rule (rate 0.05, since 0/5 is too small a sample to justify literal 0.0) placed before the generic rule, not just removed from the table. (2) First named storm: \"Will [Name] be the first named hurricane in [Basin] in [Year]?\", all 24 matches on one ticker (KXFIRSTHURRICANE-26DEC01EPAC), 1/24 YES -- a many-way field over NOAA's published annual naming list, same pattern as win-catchall/competition-award-ranking; rate set to the measured 0.04. After the split, the generic \"hurricane\" rule (0.45) no longer matches any real settled-market title in the corpus -- both sub-patterns fully accounted for the 29 original matches. Verified via full-corpus diff (old vs new label/rate for all 12,600 settled_markets titles): exactly the 5 BERTHA titles changed (0.45/\"hurricane\" -> 0.05/\"hurricane category ladder\"), zero unintended regressions elsewhere. 3 new tests (category ladder, first-named-storm, and a sanity check that a genuine non-ladder/non-many-way hurricane title still gets the generic 0.45 rate), full suite green. Backtest after: Brier 0.0861 -> 0.0837, directional accuracy holds at 89.0%; both new labels calibrate tightly (first named storm: 4.0% predicted vs 4.2% actual; hurricane category ladder: 5.0% vs 0.0%, n=5). Fourth and final item in the ladder/many-way-field recalibration arc (win-catchall, show-renewal, price-threshold/production-delivery-milestone, hurricane) -- no further Ready items remain as of this pass.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "log-pass-schema-parity",
+      "title": "Log Pass Schema Parity",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "core.logger.log_pass()'s INSERT never included event_ticker, series_ticker, watchlist_signal, sig_edge, sig_drift, sig_br_none, net_edge_after_fee or ev_after_fee_per_contract in its column list -- present in log_signal()'s INSERT since 2026-07-23 (kalshi-event-ticker-capture) but never backported to log_pass(). Every PASS-direction row (222 of 249 paper signals ever logged, 89%) silently got the SQL schema default ('') for all 8 columns regardless of what was on the signal dict -- this, not a failure of kalshi-event-ticker-capture, is why series_ticker/event_ticker looked ~98% blank in a 2026-08-01 audit. Confirmed via live API pull (0/400 events blank at the source) and per-direction DB breakdown (0/3 YES rows blank vs 91/92 PASS rows blank) before patching. Fixed; verified against a throwaway DB copy; full suite green (2036 passed).",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "near-dated-markets-supplement",
+      "title": "Near Dated Markets Supplement",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "fetch_events()'s events-catalog path (main.py's and analysis/snapshot_markets.py's primary market fetch) structurally never surfaces near-dated markets -- confirmed empirically 2026-08-01: 0 of 2722 events-catalog markets closed within 30 days, and /events' max_close_ts param has no effect (still returns century-scale novelty markets). Added core.kalshi.fetch_near_dated_markets() (direct /markets?max_close_ts=... query, KXMVE-flood-excluded, event-detail-backfilled for series_ticker/category) and wired it into both fetch paths. Live-verified: snapshot 2722->2758 markets (+36 near-dated), resolve_first.py's near-dated selector went from 0 candidates in its whole history to 25 found / 4 real picks in one run. 13 new tests, full suite green. Directly serves the \"more data resolving faster\" goal -- this is what feeds resolve_first.py's mechanism, previously starved.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "near-dated-window-chunking",
+      "title": "Near Dated Window Chunking",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Investigated why resolve_first.py (near-dated-markets-supplement's mechanism for finding short-term bets) had logged just 1 row since being built on 2026-08-01, despite its daily scheduled task reporting success every run. Root cause: core.kalshi.fetch_near_dated_markets() queried the whole 0-14 day window in a single max_close_ts request, and the KXMVE parlay-flood's density is wildly uneven across that window, not evenly ~98% throughout as originally assumed -- live-sampled day-by-day: ~0% flood at 8-9 days out (1 flood / 199 real) vs ~99.5% at 10-14 days out (198-199 flood / 1-2 real per 200-result page, not exhausted even at 200 pages / 40k markets sampled in that one bucket). The flat query got stuck consuming its whole page budget on flood-heavy days before ever reaching flood-light ones, returning 1 real market total even at 200 pages. Fixed by querying in 1-day min_close_ts/max_close_ts sub-windows instead of one flat window, each with its own small per-day page cap (5) so one flood-saturated day can't consume the shared max_pages budget -- max_pages' external contract (hard cap on total HTTP calls) is unchanged, so both call sites (main.py, analysis/snapshot_markets.py) needed no changes. Live-verified: found candidates went from 1 to 200 (target hit) in 2.6s at the default 14-day window. End-to-end verified beyond the unit level: regenerated a real snapshot (near-dated supplement +200 markets, vs +0-1 before) and ran resolve_first.py against it -- logged 4 new short-term signals, all closing same-day (short_horizon=True, time_horizon=INTRADAY). 2 existing tests updated for the new chunking semantics (both documented why), 2 new tests added covering the actual new behavior (a flood-saturated early day doesn't starve a later day; each chunk bounds both window ends). Full suite green (2059 passed).",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "price-threshold-recalibration",
+      "title": "Price Threshold Recalibration",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Investigated: core.scanner's \"price threshold\" heuristic (bare 'reach $'/'hits $'/'above $'/'below $'/'under $' etc., rate 0.35) predicted 35% but real rate was 82-100% -- but NOT because 0.35 was simply the wrong number. Traced real matches via event_ticker grouping: dominated by Kalshi MAX/MIN \"range\" ladder series (KXWTIMAX, KXH100MAX, KXA100MAX, KXRTX5090MAX, etc.) where many threshold rungs for the same underlying asset/date resolve YES together, since the question is \"did the running max/min ever touch this level,\" not a standalone one-off price call (e.g. one ladder: 18/18 rungs all YES). Raising the flat rate to match this corpus would encode that structural artifact as a general truth -- a standalone \"will Bitcoin exceed $200k\" question is not 82% likely just because it mentions a threshold. Removed the heuristic entirely instead of mis-setting a number -- 151 formerly-matched titles now correctly get no heuristic base_rate (Claude scores them directly); 4 crypto-specific titles fall through cleanly to the existing \"crypto price level\" pattern (0.5, a genuinely neutral prior). 2 tests updated (both had encoded the old, wrong rate as expected), full suite green (2054 passed). Backtest after: Brier 0.1085 -> 0.0902, directional accuracy 83.0% -> 87.8%. This is a materially different kind of fix than win-catchall/show-renewal (removal, not re-tuning) -- flagged as a pattern worth checking for on any future \"flat rate applied to a ladder-structured market family\" finding.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "production-delivery-milestone-recalibration",
+      "title": "Production Delivery Milestone Recalibration",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Investigated: same root cause as price-threshold-recalibration, applied immediately after finding it. All 39 matched settled markets traced (via event_ticker grouping) to exactly 2 tickers -- KXTSLA-26JULDELIV and KXBA-26JULDELIV, delivery-count ladders (\"Will Tesla report above 505000 total deliveries in Q2 2026?\" repeated across many threshold rungs). 100% ladder-driven, no mixed population, unlike the sports-vs-award mix show-renewal had. Removed the rule entirely rather than mis-set a flat number, same reasoning as price-threshold-recalibration. 2 tests updated, full suite green (2054 passed). Backtest after: Brier 0.0902 -> 0.0861, directional accuracy 87.8% -> 89.0%.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "prop-market-skill-filter",
+      "title": "Prop Market Skill Filter",
+      "area": "data-quality",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Added prop_market_exclude_prefixes config (mirrors near_dated_exclude_prefixes/KXMVE) and a ticker-prefix check in core.scanner.filter_markets(), applied before every other filter. Default excludes KXMLBMENTION (\"what will the announcers say\" -- no real predictive skill ceiling) -- the one category with concrete zero-skill-ceiling evidence from the 2026-08-01 near-dated audit; left conservative rather than guessing at other categories. 4 new tests, full scanner suite green (636 passed).",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "show-renewal-recalibration",
+      "title": "Show Renewal Recalibration",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Investigated: the \"show renewal\" heuristic (bare 'season 2'..'season 9'/'movie'/'film' keywords, rate 0.25) wasn't about renewal at all -- sampled real matches and every one was a many-way reality-competition or award-nominee question (\"Will X win Top Chef Season 23?\", \"Will X win Movie/Limited Actor at the Emmys?\"), the identical failure mode to win-catchall-recalibration just without the literal word \"win\" (e.g. \"finish 3rd place\"). Considered splitting the group so titles fall through to the now-fixed \" win \" catch-all, but 360 of 637 matches don't contain \"win\" at all and would lose heuristic coverage entirely -- lowered the flat rate to the measured value (0.02) instead, same fix pattern as the win catch-all, and relabeled to \"competition/award ranking\" for honesty. Re-ran the backtest: label's own calibration gap +0.233 -> +0.003 (Brier 0.0711 -> 0.0170), overall heuristic-table Brier improved further, 0.1232 -> 0.1085 (delta vs naive baseline -0.0553 -> -0.0701). 1 new test, full suite green (2054 passed). Next-worst remaining gap now flagged as price-threshold-recalibration.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "sports-award-recalibration",
+      "title": "Sports Award Recalibration",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Drafted autonomously by the first live run of the new investigate-and-draft weekly audit (Leviathan-WeeklyAudit, 2026-08-02), then independently re-verified by hand before commit (full-corpus diff re-run, test suite re-run, calibration numbers re-checked from scratch -- all matched the drafted report exactly). \"sports award\" (mvp/cy young/rookie of the year/heisman/hall of fame/all-star/golden glove/best player, rate 0.20, n=107, gap +0.163) was a many-way field like win-catchall/show-renewal/first-named-storm: all 107 real settled-market matches trace to exactly 4 event_tickers (KXMLBASGMVP-26, KXWNBACCUPMVP-26, KXWCAWARD-26GGLOVE, KXNBASUMMERMVP-2026), each one award with ~21-36 named-nominee markets and exactly 1 YES per ticker -- 4/107 YES overall (3.7%). Re-tuned 0.20 -> 0.04. Confirmed via full-corpus diff that exactly the 107 matched titles changed and nothing else. 1 new test, 3 existing hardcoded-rate assertions updated, full suite green (2065 passed). Backtest after: label's own gap +0.163 -> +0.003 (Brier 0.0624 -> 0.0360), overall heuristic-table Brier 0.0837 -> 0.0824. The same run also investigated `down-ballot election` (n=43, gap +0.287) and correctly declined to draft a fix -- only 53% of matches share one root cause (KXGOVCA-26), the rest split thin across 10 structurally different small-race tickers -- flagged as a Ready item instead of guessing at a split.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d186447ba) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "subscriber-report-rework-2026-08",
+      "title": "Subscriber Report Rework 2026 08",
+      "area": "reporting",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Compared the live subscriber_preview.html output against the user's reference design (Downloads folder) -- the CSS/template hadn't drifted (GOAL_subscriber_report.md Phases 1-5 all render correctly), but two real content gaps stood out. (1) whale_detected/whale_direction/whale_max_trade_size/smart_money_count/smart_money_dir are all computed on every signal in main.py but `_rank_top_picks` never carried them into the subscriber pick view model at all -- same class of gap as main.py's own heuristic_label omission (db-audit-2026-08). Watch items bypass `_rank_top_picks` (raw signal dicts), so only the rendering needed to change there. Added `_subscriber_corroboration_note()`: a \"Smart money\" pill + plain-English note on picks AND watch items when a whale trade or tracked smart-money wallet is active, framed as agreement vs. conflict against the pick's own direction (the actually useful signal) -- deliberately does not quote a dollar position size, since whale_max_trade_size is a contract count relative to that market's own average trade size, not a reliable dollar figure. Live-verified against the real DB: 2 of 3 current watch items have real whale corroboration, rendering correctly end to end. (2) \"Why flagged\" was keyed only on flag_path, giving every HEURISTIC-flagged pick the same generic sentence regardless of which heuristic matched -- made it reference heuristic_label for a specific sentence when known (`_subscriber_why_flagged()`), falling back to the original generic text otherwise. Also fixed the reasoning-missing fallback copy, which read \"Full written analysis renders here once reasoning is persisted per signal\" -- an internal implementation note leaking into subscriber-facing text. 14 new tests, HTML well-formedness verified on both a synthetic preview and the real live-generated output, full suite green (2087 passed).",
+      "notes": "Backfilled 2026-08-17 from git history (commit 8f0d77512) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "subscriber-report-wiring",
+      "title": "Subscriber Report Wiring",
+      "area": "reporting",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Created Leviathan-SubscriberReport (daily 9am, matches the existing 4-task pattern) running scripts/render_subscriber_preview.py, output redirected to logs/subscriber_report.log. First test hung under Task Scheduler specifically (not a script bug -- confirmed the script itself completes in <5s both interactively and via a PowerShell background job); root-caused to severe system-wide CPU contention from a still-running Defender Full Scan, not the task itself. Retested after redirecting output: completes correctly (both HTML files render with fresh content), just slowly under current system load. config.report.base_url is still empty -- real external hosting remains a separate, later decision; this item is just \"generates automatically every day,\" which it now does.",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "win-catchall-recalibration",
+      "title": "Win Catchall Recalibration",
+      "area": "calibration",
+      "priority": 1,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "analysis/heuristic_backtest.py (2026-08-01, free/no-LLM-cost study against the 12,600-row settled_markets corpus) found core.scanner's generic `\" win \"` catch-all pattern (base_rate 0.52, the single highest-volume heuristic rule -- fires on 1,397 of 2,344 total heuristic-matched settled markets) badly miscalibrated: real YES rate among matching settled markets is 7.7%, not 52%. Dropped the flat rate to the measured value (0.08) per explicit direction -- did not attempt to split the pattern by detected entrant-count, since that wasn't what was asked. Re-ran the same backtest after the change: overall heuristic-table Brier improved 0.1834 -> 0.1232 (now clearly beats the 0.1786 naive population-rate baseline, was worse before), directional accuracy 56.2% -> 83.0%, competition-win label's own calibration gap +0.321 -> +0.075. 1 new test (test_scanner.py::test_generic_win_catchall_rate), full suite green (2053 passed).",
+      "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
     }
   ]
 }

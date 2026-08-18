@@ -42,8 +42,34 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_55_items(backlog_data):
+def test_parses_and_75_items(backlog_data):
     """
+    75, not 55: the monday.com sync Phase 0 discovery (2026-08-17,
+    docs/monday_sync_discovery.md) found the monday board -- seeded early
+    on from a version of BACKLOG.md that still carried rich hand-written
+    Done-entry prose directly -- had 20 items with no backlog.json
+    counterpart at all (ci-kalshi-auth-env-2026-08, db-audit-2026-08,
+    down-ballot-election-recalibration, export-validation-pass-exclusion,
+    ext-signal-activation, graphify-skill-evaluation, heuristic-backtest-tool,
+    heuristic_label-vs-base_rate-desync, hurricane-recalibration,
+    log-pass-schema-parity, near-dated-markets-supplement,
+    near-dated-window-chunking, price-threshold-recalibration,
+    production-delivery-milestone-recalibration, prop-market-skill-filter,
+    show-renewal-recalibration, sports-award-recalibration,
+    subscriber-report-rework-2026-08, subscriber-report-wiring,
+    win-catchall-recalibration) -- the same gap the 43->55 fix (below)
+    closed for 2 items, just 20 more of them, orphaned once
+    backlog/checker.py's generate_markdown() took over rendering BACKLOG.md
+    purely from backlog.json and stopped preserving any hand-written entry
+    that never had a matching json item. Backfilled from git history (each
+    item's original BACKLOG.md-addition commit, not the monday board's own
+    Detail column, which turned out to already be truncated to ~450 chars
+    at seed time) rather than fabricated -- every action/area/priority
+    value traces to a real commit, cross-checked against what the board
+    had independently captured at seed time (matched on all 20). Per Reed's
+    explicit decision on the monday-sync handoff (backfill now, not leave
+    unmanaged), gated per that doc's own Phase 0 sign-off requirement.
+
     55, not the original 43: kalshi-sdk-migration-implementation and
     kalshi-sdk-evaluation-2026-08 (2026-08-04) were both real, completed
     Done items that had only ever been hand-added to BACKLOG.md directly,
@@ -70,7 +96,7 @@ def test_parses_and_55_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 55
+    assert len(backlog_data["items"]) == 75
 
 
 def test_all_ids_unique(backlog_data):
