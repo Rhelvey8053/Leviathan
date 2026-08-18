@@ -859,3 +859,80 @@ def test_phase3_persists_log_item_id_to_config(tmp_backlog2, monkeypatch, tmp_pa
 
     saved = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert saved["monday"]["log_item_id"] == "log-99"
+
+
+# ─── Phase 4: _resolve_dry_run() ────────────────────────────────────────────
+
+def _args(dry_run=False, live=False):
+    ns = MagicMock()
+    ns.dry_run = dry_run
+    ns.live = live
+    return ns
+
+
+def test_resolve_dry_run_explicit_dry_run_flag():
+    assert ms._resolve_dry_run(_args(dry_run=True)) is True
+
+
+def test_resolve_dry_run_explicit_live_flag():
+    assert ms._resolve_dry_run(_args(live=True)) is False
+
+
+def test_resolve_dry_run_rejects_both_flags():
+    with pytest.raises(SystemExit, match="mutually exclusive"):
+        ms._resolve_dry_run(_args(dry_run=True, live=True))
+
+
+def test_resolve_dry_run_falls_back_to_config_dry_run_default_true(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"monday": {"dry_run_default": True}}), encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+    assert ms._resolve_dry_run(_args()) is True
+
+
+def test_resolve_dry_run_falls_back_to_config_dry_run_default_false(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"monday": {"dry_run_default": False}}), encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+    assert ms._resolve_dry_run(_args()) is False
+
+
+def test_resolve_dry_run_defaults_safe_when_config_missing(tmp_path, monkeypatch):
+    """No config.json at all -- must default to dry-run (safe), never live."""
+    monkeypatch.setattr(ms, "CONFIG_PATH", tmp_path / "does_not_exist.json")
+    assert ms._resolve_dry_run(_args()) is True
+
+
+def test_resolve_dry_run_defaults_safe_when_key_absent(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"monday": {}}), encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+    assert ms._resolve_dry_run(_args()) is True
+
+
+def test_resolve_dry_run_explicit_flags_override_config(tmp_path, monkeypatch):
+    """Even if config says dry_run_default=False, an explicit --dry-run
+    flag must still win."""
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"monday": {"dry_run_default": False}}), encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+    assert ms._resolve_dry_run(_args(dry_run=True)) is True
+
+
+# ─── Phase 4: _update_config_monday_section preserves dry_run_default ─────
+
+def test_update_config_monday_section_preserves_existing_dry_run_default(tmp_path, monkeypatch):
+    """Regression guard: an earlier version hardcoded dry_run_default=True
+    on every write, silently clobbering a value Reed had deliberately set
+    to False -- now that the script actually reads this field (Phase 4),
+    clobbering it would be a real behavior change no one asked for."""
+    monkeypatch.setenv("MONDAY_API_TOKEN", "tok")
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"monday": {"dry_run_default": False}}), encoding="utf-8")
+    monkeypatch.setattr(ms, "CONFIG_PATH", cfg_path)
+
+    schema = _phase2_schema()
+    ms._update_config_monday_section(999, schema, "text_bid", "date_cd")
+
+    saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert saved["monday"]["dry_run_default"] is False

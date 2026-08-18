@@ -340,7 +340,7 @@ def _update_config_monday_section(board_id: int, schema: dict, backlog_id_col: s
         "api_token_env": "MONDAY_API_TOKEN",
         "board_id": board_id,
         "workspace_id": cfg.get("monday", {}).get("workspace_id", 17049665),
-        "dry_run_default": True,
+        "dry_run_default": cfg.get("monday", {}).get("dry_run_default", True),
         "groups": {
             "ready": groups.get("ready"),
             "locked": groups.get("locked"),
@@ -770,6 +770,29 @@ def verify_phase2(board_id: int = DEFAULT_BOARD_ID) -> dict:
     return {"ok": ok, "mismatches": mismatches}
 
 
+def _resolve_dry_run(args: argparse.Namespace) -> bool:
+    """
+    --dry-run / --live are explicit overrides (mutually exclusive). With
+    neither given, falls back to config.json's monday.dry_run_default --
+    the handoff's own documented safety knob (section 5), previously
+    written but never actually read by this script. Defaults to True
+    (safe/dry-run) if config.json or the key is missing, so a bare
+    invocation from a clean prompt with no flags at all never
+    accidentally writes.
+    """
+    if args.dry_run and args.live:
+        raise SystemExit("--dry-run and --live are mutually exclusive")
+    if args.dry_run:
+        return True
+    if args.live:
+        return False
+    try:
+        cfg = load_local_config()
+    except FileNotFoundError:
+        return True
+    return bool(cfg.get("monday", {}).get("dry_run_default", True))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Leviathan <-> monday.com sync")
     parser.add_argument("--phase1", action="store_true", help="Run Phase 1: board schema prep")
@@ -778,20 +801,34 @@ def main() -> int:
                         help="Run Phase 2 sync + Phase 3 progress log (per-item updates, pinned summary)")
     parser.add_argument("--board-id", type=int, default=DEFAULT_BOARD_ID)
     parser.add_argument("--dry-run", action="store_true", help="Preview writes, write nothing")
+    parser.add_argument("--live", action="store_true",
+                        help="Force a live run, overriding config.json's monday.dry_run_default")
+    parser.add_argument("--once", action="store_true",
+                        help="No-op marker for the scheduled task -- this script always runs "
+                             "once per invocation and exits; accepted so a --once in the "
+                             "scheduler's command line doesn't need special-casing.")
     args = parser.parse_args()
+    dry_run = _resolve_dry_run(args)
 
     if args.phase1:
-        phase1_setup(board_id=args.board_id, dry_run=args.dry_run)
+        phase1_setup(board_id=args.board_id, dry_run=dry_run)
         return 0
 
-    if args.phase2 or args.phase3:
-        phase2_sync(board_id=args.board_id, dry_run=args.dry_run, post_progress=args.phase3)
-        if not args.dry_run:
+    if args.phase2:
+        phase2_sync(board_id=args.board_id, dry_run=dry_run, post_progress=False)
+        if not dry_run:
             verify_phase2(board_id=args.board_id)
         return 0
 
-    parser.print_help()
-    return 1
+    # Reached only when --phase1/--phase2 weren't given (both return above)
+    # -- covers --phase3 explicitly AND no --phaseN flag at all. This is
+    # the full steady-state sync (Phase 2 + Phase 3 together): what the
+    # scheduled task runs, and what a bare
+    # `python scripts/monday_sync.py --dry-run` is meant to preview.
+    phase2_sync(board_id=args.board_id, dry_run=dry_run, post_progress=True)
+    if not dry_run:
+        verify_phase2(board_id=args.board_id)
+    return 0
 
 
 if __name__ == "__main__":
