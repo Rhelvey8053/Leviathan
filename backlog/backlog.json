@@ -6,7 +6,8 @@
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
     "resolved_count_per_wallet_max": "max resolved across any qualified smart-money wallet",
     "fills_count": "count of real_fill rows",
-    "api_spend_authorized": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent, so any trigger condition on it can only be satisfied by a human deliberately editing backlog.json again. Used to gate items that require real metered Anthropic API spend the user has not currently authorized (see replay-instrument-validation), so `python -m backlog.checker` can never auto-unlock them on a passing pipeline metric."
+    "api_spend_authorized": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent, so any trigger condition on it can only be satisfied by a human deliberately editing backlog.json again. Used to gate items that require real metered Anthropic API spend the user has not currently authorized (see replay-instrument-validation), so `python -m backlog.checker` can never auto-unlock them on a passing pipeline metric.",
+    "graphify_corpus_shape_changed": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent. Documents graphify-skill-evaluation's real blocking condition (Leviathan's project shape changing to include a heterogeneous, non-code corpus -- research papers, notes, screenshots -- alongside the code) without inventing a fake depends_on for a non-item condition; only a human editing backlog.json again can clear it. Same sentinel pattern as api_spend_authorized, applied to a different gate."
   },
   "items": [
     {
@@ -1090,6 +1091,25 @@
       "depends_on": [],
       "action": "analysis/heuristic_backtest.py (2026-08-01, free/no-LLM-cost study against the 12,600-row settled_markets corpus) found core.scanner's generic `\" win \"` catch-all pattern (base_rate 0.52, the single highest-volume heuristic rule -- fires on 1,397 of 2,344 total heuristic-matched settled markets) badly miscalibrated: real YES rate among matching settled markets is 7.7%, not 52%. Dropped the flat rate to the measured value (0.08) per explicit direction -- did not attempt to split the pattern by detected entrant-count, since that wasn't what was asked. Re-ran the same backtest after the change: overall heuristic-table Brier improved 0.1834 -> 0.1232 (now clearly beats the 0.1786 naive population-rate baseline, was worse before), directional accuracy 56.2% -> 83.0%, competition-win label's own calibration gap +0.321 -> +0.075. 1 new test (test_scanner.py::test_generic_win_catchall_rate), full suite green (2053 passed).",
       "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
+    },
+    {
+      "id": "graphify-skill-evaluation",
+      "title": "Graphify Skill Evaluation",
+      "area": "infra",
+      "priority": 6,
+      "status": "blocked",
+      "trigger": {
+        "all": [
+          {
+            "metric": "graphify_corpus_shape_changed",
+            "op": ">=",
+            "value": 1
+          }
+        ]
+      },
+      "depends_on": [],
+      "action": "project shape changing to include a heterogeneous, non-code corpus (research papers, notes, screenshots) alongside the code, the way its own worked examples show real benefit. Evaluated 2026-08-02: Graphify-Labs/graphify (formerly safishamsi/graphify), a Claude Code `/graphify` skill that parses a folder into a local, queryable knowledge graph (tree-sitter AST + NetworkX/Leiden, runs entirely locally, no phone-home found). Legitimate on every technical signal checked -- PyPI package (`graphifyy`) matches the GitHub repo exactly, real multi-contributor history, CI configured, worked examples with committed input+output for independent verification, no typosquat risk. One residual, unresolved concern: 100k+ stars / 9.7k forks on a 4-month-old repo is an unusually fast growth rate that can't be confirmed organic from available signals. Not installed -- its own worked examples show the claimed \"71.5x fewer tokens\" benefit was on a heterogeneous 52-file corpus (code+papers+images), while its httpx example (single-language, single-repo, structurally the closest match to Leviathan) showed ~1x, i.e. no real benefit at Leviathan's current shape. Install footprint is also global (`~/.claude/CLAUDE.md`, `~/.claude/skills/`), not scoped to this project.",
+      "notes": "Restored 2026-08-19 after being dropped from backlog.json on 2026-08-17 (commit 4bcda44) specifically because the schema had no way to encode \"blocked on an external/subjective condition\" without an empty depends_on/trigger vacuously satisfying evaluate_triggers() and auto-promoting it to ready -- the exact bug just fixed for replay-instrument-validation this session via a permanent sentinel trigger metric. Applying the same pattern here (graphify_corpus_shape_changed) closes the gap that caused the original revert, so this is a fix, not a re-litigation of the original decision to drop it. Action text is the full, untruncated evaluation recovered from commit 1a683a236 -- the monday board's own copy has been truncated mid-sentence since it was first seeded (896 chars, cuts off at \"...show the cl...\"). New intelligence surfaced by Liam (PM Agent, monday.com) in the 2026-08-18 weekly report, for a human to weigh -- not resolved here: graphify now has 107K+ GitHub stars, YC S26 batch backing, 472+ contributors, an enterprise launch (2026-07-11), and an active release cadence (v0.8.47, 2026-06-24). Liam's assessment is that this substantially explains the previously-unresolved concern about unusually fast star growth on a young repo, and recommends revisiting the earlier \"not worth adopting yet\" call. Left as a human decision, not acted on here."
     }
   ]
 }

@@ -14,7 +14,7 @@ Last updated: 2026-08-18 | Metrics: resolved=13, fills=7
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (6)
+## Blocked (7)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
 | 3 | replay-instrument-validation | replay-runner, market-baseline-brier | validation |
@@ -23,6 +23,7 @@ Last updated: 2026-08-18 | Metrics: resolved=13, fills=7
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
+| 6 | graphify-skill-evaluation | - | infra |
 
 ## Done (63)
 | Priority | ID | Action | Area |

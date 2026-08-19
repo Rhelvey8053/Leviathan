@@ -42,8 +42,25 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_74_items(backlog_data):
+def test_parses_and_75_items(backlog_data):
     """
+    75, not 74: graphify-skill-evaluation re-added 2026-08-19, restoring the
+    item the 74-count paragraph below describes dropping on 2026-08-17. The
+    schema gap that caused that drop (no way to encode "blocked on an
+    external/subjective condition" without an empty depends_on/trigger
+    vacuously satisfying evaluate_triggers() and auto-promoting it to
+    ready) is now closed the same way it was closed for
+    replay-instrument-validation this session: a permanent sentinel
+    trigger metric (graphify_corpus_shape_changed) that
+    backlog.checker.compute_metrics() never populates, so the exact
+    auto-promotion bug that forced the original drop can't recur. This is
+    a fix to the schema gap, not a reversal of the original decision on
+    the item's merits -- action text is the full, untruncated evaluation
+    recovered from commit 1a683a236 (the monday board's own copy has been
+    truncated mid-sentence since it was first seeded), and status is
+    restored to "blocked", matching both the item's original Phase 0
+    backfill and its current, independently-unchanged board state.
+
     74, not 75: 19 of the 20 items backfilled during the monday.com sync
     Phase 0 discovery (2026-08-17, docs/monday_sync_discovery.md) stuck --
     graphify-skill-evaluation did not. It was backfilled with status
@@ -117,7 +134,7 @@ def test_parses_and_74_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 74
+    assert len(backlog_data["items"]) == 75
 
 
 def test_all_ids_unique(backlog_data):
