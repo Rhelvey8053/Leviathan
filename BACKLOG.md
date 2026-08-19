@@ -1,10 +1,9 @@
 # Leviathan Backlog
 Last updated: 2026-08-18 | Metrics: resolved=13, fills=7
 
-## Ready (1)
+## Ready (0)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price range; the resolved_count >= 10 smart-money wallet threshold is empirically defensible. | validation |
 
 ## Locked (5)
 | Priority | ID | Gate | Area |
@@ -15,9 +14,10 @@ Last updated: 2026-08-18 | Metrics: resolved=13, fills=7
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (5)
+## Blocked (6)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
+| 3 | replay-instrument-validation | replay-runner, market-baseline-brier | validation |
 | 4 | cross-venue-expansion | net-edge-fee-depth-model, replay-instrument-validation | data-quality |
 | 5 | methodology-writeup | replay-instrument-validation, preregistration | reporting |
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
