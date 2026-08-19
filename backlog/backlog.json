@@ -5,7 +5,8 @@
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
     "resolved_count_per_wallet_max": "max resolved across any qualified smart-money wallet",
-    "fills_count": "count of real_fill rows"
+    "fills_count": "count of real_fill rows",
+    "api_spend_authorized": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent, so any trigger condition on it can only be satisfied by a human deliberately editing backlog.json again. Used to gate items that require real metered Anthropic API spend the user has not currently authorized (see replay-instrument-validation), so `python -m backlog.checker` can never auto-unlock them on a passing pipeline metric."
   },
   "items": [
     {
