@@ -1244,7 +1244,17 @@ def main():
 
     print(f"\n=== Done in {time.time() - start_time:.1f}s | {len(final_signals)} signals | cost {_fmt_usd(cost)} ===\n")
     if sys.platform == "win32":
-        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+        # Task Scheduler's S4U logon runs this in a non-interactive session
+        # with no audio device -- PlaySound raises RuntimeError there (real
+        # 2026-08-18 incident: the scan/score/log/report work all completed
+        # successfully, but this unguarded call still crashed main() at the
+        # very last line, so Task Scheduler recorded the whole run as failed
+        # (LastTaskResult 0x8007042B) despite nothing upstream being broken.
+        # Purely a local "done" chime -- never worth failing a real run over.
+        try:
+            winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
