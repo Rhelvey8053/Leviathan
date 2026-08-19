@@ -800,13 +800,13 @@
       "title": "Citations Provenance Grounding",
       "area": "validation",
       "priority": 2,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
       "depends_on": [],
       "action": "Ground scorer output in the market's supplied sources via the Anthropic Citations API, so each rationale claim carries a machine-checkable cited-text span (document index + char offset) rather than free-text provenance. Verified 2026-08-17 that this is genuinely new: web search itself is already active on both backends (core/llm.py's web_search_20250305 tool on the API path, core/scorer.py's --allowedTools WebSearch on the CLI path), and rescore_single_market() already exists specifically to avoid batch-level source misattribution (GOAL_phase2-6_decisions.md Decision 1) -- but neither path ties a specific reasoning claim to a specific cited span; sources are captured as a loose per-call list, not structured per-claim citations. Additive to the scorer; must not change signal selection. Pairs with price-blind-arm as scoring-integrity work.",
-      "notes": ""
+      "notes": "SHIPPED 2026-08-18: core.llm.ground_citations_via_api adds a second, non-forced API call (web_fetch_20260318, native citations support) that re-fetches a scored pick's own already-surfaced sources and asks Claude to restate its reasoning grounded in specific cited passages -- each citation carries the fetched url, title, cited_text, and char offsets, not just a loose per-call source list. Deliberately kept as a SEPARATE call from rescore_single_market()'s forced record_scores call: the only documented citations incompatibility is with output_config.format (structured outputs), which this codebase does not use, but forced tool_choice still ends the turn on a single tool_use block with no room for the interleaved cited text citations require, and that cited prose has nowhere to live inside record_scores's structured reasoning string anyway. document_index correlation to the fetched url was the one open design question -- confirmed via live doc fetch that web_fetch_result carries the url directly, and that the Nth successful web_fetch_tool_result block in a response is document index N (failed fetches consume no index). Wired into main.py's already-dormant _rescore_shortlist_for_clean_sources (config.llm.backend equals api only, never the live CLI/Pro-subscription path), so this inherits the same off-by-default, zero-cost-on-live-runs property as the rest of that path -- additive only, never touches sources, reasoning, or signal selection, and a grounding failure is caught non-fatally without losing the pick's already-good sources. Persisted to a new signals.citations column (additive migration, JSON-encoded like the existing sources column). 13 new tests in tests/test_llm.py (TestExtractWebFetchCitations, TestGroundCitationsViaApi), fully mocked per this file's existing no-live-API-calls convention. Full suite: 2248 passed, 1 skipped, 13 subtests passed."
     },
     {
       "id": "net-edge-fee-depth-model",
@@ -899,7 +899,7 @@
         "all": []
       },
       "depends_on": [],
-      "action": "Investigated: ext_estimate/ext_edge/ext_n_signals/ext_alpha are 100% blank not due to a bug but because their >=2-agreeing-signals trigger has never once been met -- reconstructed _count_agreeing_signals against all 27 historical YES/NO paper signals: 15 at n=0, 12 at n=1, zero at n>=2. No code change made: loosening the threshold to fire on a single weak corroborating signal would apply the Satop\u00e4\u00e4 et al. extremizing transform outside its statistical justification (it corrects for info-dilution when averaging multiple independent forecasts -- there's no \"averaging\" with only one). The real lever is signal richness elsewhere (whale-detection recall, watchlist coverage), not this threshold -- closing as understood, not a plumbing fix.",
+      "action": "Investigated: ext_estimate/ext_edge/ext_n_signals/ext_alpha are 100% blank not due to a bug but because their >=2-agreeing-signals trigger has never once been met -- reconstructed _count_agreeing_signals against all 27 historical YES/NO paper signals: 15 at n=0, 12 at n=1, zero at n>=2. No code change made: loosening the threshold to fire on a single weak corroborating signal would apply the Satopää et al. extremizing transform outside its statistical justification (it corrects for info-dilution when averaging multiple independent forecasts -- there's no \"averaging\" with only one). The real lever is signal richness elsewhere (whale-detection recall, watchlist coverage), not this threshold -- closing as understood, not a plumbing fix.",
       "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
     },
     {
