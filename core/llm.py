@@ -695,3 +695,150 @@ def probe_via_api(
             ) from e
 
     raise RuntimeError(f"probe_via_api: failed after 3 attempts: {last_exc}")
+
+
+# ── Citations grounding (backlog: citations-provenance-grounding) ─────────────
+# web_fetch_20260318's native citations support (Anthropic docs, confirmed
+# live 2026-08) means fetched-page citations don't need a hand-built
+# document-block pipeline: the API fetches each URL server-side and returns
+# web_fetch_tool_result blocks alongside text blocks carrying a `citations`
+# array. The only documented citations incompatibility is with
+# output_config.format (structured outputs) -- this module's forced
+# tool_choice pattern (record_scores etc.) is a different mechanism the
+# citations docs never call incompatible, but citations grounding is still
+# kept as its own separate, non-forced call: forced tool_choice would end
+# the turn on a single tool_use block, leaving no room for the interleaved
+# cited text citations require, and that cited prose has nowhere to live
+# inside record_scores's structured `reasoning` string anyway.
+
+def _extract_web_fetch_citations(response: Any) -> list[dict]:
+    """
+    Collect cited passages from one response's text blocks into
+    [{"url","title","cited_text","start_char_index","end_char_index"}, ...].
+
+    A citation's document_index refers to the fetched documents in the
+    order Claude's web_fetch calls succeeded within THIS response -- the
+    web fetch tool docs' own response example shows document_index:0
+    lining up with the sole preceding web_fetch_tool_result block, and
+    citations.md defines document_index as 0-indexed across the document
+    content blocks present, so the Nth successful web_fetch_tool_result
+    block here IS document index N. A failed fetch (content.type ==
+    "web_fetch_tool_result_error") carries no document for Claude to cite,
+    so it's skipped rather than consuming an index.
+
+    Each web_fetch_result carries the fetched `url` directly (confirmed in
+    the web fetch tool docs' response example) -- no separate correlation
+    against request-supplied document blocks is needed, unlike citations on
+    caller-provided `document` content blocks.
+    """
+    fetched_docs: list[dict] = []
+    for block in response.content:
+        if getattr(block, "type", None) != "web_fetch_tool_result":
+            continue
+        result = getattr(block, "content", None)
+        if getattr(result, "type", None) != "web_fetch_result":
+            continue  # web_fetch_tool_result_error -- skip, don't raise
+        doc = getattr(result, "content", None)
+        fetched_docs.append({
+            "url":   getattr(result, "url", "") or "",
+            "title": getattr(doc, "title", "") or "",
+        })
+
+    citations: list[dict] = []
+    for block in response.content:
+        if getattr(block, "type", None) != "text":
+            continue
+        for cite in (getattr(block, "citations", None) or []):
+            idx = getattr(cite, "document_index", None)
+            source = fetched_docs[idx] if idx is not None and 0 <= idx < len(fetched_docs) else {}
+            citations.append({
+                "url":              source.get("url", ""),
+                "title":            source.get("title") or getattr(cite, "document_title", "") or "",
+                "cited_text":       getattr(cite, "cited_text", "") or "",
+                "start_char_index": getattr(cite, "start_char_index", None),
+                "end_char_index":   getattr(cite, "end_char_index", None),
+            })
+    return citations
+
+
+def ground_citations_via_api(market: dict, score: dict, config: dict) -> tuple[list[dict], dict]:
+    """
+    Re-fetch a scored pick's already-surfaced sources and have Claude
+    ground its reasoning in inline citations to specific fetched passages
+    (backlog: citations-provenance-grounding).
+
+    Only meant to be called from main.py's _rescore_shortlist_for_clean_
+    sources, after rescore_single_market() has already produced `score`
+    for the same market -- that path only runs when config.llm.backend ==
+    "api" (dormant on the live CLI-backed scan), so this inherits the same
+    off-by-default, zero-cost-on-live-runs property as the rest of it.
+    Additive: callers attach the result to a signal's own `citations` key,
+    never touching `sources` or `reasoning`.
+
+    Returns ([], {}) without an API call when `score` has no sources --
+    nothing to fetch or ground citations against.
+
+    Returns (citations, token_info): citations is
+    [{"url","title","cited_text","start_char_index","end_char_index"}, ...]
+    (empty if Claude's response carried none), token_info matches every
+    other function in this module's shape (goes through the same
+    _finalize_token_info / daily cost ceiling as score_via_api etc.).
+    """
+    sources = (score.get("sources") or [])[:MAX_SOURCES_PER_SIGNAL]
+    if not sources:
+        return [], {}
+
+    _check_cost_ceiling(config)
+
+    llm_cfg = config.get("llm", {})
+    model   = llm_cfg.get("model", "claude-sonnet-4-6")
+
+    source_lines = "\n".join(
+        f"- {s.get('title') or s.get('url', '')}: {s.get('url', '')}" for s in sources
+    )
+    user_prompt = (
+        f"You previously analyzed the Kalshi market \"{market.get('title') or market.get('ticker', '')}\" "
+        f"(ticker {market.get('ticker', '')}) and reached this conclusion:\n\n"
+        f"{score.get('reasoning', '')}\n\n"
+        f"Fetch each of the following sources and restate the reasoning above, grounding "
+        f"each claim in specific passages from the fetched pages:\n\n"
+        f"{source_lines}\n\n"
+        f"Keep the restated reasoning concise (a few sentences)."
+    )
+    system = (
+        "You are a research assistant verifying and citing the sources behind an "
+        "existing market analysis. Fetch every source URL provided and cite the "
+        "specific passages that support the analysis."
+    )
+    tools: list[dict] = [{
+        "type": "web_fetch_20260318",
+        "name": "web_fetch",
+        "citations": {"enabled": True},
+        "max_uses": len(sources),
+    }]
+    messages = [{"role": "user", "content": user_prompt}]
+    client   = _make_client()
+    last_exc: Exception | None = None
+
+    for attempt in range(3):
+        try:
+            response = client.messages.create(
+                model=model,
+                system=system,
+                messages=messages,
+                tools=tools,
+                max_tokens=2048,
+            )
+            citations = _extract_web_fetch_citations(response)
+            return citations, _finalize_token_info(response, model=model)
+
+        except (anthropic.APIError, anthropic.APITimeoutError) as e:
+            last_exc = e
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+                continue
+            raise RuntimeError(
+                f"ground_citations_via_api: API error after 3 attempts: {e}"
+            ) from e
+
+    raise RuntimeError(f"ground_citations_via_api: failed after 3 attempts: {last_exc}")

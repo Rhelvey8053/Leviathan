@@ -14,7 +14,10 @@ import re
 import subprocess
 import tempfile as _tempfile
 
-from .llm import _find_claude, _validate_scores, score_via_api as _score_via_api
+from .llm import (
+    _find_claude, _validate_scores, score_via_api as _score_via_api,
+    ground_citations_via_api as _ground_citations_via_api,
+)
 from .report import compute_leviathan_score
 
 SYSTEM_PROMPT = (
@@ -1303,4 +1306,14 @@ def rescore_single_market(
     if not scores:
         return None, token_info
     return scores[0], token_info
+
+
+def ground_citations(market: dict, score: dict, config: dict) -> tuple[list[dict], dict]:
+    """
+    Thin passthrough to core.llm.ground_citations_via_api (backlog:
+    citations-provenance-grounding) -- kept here rather than called
+    directly from main.py so callers only ever reach core.llm through
+    scorer.py, matching rescore_single_market's own layering.
+    """
+    return _ground_citations_via_api(market, score, config)
 

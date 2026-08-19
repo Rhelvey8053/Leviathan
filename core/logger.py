@@ -225,6 +225,16 @@ def _init_db() -> None:
             "ob_ask_depth          REAL",
             "liquidity_checked     INTEGER DEFAULT 0",
             "liquidity_thin        INTEGER DEFAULT 0",
+            # backlog: citations-provenance-grounding. core.llm.ground_
+            # citations_via_api's structured [{"url","title","cited_text",
+            # "start_char_index","end_char_index"}, ...] output, JSON-
+            # encoded like the existing `sources` column above -- readers
+            # must go through the same json.loads-or-[] pattern, never
+            # assume it's already a list. NULL for every row logged before
+            # this existed, and for any row whose shortlist re-score wasn't
+            # reached or found no citations (see _rescore_shortlist_for_
+            # clean_sources's non-fatal try/except in main.py).
+            "citations             TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -356,9 +366,9 @@ def log_signal(signal: dict) -> None:
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
-                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin)
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -420,6 +430,7 @@ def log_signal(signal: dict) -> None:
                 _to_float(signal.get("ob_ask_depth")),
                 1 if signal.get("liquidity_checked") else 0,
                 1 if signal.get("liquidity_thin") else 0,
+                json.dumps(signal.get("citations") or []),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -449,9 +460,9 @@ def log_pass(signal: dict) -> None:
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
-                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin)
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -519,6 +530,7 @@ def log_pass(signal: dict) -> None:
                 _to_float(signal.get("ob_ask_depth")),
                 1 if signal.get("liquidity_checked") else 0,
                 1 if signal.get("liquidity_thin") else 0,
+                json.dumps(signal.get("citations") or []),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")

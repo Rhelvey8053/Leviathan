@@ -125,6 +125,14 @@ def _rescore_shortlist_for_clean_sources(
     "cost_usd": float}. A market re-score that comes back empty leaves that
     pick's existing batch-scored `sources` untouched rather than losing the
     pick outright.
+
+    Also mutates each successfully re-scored signal's `citations` key
+    (backlog: citations-provenance-grounding) via a second, non-forced API
+    call that re-fetches the pick's own sources and asks Claude to ground
+    its reasoning in specific cited passages -- see scorer.ground_citations.
+    A citations-grounding failure is non-fatal and independent of the
+    `sources` re-score above: it never removes or downgrades `sources`,
+    it just leaves `citations` unset on that signal.
     """
     shortlist = report.determine_subscriber_shortlist(final_signals, config)
     markets_by_ticker = {m.get("ticker", ""): m for m in flagged_markets}
@@ -144,6 +152,19 @@ def _rescore_shortlist_for_clean_sources(
         if fresh_score:
             sig["sources"] = fresh_score.get("sources") or []
             rescored_count += 1
+            # backlog: citations-provenance-grounding. A second, non-forced
+            # API call re-fetches this pick's own sources and asks Claude to
+            # ground its reasoning in specific cited passages -- additive,
+            # never touches sources/reasoning, and failure here must not
+            # cost the pick its already-good sources from the block above.
+            try:
+                citations, cite_info = scorer.ground_citations(market, fresh_score, config)
+                sig["citations"] = citations
+                cost_usd += cite_info.get("cost_usd", 0) or 0
+                tokens   += (cite_info.get("input_tokens", 0) or 0) + \
+                            (cite_info.get("output_tokens", 0) or 0)
+            except Exception as e:
+                print(f"      Citations grounding FAILED for {sig.get('ticker', '?')} (non-fatal): {e}")
 
     return {
         "shortlist_size": len(shortlist),
