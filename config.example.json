@@ -94,7 +94,9 @@
     "max_pass_before_suppress": 5,
     "resolve_first_max_days": 14,
     "resolve_first_dedup_days": 7,
-    "multi_sample_n": 1
+    "multi_sample_n": 1,
+    "repeat_dedup_days": 30,
+    "_repeat_dedup_notes": "How long a ticker stays suppressed as a repeat (main.py's is_repeat tagging, core.logger.get_recent_tickers) before a fresh flag logs as a brand-new signal row. Widened 7 -> 30 (2026-08-20) after finding a genuine same-market direction flip (KXMLBDEBUT-KANDERSON-26NOV01: NO on 2026-06-29, YES on 2026-07-06, 8 days apart -- just outside the old 7-day window) that will resolve as one win and one loss for the same underlying event by construction, and a separate ticker with 3 resolved rows all agreeing -- both inflate resolved_count (every locked backlog item's gate) with non-independent samples. 30 days doesn't eliminate re-flagging on long-dated markets, just meaningfully reduces near-term whipsaws like the 8-day case. Distinct from resolve_first_dedup_days, an unrelated analysis/resolve_first.py setting."
   },
   "accounts": {
     "enabled": true,

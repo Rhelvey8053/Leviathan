@@ -183,13 +183,18 @@ def test_html_row_with_mocked_resolver_gets_href():
     assert 'href="https://kalshi.com/markets/KXLINKED2/KXLINKED-02-EVT"' in html_body
 
 
-def test_html_row_with_empty_event_ticker_has_no_href():
+def test_html_row_with_empty_event_ticker_has_no_href(tmp_path):
     """A row missing event_ticker (series_ticker present or not) shows the
     bare ticker with NO href anywhere for it."""
     s = _sig(ticker="KXBARE-01", series_ticker="KXBARE", event_ticker="")
+    # db_path pointed at a not-yet-existing file: render_html's betting-queue
+    # section (_betting_queue_data) otherwise falls back to core.logger's
+    # real DB_PATH, which can legitimately contain unrelated real signals
+    # with valid hrefs (e.g. after a live pipeline run) and make this
+    # single-signal assertion depend on the local machine's live data.
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
                                    new_signals=[s], repeat_signals=[],
-                                   now_utc=_FIXED_NOW)
+                                   db_path=str(tmp_path / "empty.db"), now_utc=_FIXED_NOW)
     assert "KXBARE-01" in html_body
     assert 'href=""' not in html_body
     # event_ticker missing -> kalshi_market_url (real, unmocked) returns
@@ -197,13 +202,13 @@ def test_html_row_with_empty_event_ticker_has_no_href():
     assert "<a href" not in html_body
 
 
-def test_html_row_with_empty_series_ticker_has_no_href():
+def test_html_row_with_empty_series_ticker_has_no_href(tmp_path):
     """A row missing series_ticker (the field a pre-upgrade row would lack)
     shows the bare ticker with NO href, even with a valid event_ticker."""
     s = _sig(ticker="KXNOSERIES-01", series_ticker="", event_ticker="KXNOSERIES-01-EVT")
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
                                    new_signals=[s], repeat_signals=[],
-                                   now_utc=_FIXED_NOW)
+                                   db_path=str(tmp_path / "empty.db"), now_utc=_FIXED_NOW)
     assert "KXNOSERIES-01" in html_body
     assert 'href=""' not in html_body
     assert "<a href" not in html_body

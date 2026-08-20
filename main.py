@@ -1048,8 +1048,17 @@ def main():
 
     run_meta["signals_generated"] = len(final_signals)
 
-    # Tag signals as new or repeat (seen in past 7 days); annotate repeat count
-    recent_tickers = logger.get_recent_tickers(days=7)
+    # Tag signals as new or repeat (seen within the repeat-dedup window);
+    # annotate repeat count. Widened 7 -> config-driven (default 30) days
+    # 2026-08-20 -- a 7-day window let the same still-open market re-flag
+    # with a genuinely different direction just outside the window
+    # (KXMLBDEBUT-KANDERSON-26NOV01: NO then YES, 8 days apart), which
+    # logs as two independent rows that will resolve as one win and one
+    # loss for the same real-world event by construction -- inflating
+    # resolved_count (every locked backlog item's gate) with non-
+    # independent samples. See config.example.json's repeat_dedup_days note.
+    repeat_dedup_days = int(config.get("scoring", {}).get("repeat_dedup_days", 30))
+    recent_tickers = logger.get_recent_tickers(days=repeat_dedup_days)
     for sig in final_signals:
         ticker = sig.get("ticker", "")
         sig["is_repeat"] = ticker in recent_tickers
