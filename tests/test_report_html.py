@@ -356,14 +356,16 @@ class TestEditorialDesignSource:
 
     def test_editorial_root_css_byte_stable_output(self):
         """
-        Locks the exact string _SUBSCRIBER_TEMPLATE's .format() call
-        embeds -- this is what made Phase 1's extraction byte-identical to
-        the pre-extraction hardcoded :root block. If this test needs to
-        change, the subscriber template's rendered HTML changed too.
+        Locks the exact string every editorial template's .format() call
+        embeds -- a regression guard against ACCIDENTAL drift, not a freeze
+        on the design. Deliberate design changes (like ink-faint's
+        2026-08-20 contrast fix, #949AA5 -> #646B77) update this test
+        intentionally; an unexpected diff here means something changed the
+        shared tokens without meaning to.
         """
         expected = (
             ":root{\n"
-            "    --paper:#FBFAF7; --ink:#15181E; --ink-soft:#525A67; --ink-faint:#949AA5;\n"
+            "    --paper:#FBFAF7; --ink:#15181E; --ink-soft:#525A67; --ink-faint:#646B77;\n"
             "    --line:#E7E4DC; --line-soft:#EFEDE7; --slate:#1C2A3A;\n"
             "    --edge:#0B6E52; --edge-soft:#E7F0EB; --amber:#9A5A12; --amber-soft:#F4ECDE;\n"
             "    --whale:#2F4C8C; --whale-soft:#E8ECF5;\n"

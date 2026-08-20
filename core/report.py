@@ -1363,7 +1363,13 @@ def _render_upcoming_resolution(u: dict) -> str:
 # choices (a 3-pick digest vs. a full tabular log), not drift to fix.
 
 _EDITORIAL_TOKENS: dict[str, str] = {
-    "paper": "#FBFAF7", "ink": "#15181E", "ink-soft": "#525A67", "ink-faint": "#949AA5",
+    # ink-faint darkened 2026-08-20 from #949AA5 (2.71:1 contrast against
+    # --paper, well under WCAG AA's 4.5:1 minimum for normal text) to
+    # #646B77 (5.14:1) -- this token drives every eyebrow, digest label,
+    # rank, resolves-date, and footnote across all three editorial
+    # templates, so the old value made most of the page's secondary text
+    # objectively hard to read, not just subjectively "light."
+    "paper": "#FBFAF7", "ink": "#15181E", "ink-soft": "#525A67", "ink-faint": "#646B77",
     "line": "#E7E4DC", "line-soft": "#EFEDE7", "slate": "#1C2A3A",
     "edge": "#0B6E52", "edge-soft": "#E7F0EB",
     "amber": "#9A5A12", "amber-soft": "#F4ECDE",
@@ -1445,7 +1451,7 @@ _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
     font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;}}
   a{{color:inherit;}}
   .wrap{{max-width:640px; margin:0 auto; padding:0 28px;}}
-  .masthead{{border-top:2px solid var(--ink); padding-top:14px; margin-top:40px;
+  .masthead{{border-top:2px solid var(--ink); padding-top:14px; margin-top:var(--sp-3);
     display:flex; align-items:baseline; justify-content:space-between;}}
   .wordmark{{font-family:var(--mono); font-size:12px; font-weight:600; letter-spacing:4px; text-transform:uppercase;}}
   .issue{{font-family:var(--mono); font-size:11px; letter-spacing:.5px; color:var(--ink-faint);}}
@@ -1453,7 +1459,7 @@ _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
   .lede h1{{font-family:var(--serif); font-weight:500; font-size:34px; line-height:1.12; letter-spacing:-.5px; margin:0;}}
   .lede h1 em{{font-style:italic; color:var(--ink-soft);}}
   .lede .sub{{font-size:14.5px; color:var(--ink-soft); margin-top:12px; max-width:46ch;}}
-  .digest{{display:flex; flex-wrap:wrap; gap:26px; padding:20px 0 6px; border-bottom:1px solid var(--line); margin-bottom:var(--sp-6);}}
+  .digest{{display:flex; flex-wrap:wrap; gap:var(--sp-3); padding:20px 0 6px; border-bottom:1px solid var(--line); margin-bottom:var(--sp-6);}}
   .digest .item .n{{font-family:var(--mono); font-size:19px; font-weight:600; letter-spacing:-.5px;}}
   .digest .item .l{{font-family:var(--mono); font-size:10px; letter-spacing:1.4px; text-transform:uppercase; color:var(--ink-faint); margin-top:3px;}}
   .eyebrow{{font-family:var(--mono); font-size:11px; letter-spacing:2.5px; text-transform:uppercase; color:var(--ink-faint); margin:0 0 var(--sp-3); display:flex; align-items:center; gap:12px;}}
@@ -3593,7 +3599,7 @@ _WEEKLY_SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
     font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;}}
   a{{color:inherit;}}
   .wrap{{max-width:640px; margin:0 auto; padding:0 28px;}}
-  .masthead{{border-top:2px solid var(--ink); padding-top:14px; margin-top:40px;
+  .masthead{{border-top:2px solid var(--ink); padding-top:14px; margin-top:var(--sp-3);
     display:flex; align-items:baseline; justify-content:space-between;}}
   .wordmark{{font-family:var(--mono); font-size:12px; font-weight:600; letter-spacing:4px; text-transform:uppercase;}}
   .issue{{font-family:var(--mono); font-size:11px; letter-spacing:.5px; color:var(--ink-faint);}}
@@ -3601,7 +3607,7 @@ _WEEKLY_SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
   .lede h1{{font-family:var(--serif); font-weight:500; font-size:34px; line-height:1.12; letter-spacing:-.5px; margin:0;}}
   .lede h1 em{{font-style:italic; color:var(--ink-soft);}}
   .lede .sub{{font-size:14.5px; color:var(--ink-soft); margin-top:12px; max-width:46ch;}}
-  .digest{{display:flex; flex-wrap:wrap; gap:22px; padding:20px 0 6px; border-bottom:1px solid var(--line); margin-bottom:var(--sp-6);}}
+  .digest{{display:flex; flex-wrap:wrap; gap:var(--sp-3); padding:20px 0 6px; border-bottom:1px solid var(--line); margin-bottom:var(--sp-6);}}
   .digest .item .n{{font-family:var(--mono); font-size:19px; font-weight:600; letter-spacing:-.5px;}}
   .digest .item .l{{font-family:var(--mono); font-size:10px; letter-spacing:1.4px; text-transform:uppercase; color:var(--ink-faint); margin-top:3px;}}
   .eyebrow{{font-family:var(--mono); font-size:11px; letter-spacing:2.5px; text-transform:uppercase; color:var(--ink-faint); margin:0 0 var(--sp-3); display:flex; align-items:center; gap:12px;}}
