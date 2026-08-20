@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-08-20 | Metrics: resolved=13, fills=7
+Last updated: 2026-08-20 | Metrics: resolved=12, fills=7
 
 ## Ready (0)
 | Priority | ID | Action | Area |
