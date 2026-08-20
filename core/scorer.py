@@ -1,12 +1,21 @@
 """
 Probability estimation via Claude CLI or Anthropic Messages API.
 
-backend="cli"  (default) — subprocess to local claude CLI, Pro OAuth, no API billing.
+backend="cli"  (default, and the ONLY backend the live/scheduled pipeline may
+                 use) — subprocess to local claude CLI, Pro OAuth, no API billing.
 backend="api"  — Anthropic Messages API via core/llm.py; forced tool_choice structured
-                 output with web_search_20250305; real cost_usd in token_info.
+                 output with web_search_20250305; real cost_usd in token_info. Real
+                 metered spend -- per the user's explicit 2026-08-18 decision, this
+                 backend may only be used with fresh, explicit authorization in the
+                 moment (research probes, one-off eval re-scoring), never by anything
+                 scheduled or run unattended. See [[feedback-leviathan-no-api-billing]]
+                 memory / docs/RUNBOOK.md.
 
-Switch via config["llm"]["backend"]. The CLI path is a legacy fallback scheduled for
-deletion after 2 clean weeks of API runs (goal 5a parallel validation).
+Switch via config["llm"]["backend"]. An earlier goal (5a, "parallel validation")
+once planned to delete the CLI path after 2 clean weeks of API runs and make
+backend="api" the permanent default -- that plan is superseded by the no-API-
+billing policy decision above and will not happen; the CLI path is permanent,
+not a legacy fallback.
 """
 
 import json

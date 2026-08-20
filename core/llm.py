@@ -16,7 +16,16 @@ to attach real source links. If Claude reaches end_turn without calling
 record_scores, a forced second call constrains tool_choice to record_scores only.
 
 _find_claude() is the canonical CLI binary finder — imported by scorer.py and
-analysis/research_probe.py for the legacy backend="cli" path.
+analysis/research_probe.py for the backend="cli" path, which is the
+permanent default (Claude Pro subscription, no per-token bill) per the
+user's 2026-08-19 decision, not a legacy fallback.
+
+Every metered function below (score_via_api, probe_via_api,
+score_blind_via_api, ground_citations_via_api) is gated by
+_check_api_spend_authorized(): real API spend requires
+config.llm.api_spend_authorized == True, which defaults to False and must
+be deliberately, explicitly flipped per session. This applies regardless
+of backend, blind_arm.enabled, or which higher-level caller reached it.
 """
 
 import json
@@ -90,6 +99,36 @@ def _accumulate_daily_cost(cost_usd: float) -> float:
     state["total_cost_usd"] = round(float(state.get("total_cost_usd", 0.0)) + cost_usd, 6)
     _save_daily_cost_state(state)
     return state["total_cost_usd"]
+
+
+class LLMApiSpendNotAuthorized(RuntimeError):
+    """Raised when a metered call is attempted without config.llm.api_spend_authorized == True."""
+
+
+def _check_api_spend_authorized(config: dict) -> None:
+    """
+    Raises LLMApiSpendNotAuthorized unless config["llm"]["api_spend_authorized"]
+    is exactly True -- called before _check_cost_ceiling (and thus before any
+    real request) in every metered function in this module (score_via_api,
+    probe_via_api, score_blind_via_api, ground_citations_via_api), so this is
+    a single choke point every caller passes through regardless of backend,
+    blind_arm.enabled, or which higher-level path reached it (replay-runner
+    forces backend="api" but still routes through score_via_api -> this
+    guard). Per the user's 2026-08-19 decision: the bot may only draw on the
+    Claude Pro subscription (backend="cli"), never metered Anthropic console
+    API spend, without fresh explicit authorization in the moment. Defaults
+    to False in both config.json and config.example.json -- flipping it is a
+    deliberate, visible edit, not an ambient env var that could be left set
+    and forgotten across sessions.
+    """
+    if config.get("llm", {}).get("api_spend_authorized") is not True:
+        raise LLMApiSpendNotAuthorized(
+            "Real metered Anthropic API spend is not authorized "
+            "(config.llm.api_spend_authorized is not true). The bot may only "
+            "use the Claude Pro subscription (backend=\"cli\") unless a human "
+            "explicitly authorizes real API spend for this session by setting "
+            "config.llm.api_spend_authorized to true, then reverting it after."
+        )
 
 
 def _check_cost_ceiling(config: dict) -> None:
@@ -473,6 +512,7 @@ def score_via_api(
     explicitly passed — production callers are unaffected. The eval harness
     (analysis/eval_rescore.py) pins temperature=0 for reproducible re-scoring.
     """
+    _check_api_spend_authorized(config)
     _check_cost_ceiling(config)
 
     llm_cfg      = config.get("llm", {})
@@ -559,6 +599,7 @@ def score_blind_via_api(
     Each returned score also gets a "sources" key -- see score_via_api's
     docstring; same structured/freeform separation from sources_checked.
     """
+    _check_api_spend_authorized(config)
     _check_cost_ceiling(config)
 
     llm_cfg      = config.get("llm", {})
@@ -638,6 +679,7 @@ def probe_via_api(
     rationale, sources ([{"url","title","age"}, ...] from real web_search_tool_result
     blocks -- unambiguous here since probe scores exactly one market per call).
     """
+    _check_api_spend_authorized(config)
     _check_cost_ceiling(config)
 
     llm_cfg      = config.get("llm", {})
@@ -788,6 +830,7 @@ def ground_citations_via_api(market: dict, score: dict, config: dict) -> tuple[l
     if not sources:
         return [], {}
 
+    _check_api_spend_authorized(config)
     _check_cost_ceiling(config)
 
     llm_cfg = config.get("llm", {})

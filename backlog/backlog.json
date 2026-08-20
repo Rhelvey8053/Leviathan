@@ -282,7 +282,7 @@
       "depends_on": [
         "calibration-curve"
       ],
-      "action": "Add the calibration curve chart to the Power BI dashboard.",
+      "action": "Add the calibration curve chart to the Streamlit dashboard (dashboard/) -- targets Power BI until 2026-08-19, when the project moved off Power BI entirely (Streamlit already covers the same ground for free; see BACKLOG.md's streamlit-dashboard-2026-08).",
       "notes": "Depends on calibration-curve analysis being complete before the visual can be built."
     },
     {
@@ -381,7 +381,7 @@
       "depends_on": [
         "per-wallet-track-record"
       ],
-      "action": "Add a Power BI page showing realized hit rate over time per qualified smart-money wallet",
+      "action": "Add a Streamlit dashboard page showing realized hit rate over time per qualified smart-money wallet -- targeted Power BI until 2026-08-19, when the project moved off Power BI entirely (Streamlit already covers the same ground for free; see BACKLOG.md's streamlit-dashboard-2026-08).",
       "notes": "Viz layer on top of the per-wallet metric, gated so it only surfaces once wallets have enough resolved cross-refs to be readable"
     },
     {

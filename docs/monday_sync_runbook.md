@@ -2,7 +2,10 @@
 
 For running, promoting, and diagnosing `scripts/monday_sync.py`
 (`Leviathan-MondaySync` scheduled task). See `docs/monday_sync_discovery.md`
-for the design/Phase 0 investigation this was built from.
+for the design/Phase 0 investigation this was built from. For evaluating
+Liam (monday.com's own PM agent) reports and suggestions -- a separate
+concern from this sync tool -- see `docs/RUNBOOK.md`'s "Triaging Liam"
+section instead.
 
 **Source of truth is always `backlog/backlog.json`.** The board is a
 one-way mirror + progress log in v1 — nothing you edit on monday flows

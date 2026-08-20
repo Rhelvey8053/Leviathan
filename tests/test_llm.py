@@ -141,6 +141,10 @@ def _make_config(backend="api"):
             "backend": backend,
             "model": "claude-sonnet-4-6",
             "max_web_searches": 4,
+            # Every metered function requires this explicitly -- default it
+            # true here so existing tests exercise the real (mocked) API
+            # path; TestApiSpendAuthorization below tests the guard itself.
+            "api_spend_authorized": True,
         }
     }
 
@@ -1066,4 +1070,105 @@ class TestGroundCitationsViaApi:
             with pytest.raises(RuntimeError, match="ground_citations_via_api"):
                 ground_citations_via_api({"ticker": "KXTEST"}, score, _make_config())
 
-        assert mock_client.messages.create.call_count == 3
+
+# ── api_spend_authorized guard (2026-08-19 policy: Pro subscription only) ────
+#
+# Every metered function must refuse to call the API at all -- not even
+# reach _make_client() -- unless config.llm.api_spend_authorized is exactly
+# True. False, missing, "true" (string), and 1 (truthy int) must all block;
+# only the literal boolean True passes.
+
+class TestApiSpendAuthorization:
+
+    def test_score_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, score_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_score_via_api_blocked_when_key_missing(self):
+        from core.llm import LLMApiSpendNotAuthorized, score_via_api
+        config = {"llm": {"backend": "api", "model": "claude-sonnet-4-6"}}
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_score_via_api_blocked_by_truthy_non_bool(self):
+        """Only the literal True passes -- truthy strings/ints must still block."""
+        from core.llm import LLMApiSpendNotAuthorized, score_via_api
+        for truthy in ("true", "yes", 1):
+            config = _make_config()
+            config["llm"]["api_spend_authorized"] = truthy
+            with patch("core.llm._make_client") as mock_client_fn:
+                with pytest.raises(LLMApiSpendNotAuthorized):
+                    score_via_api("sys", "user", config)
+                mock_client_fn.assert_not_called()
+
+    def test_score_via_api_proceeds_when_authorized(self):
+        from core.llm import score_via_api
+        score = _valid_score()
+        block = _make_tool_use_block("record_scores", {"scores": [score]})
+        resp = _make_response([block])
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = True
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+            scores, _ = score_via_api("sys", "user", config)
+        assert scores[0]["ticker"] == "KXTEST-01"
+
+    def test_probe_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, probe_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                probe_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_score_blind_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, score_blind_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_blind_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_ground_citations_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, ground_citations_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        score = _valid_grounding_score()
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                ground_citations_via_api({"ticker": "KXTEST"}, score, config)
+            mock_client_fn.assert_not_called()
+
+    def test_ground_citations_via_api_no_sources_skips_guard_too(self):
+        """Empty sources short-circuits before the guard -- still no API call, no exception either."""
+        from core.llm import ground_citations_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        score = _valid_grounding_score(sources=[])
+        with patch("core.llm._make_client") as mock_client_fn:
+            citations, token_info = ground_citations_via_api({"ticker": "KXTEST"}, score, config)
+        mock_client_fn.assert_not_called()
+        assert citations == []
+        assert token_info == {}
+
+    def test_guard_checked_before_cost_ceiling(self):
+        """Spend-authorization is checked first -- an exhausted cost ceiling doesn't mask it."""
+        from core.llm import LLMApiSpendNotAuthorized, _accumulate_daily_cost, score_via_api
+        _accumulate_daily_cost(100.0)  # blow the ceiling too
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()

@@ -146,6 +146,10 @@ waste one run's worth of Kalshi/Claude calls.
 
 ## Triaging Liam (monday.com's built-in PM agent) reports
 
+For running/diagnosing the sync tool itself (`scripts/monday_sync.py`),
+see `docs/monday_sync_runbook.md` instead -- this section is about
+evaluating Liam's judgment, a separate concern from the sync mechanism.
+
 Liam posts a "Daily + Weekly Report" update to the "Leviathan Sync Log"
 item on the monday board on its own cadence, independent of anything in
 this repo. It's a genuine second source of *external* research (regulatory
