@@ -1,6 +1,7 @@
 import html as _html
 import json
 import os
+import re
 import smtplib
 import textwrap
 from datetime import datetime, date, timezone, timedelta
@@ -182,18 +183,31 @@ def _ev_per_contract(direction: str, market_price, estimate, unit_size: float = 
     return f"${ev:+.2f}" if ev is not None else None
 
 
-def _wilson_ci(p_pct, n: int) -> str:
-    """Returns a formatted Wilson 95% CI line for a win rate percentage over n trials."""
+def _wilson_interval(p_pct, n: int) -> tuple[float, float] | None:
+    """
+    Wilson 95% CI bounds (0-1 scale) for a win-rate percentage over n
+    trials. None if n==0. Split out of _wilson_ci so HTML renderers (the
+    editorial weekly's calibration section) can use the raw bounds without
+    parsing _wilson_ci's pre-formatted text-digest line -- same math,
+    same result, one source.
+    """
     if n == 0:
-        return "  95% CI:         N/A (no resolved signals)"
+        return None
     p = p_pct / 100.0
     z = 1.96
     z2 = z * z
     denom = 1.0 + z2 / n
     center = (p + z2 / (2 * n)) / denom
     margin = z * ((p * (1 - p) / n + z2 / (4 * n * n)) ** 0.5) / denom
-    low  = center - margin
-    high = center + margin
+    return (center - margin, center + margin)
+
+
+def _wilson_ci(p_pct, n: int) -> str:
+    """Returns a formatted Wilson 95% CI line for a win rate percentage over n trials."""
+    interval = _wilson_interval(p_pct, n)
+    if interval is None:
+        return "  95% CI:         N/A (no resolved signals)"
+    low, high = interval
     tag = ", low confidence" if n < 5 else ""
     return f"  95% CI:         {low:.1%} – {high:.1%}  (n={n}{tag})"
 
@@ -1307,6 +1321,114 @@ def _render_subscriber_watch(w: dict) -> str:
   </div>"""
 
 
+def _render_upcoming_resolution(u: dict) -> str:
+    """
+    One pending signal closing in the next 7 days -- "Coming to resolve"
+    (leviathan-report-format-decision.md Phase 2 section 7, weekly-only).
+    Reuses the .watch component's markup/classes rather than inventing a
+    new one, since this is the same shape of thing (a market with no
+    settled outcome yet, described briefly).
+    """
+    question  = _html.escape(u.get("title") or "")
+    close_fmt = _subscriber_fmt_close(u.get("close_time") or u.get("close_time_raw") or "")
+    direction = u.get("direction") or ""
+    try:
+        mkt_pct = f"{round(float(u.get('market_price')) * 100)}%" if u.get("market_price") is not None else "—"
+    except (TypeError, ValueError):
+        mkt_pct = "—"
+    note = (
+        f"Called {direction} · market at {mkt_pct}"
+        if direction and direction != "PASS" else f"Market at {mkt_pct} · no call made"
+    )
+    return f"""
+  <div class="watch">
+    <div class="wmeta">
+      <span class="resolves" style="margin-left:0;">Resolves {close_fmt}</span>
+    </div>
+    <h4 class="wq">{question}</h4>
+    <div class="watch-note">{note}</div>
+  </div>"""
+
+
+# ── Editorial design system ("Where price and reality diverge") ──────────────
+# Single source of the design tokens shared by _SUBSCRIBER_TEMPLATE,
+# _TRACK_RECORD_TEMPLATE, and (Phase 2, leviathan-report-format-decision.md)
+# render_weekly_subscriber_html. Extracted 2026-08-19 -- the two templates
+# previously hardcoded near-identical but drifted copies of this :root block
+# (_TRACK_RECORD_TEMPLATE was missing --whale/--whale-soft/--sp-3/--sp-6,
+# harmless since it never referenced them, but a real drift risk the next
+# time someone edited one copy and not the other). Each template's `.wrap`
+# max-width and other layout values are deliberately NOT unified here --
+# per leviathan-report-format-decision.md, those are intentional per-template
+# choices (a 3-pick digest vs. a full tabular log), not drift to fix.
+
+_EDITORIAL_TOKENS: dict[str, str] = {
+    "paper": "#FBFAF7", "ink": "#15181E", "ink-soft": "#525A67", "ink-faint": "#949AA5",
+    "line": "#E7E4DC", "line-soft": "#EFEDE7", "slate": "#1C2A3A",
+    "edge": "#0B6E52", "edge-soft": "#E7F0EB",
+    "amber": "#9A5A12", "amber-soft": "#F4ECDE",
+    "whale": "#2F4C8C", "whale-soft": "#E8ECF5",
+    "serif": '"Newsreader",Georgia,serif',
+    "sans": '"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    "mono": '"IBM Plex Mono",ui-monospace,Consolas,Menlo,monospace',
+    "sp-3": "24px", "sp-6": "48px",
+}
+
+
+# Line grouping for _editorial_root_css's output -- matches
+# _SUBSCRIBER_TEMPLATE's original hand-written :root block exactly (one
+# token per CSS custom property, still one value per _EDITORIAL_TOKENS
+# entry, but grouped several-per-line the way the original was written) so
+# extracting this into a shared function is byte-for-byte output-preserving
+# for the subscriber template, not just visually equivalent -- the Phase 1
+# acceptance bar this was built against.
+_EDITORIAL_ROOT_LINE_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("paper", "ink", "ink-soft", "ink-faint"),
+    ("line", "line-soft", "slate"),
+    ("edge", "edge-soft", "amber", "amber-soft"),
+    ("whale", "whale-soft"),
+    ("serif", "sans"),
+    ("mono",),
+    ("sp-3", "sp-6"),
+)
+
+
+def _editorial_root_css(tokens: dict[str, str] = _EDITORIAL_TOKENS) -> str:
+    """
+    Renders the :root{...} custom-property block for embedding inside a
+    <style> element via a template's {editorial_root_css} format field.
+    Returned text is plain CSS -- str.format() only interprets braces in
+    the template string itself, not in substituted values, so this does
+    NOT need {{ }} doubling the way the surrounding template literals do.
+    """
+    lines = [
+        " ".join(f"--{name}:{tokens[name]};" for name in group)
+        for group in _EDITORIAL_ROOT_LINE_GROUPS
+    ]
+    body = "\n    ".join(lines)
+    return ":root{\n    " + body + "\n  }"
+
+
+_EDITORIAL_VAR_RE = re.compile(r"var\(--([\w-]+)\)")
+
+
+def _flatten_editorial_vars(css: str, tokens: dict[str, str] = _EDITORIAL_TOKENS) -> str:
+    """
+    Replaces every var(--token) in `css` with its literal value from
+    `tokens` -- for email-safe inline styles (Phase 3 self-test / any
+    future email use), where CSS custom properties have poor-to-nonexistent
+    client support (notably Outlook's Word-based rendering engine doesn't
+    support var() at all). Raises KeyError naming the unknown token rather
+    than silently leaving an unresolved var(--x) in the output.
+    """
+    def _repl(m: "re.Match[str]") -> str:
+        name = m.group(1)
+        if name not in tokens:
+            raise KeyError(f"_flatten_editorial_vars: unknown token --{name}")
+        return tokens[name]
+    return _EDITORIAL_VAR_RE.sub(_repl, css)
+
+
 _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1317,15 +1439,7 @@ _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root{{
-    --paper:#FBFAF7; --ink:#15181E; --ink-soft:#525A67; --ink-faint:#949AA5;
-    --line:#E7E4DC; --line-soft:#EFEDE7; --slate:#1C2A3A;
-    --edge:#0B6E52; --edge-soft:#E7F0EB; --amber:#9A5A12; --amber-soft:#F4ECDE;
-    --whale:#2F4C8C; --whale-soft:#E8ECF5;
-    --serif:"Newsreader",Georgia,serif; --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    --mono:"IBM Plex Mono",ui-monospace,Consolas,Menlo,monospace;
-    --sp-3:24px; --sp-6:48px;
-  }}
+  {editorial_root_css}
   *{{box-sizing:border-box;}}
   body{{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
     font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;}}
@@ -1664,6 +1778,7 @@ def render_subscriber_html(
         '\n  <p style="color:var(--ink-faint); font-style:italic;">No unusual market moves outside today\'s calls.</p>'
 
     return _SUBSCRIBER_TEMPLATE.format(
+        editorial_root_css=_editorial_root_css(),
         issue_date=now_utc.strftime("%d %b %Y").upper(),
         n_calls=len(picks),
         n_watch=len(watch_sorted),
@@ -1784,13 +1899,7 @@ _TRACK_RECORD_TEMPLATE = """<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root{{
-    --paper:#FBFAF7; --ink:#15181E; --ink-soft:#525A67; --ink-faint:#949AA5;
-    --line:#E7E4DC; --line-soft:#EFEDE7;
-    --edge:#0B6E52; --edge-soft:#E7F0EB; --amber:#9A5A12; --amber-soft:#F4ECDE;
-    --serif:"Newsreader",Georgia,serif; --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    --mono:"IBM Plex Mono",ui-monospace,Consolas,Menlo,monospace;
-  }}
+  {editorial_root_css}
   *{{box-sizing:border-box;}}
   body{{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
     font-size:16px; line-height:1.6;}}
@@ -1907,6 +2016,7 @@ def render_track_record_html(now_utc: "datetime | None" = None) -> str:
         '<tr><td colspan="9" style="text-align:center; color:var(--ink-faint); font-style:italic;">No resolved signals yet.</td></tr>'
 
     return _TRACK_RECORD_TEMPLATE.format(
+        editorial_root_css=_editorial_root_css(),
         hero_card_html=hero_card_html,
         secondary_cards_html=secondary_cards_html,
         log_n=len(full_log),
@@ -3456,6 +3566,304 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
 </html>
 '''
     return html_doc
+
+
+# ── Editorial weekly (leviathan-report-format-decision.md Phase 2) ───────────
+# Same "Where price and reality diverge" visual system as _SUBSCRIBER_TEMPLATE/
+# _TRACK_RECORD_TEMPLATE, via the shared _editorial_root_css() token source.
+# NOT wired into main.py's live Sunday send -- that still goes out via
+# render_weekly_html/compile_weekly_digest (dark theme) until a later,
+# explicitly gated phase. This produces the artifact only.
+
+_CALIBRATION_MIN_N = 50  # docs/PREREGISTRATION.md's pre-registered n=50 checkpoint -- same gate calibration-curve's own backlog trigger uses (resolved_count>=50), not a new threshold invented for this template.
+
+_WEEKLY_SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leviathan — Weekly Briefing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  {editorial_root_css}
+  *{{box-sizing:border-box;}}
+  body{{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
+    font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;}}
+  a{{color:inherit;}}
+  .wrap{{max-width:640px; margin:0 auto; padding:0 28px;}}
+  .masthead{{border-top:2px solid var(--ink); padding-top:14px; margin-top:40px;
+    display:flex; align-items:baseline; justify-content:space-between;}}
+  .wordmark{{font-family:var(--mono); font-size:12px; font-weight:600; letter-spacing:4px; text-transform:uppercase;}}
+  .issue{{font-family:var(--mono); font-size:11px; letter-spacing:.5px; color:var(--ink-faint);}}
+  .lede{{padding:38px 0 30px; border-bottom:1px solid var(--line);}}
+  .lede h1{{font-family:var(--serif); font-weight:500; font-size:34px; line-height:1.12; letter-spacing:-.5px; margin:0;}}
+  .lede h1 em{{font-style:italic; color:var(--ink-soft);}}
+  .lede .sub{{font-size:14.5px; color:var(--ink-soft); margin-top:12px; max-width:46ch;}}
+  .digest{{display:flex; flex-wrap:wrap; gap:22px; padding:20px 0 6px; border-bottom:1px solid var(--line); margin-bottom:var(--sp-6);}}
+  .digest .item .n{{font-family:var(--mono); font-size:19px; font-weight:600; letter-spacing:-.5px;}}
+  .digest .item .l{{font-family:var(--mono); font-size:10px; letter-spacing:1.4px; text-transform:uppercase; color:var(--ink-faint); margin-top:3px;}}
+  .eyebrow{{font-family:var(--mono); font-size:11px; letter-spacing:2.5px; text-transform:uppercase; color:var(--ink-faint); margin:0 0 var(--sp-3); display:flex; align-items:center; gap:12px;}}
+  .eyebrow::after{{content:""; flex:1; height:1px; background:var(--line);}}
+  .pick{{padding-bottom:var(--sp-6); margin-bottom:var(--sp-6); border-bottom:1px solid var(--line);}}
+  .pick:last-of-type{{border-bottom:none;}}
+  .pick-head{{display:flex; align-items:center; gap:10px; margin-bottom:18px;}}
+  .rank{{font-family:var(--mono); font-size:12px; font-weight:600; color:var(--ink-faint); letter-spacing:1px;}}
+  .rank::after{{content:""; display:inline-block; width:16px; height:1px; background:var(--line); vertical-align:middle; margin-left:10px;}}
+  .tag{{font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.5px; padding:4px 10px; border-radius:4px; text-transform:uppercase;}}
+  .tag-yes{{color:var(--edge); background:var(--edge-soft);}}
+  .tag-no{{color:var(--amber); background:var(--amber-soft);}}
+  .tag-conf{{color:var(--ink-soft); background:var(--line-soft); border:1px solid var(--line);}}
+  .tag-whale{{color:var(--whale); background:var(--whale-soft);}}
+  .resolves{{margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:.3px;}}
+  .question{{font-family:var(--serif); font-weight:500; font-size:25px; line-height:1.28; letter-spacing:-.3px; margin:0 0 24px;}}
+  .meter{{margin:0 0 26px;}}
+  .meter-reads{{display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:14px;}}
+  .read .rl{{font-family:var(--mono); font-size:10px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-faint);}}
+  .read .rv{{font-family:var(--serif); font-size:30px; font-weight:500; letter-spacing:-1px; line-height:1; margin-top:5px;}}
+  .read.est{{text-align:right;}}
+  .read.est .rv{{color:var(--edge);}}
+  .track{{position:relative; height:4px; background:var(--line); border-radius:3px; margin:4px 0 10px;}}
+  .track .mid{{position:absolute; left:50%; top:-4px; bottom:-4px; width:1px; background:var(--line);}}
+  .track .fill{{position:absolute; top:0; bottom:0; background:var(--edge); border-radius:3px; opacity:.85;}}
+  .track .tick{{position:absolute; top:-5px; width:2px; height:14px; border-radius:2px;}}
+  .track .tick.mkt{{background:var(--ink-soft);}}
+  .track .tick.est{{background:var(--edge);}}
+  .scale{{display:flex; justify-content:space-between; font-family:var(--mono); font-size:9.5px; color:var(--ink-faint); letter-spacing:.5px;}}
+  .gap-note{{font-size:15px; color:var(--ink-soft); margin-top:16px; line-height:1.55;}}
+  .gap-note b{{color:var(--ink); font-weight:600;}}
+  .gap-note .big{{font-family:var(--mono); color:var(--edge); font-weight:600;}}
+  .why{{display:flex; gap:14px; align-items:baseline; padding:16px 0; border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); margin-bottom:22px;}}
+  .why .wl{{flex-shrink:0; font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink); width:96px; padding-top:2px;}}
+  .why .wt{{font-size:14.5px; color:var(--ink-soft); line-height:1.5;}}
+  .why .wt b{{color:var(--ink); font-weight:500;}}
+  .analysis{{font-size:16px; line-height:1.68; color:var(--ink); margin-bottom:26px;}}
+  .src-head{{font-family:var(--mono); font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--ink-faint); margin-bottom:2px;}}
+  .src-pending{{font-size:13px; color:var(--ink-faint); font-style:italic; padding:12px 0; border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft);}}
+  .src-item{{font-size:13.5px; padding:6px 0; border-top:1px solid var(--line-soft);}}
+  .src-item a{{color:var(--ink-soft); text-decoration:none; border-bottom:1px solid var(--line);}}
+  .watch{{padding:18px 0 0;}}
+  .watch .wq{{font-family:var(--serif); font-size:19px; font-weight:500; line-height:1.3; margin:0 0 8px;}}
+  .watch .wmeta{{display:flex; gap:10px; align-items:center; margin-bottom:8px;}}
+  .watch-note{{font-size:14.5px; color:var(--ink-soft); line-height:1.55;}}
+  .watch-note b{{color:var(--ink); font-weight:600;}}
+  .recap-item{{padding:16px 0; border-top:1px solid var(--line-soft);}}
+  .recap-item:first-of-type{{border-top:none;}}
+  .recap-meta{{display:flex; gap:10px; align-items:center; margin-bottom:6px;}}
+  .rq{{font-family:var(--serif); font-size:17px; font-weight:500; line-height:1.3; margin:0 0 6px;}}
+  .recap-note{{font-size:14px; color:var(--ink-soft); line-height:1.5;}}
+  .mcard-hero{{border:1px solid var(--edge); border-left:4px solid var(--edge); border-radius:8px; padding:22px 24px; background:var(--edge-soft);}}
+  .mcard-hero .mc-label{{color:var(--edge);}}
+  .mcard-hero .mc-value{{font-size:38px;}}
+  .mcard-secondary{{border:1px solid var(--line); border-radius:8px; padding:12px 16px; opacity:.75; margin-top:12px;}}
+  .mcard-secondary .mc-value{{font-size:19px;}}
+  .mc-label{{font-family:var(--mono); font-size:10.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-faint);}}
+  .mc-value{{font-family:var(--serif); font-size:26px; font-weight:500; margin-top:8px;}}
+  .mc-n{{font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-top:4px;}}
+  .mc-note{{font-size:12px; color:var(--ink-soft); margin-top:6px;}}
+  .methodology{{margin:var(--sp-6) 0 0; padding-top:22px; border-top:1px solid var(--line);}}
+  .methodology p{{font-size:13.5px; color:var(--ink-soft); line-height:1.7; max-width:56ch; margin:8px 0 0;}}
+  .foot{{border-top:2px solid var(--ink); margin-top:var(--sp-6); padding:22px 0 60px; font-size:12.5px; color:var(--ink-faint); line-height:1.9;}}
+  .foot .discl{{color:var(--ink-soft); max-width:52ch;}}
+  .foot a{{color:var(--ink-soft); text-decoration:none; border-bottom:1px solid var(--line);}}
+  @media (max-width:520px){{.lede h1{{font-size:28px;}} .question{{font-size:21px;}} .read .rv{{font-size:25px;}} .why{{flex-direction:column; gap:6px;}} .why .wl{{width:auto;}}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="wordmark">Leviathan</div>
+    <div class="issue">{issue_date}</div>
+  </header>
+  <div class="lede">
+    <h1>The week in <em>drift</em>.</h1>
+    <div class="sub">A weekly read on how the calls landed, what's still open, and what's coming due.</div>
+  </div>
+  <div class="digest">
+    <div class="item"><div class="n">{n_mkts}</div><div class="l">Markets flagged</div></div>
+    <div class="item"><div class="n">{n_calls}</div><div class="l">Signal instances</div></div>
+    <div class="item"><div class="n">{n_yes}/{n_no}</div><div class="l">Yes/No split</div></div>
+    <div class="item"><div class="n">{n_high}</div><div class="l">High conviction</div></div>
+    <div class="item"><div class="n">{win_rate}</div><div class="l">Win rate</div></div>
+    <div class="item"><div class="n">{avg_edge}</div><div class="l">Avg edge captured</div></div>
+    <div class="item"><div class="n">{total_pnl}</div><div class="l">Hypo P&amp;L</div></div>
+    <div class="item"><div class="n">{markets_scanned}</div><div class="l">Markets scanned</div></div>
+    <div class="item"><div class="n">{n_resolving}</div><div class="l">Resolving next 7d</div></div>
+  </div>
+  <div class="eyebrow">How last week's calls resolved</div>
+{recap_html}
+  <div class="eyebrow">This week's notable calls</div>
+{picks_html}
+  <div class="eyebrow">Calibration snapshot</div>
+{calibration_html}
+  <div class="eyebrow">Coming to resolve</div>
+{upcoming_html}
+  <footer class="foot">
+    <div class="discl">Leviathan is research, not financial advice. Prediction markets carry risk — bet only what you can afford to lose.</div>
+    <div class="methodology">
+      <div class="src-head">Methodology</div>
+      <p>Estimates come from Claude, cross-referencing live web search, Kalshi's own order book and trade history, Polymarket's prices on the same or related events, and a tracked set of historically sharp Kalshi wallets.</p>
+    </div>
+    <div class="links" style="margin-top:12px;"><a href="{track_record_href}">Full track record</a> &nbsp; <a href="#">Manage subscription</a> &nbsp; <a href="#">Unsubscribe</a></div>
+  </footer>
+</div>
+</body>
+</html>
+"""
+
+
+def _weekly_calibration_html(
+    brier: dict | None, market_baseline_brier: dict | None, win_rate, resolved_n: int,
+) -> str:
+    """
+    "Calibration snapshot" section (leviathan-report-format-decision.md
+    Phase 2 section 6) -- shown only once _CALIBRATION_MIN_N is cleared,
+    matching calibration-curve's own resolved_count>=50 gate; below that,
+    an honest "not enough resolved yet" line naming the real n and the
+    real gate, never a fabricated Brier score or interval.
+    """
+    n = (brier or {}).get("n") or 0
+    if n < _CALIBRATION_MIN_N:
+        return (
+            f'\n  <p style="color:var(--ink-faint); font-style:italic;">'
+            f"Not enough resolved yet to show a calibration snapshot honestly "
+            f"(n={n}, need {_CALIBRATION_MIN_N}).</p>"
+        )
+
+    bs = brier.get("brier_score")
+    bs_s = f"{bs:.4f}" if bs is not None else "—"
+    html_parts = [f'''
+  <div class="mcard-hero">
+    <div class="mc-label">Scorer Brier</div>
+    <div class="mc-value">{bs_s}</div>
+    <div class="mc-n">n={n}  ·  0=perfect, 0.25=random</div>
+  </div>''']
+
+    if market_baseline_brier and market_baseline_brier.get("brier_score") is not None:
+        mb_n = market_baseline_brier.get("n") or 0
+        html_parts.append(f'''
+  <div class="mcard-secondary">
+    <div class="mc-label">Market-price baseline Brier</div>
+    <div class="mc-value">{market_baseline_brier["brier_score"]:.4f}</div>
+    <div class="mc-n">n={mb_n}  ·  scoring the market price instead of our estimate</div>
+  </div>''')
+
+    interval = _wilson_interval(win_rate if win_rate is not None else 0.0, resolved_n)
+    if interval is not None:
+        low, high = interval
+        html_parts.append(
+            f'\n  <div class="mc-note">Win rate 95% CI: {low:.1%} – {high:.1%} (n={resolved_n})</div>'
+        )
+
+    return "".join(html_parts)
+
+
+def render_weekly_subscriber_html(
+    week_signals: list[dict],
+    stats: dict,
+    config: dict,
+    flag_path_stats: list | None = None,
+    brier: dict | None = None,
+    market_baseline_brier: dict | None = None,
+    lv_stats: dict | None = None,
+    heuristic_label_stats: list | None = None,
+    whale_stats: dict | None = None,
+    resolved_recap: list[dict] | None = None,
+    upcoming: list[dict] | None = None,
+    markets_scanned_week: int = 0,
+    now_utc: "datetime | None" = None,
+) -> str:
+    """
+    Editorial-design weekly subscriber briefing (leviathan-report-format-
+    decision.md Phase 2) -- same "Where price and reality diverge" visual
+    system as render_subscriber_html/render_track_record_html via the
+    shared _editorial_root_css() token source, populated from the SAME
+    weekly computations render_weekly_html/compile_weekly_digest already
+    use (win_rate, avg_edge_captured, total_hypothetical_pnl, brier,
+    per-heuristic/whale stats passed straight through, unused directly by
+    this template's current section list but accepted for signature
+    parity and future sections) -- no new or divergent numbers.
+
+    resolved_recap and upcoming are pure-view parameters the caller
+    queries and passes in, same pattern render_subscriber_html's
+    resolved_recap already follows -- this function never touches the DB.
+    resolved_recap: settled paper signals from the trailing 7 days, e.g.
+    core.logger.get_resolved_track_record(days=7). upcoming: pending
+    signals whose close_time falls in the next 7 days -- a presentational
+    filter over existing signal data, not a new statistic.
+
+    market_baseline_brier (core.logger.get_market_baseline_brier_score())
+    is optional; when given, renders alongside the scorer's own Brier for
+    the "does the scorer add real edge over market price" comparison --
+    an existing function, just not previously threaded into either
+    weekly renderer.
+
+    Not wired into main.py's live Sunday send -- still render_weekly_html/
+    compile_weekly_digest (dark theme) until a later, explicitly gated
+    phase. This produces the artifact only.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+
+    # Same dedup-by-ticker compile_weekly_digest already does.
+    by_ticker: dict[str, dict] = {}
+    for row in week_signals:
+        t = row.get("ticker", "")
+        if t not in by_ticker:
+            by_ticker[t] = row
+    unique_markets = list(by_ticker.values())
+
+    n_calls = len(week_signals)
+    n_mkts  = len(unique_markets)
+    n_yes   = sum(1 for r in unique_markets if r.get("direction") == "YES")
+    n_no    = sum(1 for r in unique_markets if r.get("direction") == "NO")
+    n_high  = sum(1 for r in unique_markets if r.get("confidence") == "HIGH")
+
+    win_rate   = stats.get("win_rate")
+    avg_edge   = stats.get("avg_edge_captured")
+    total_pnl  = stats.get("total_hypothetical_pnl")
+    resolved_n = stats.get("resolved") or 0
+
+    # Notable calls: same ranking _rank_top_picks already provides, same
+    # view-model/render function the daily .pick card uses -- applied to
+    # this week's unique markets instead of a live run's final_signals.
+    ranked = _rank_top_picks(unique_markets, n=3)
+    picks = [_subscriber_pick_view_model(p) for p in ranked]
+    picks_html = "\n".join(_render_subscriber_pick(p) for p in picks) if picks else \
+        '\n  <p style="color:var(--ink-faint); font-style:italic;">No qualifying calls this week.</p>'
+
+    recap_html = _resolved_recap_html(resolved_recap, top_n=7)
+    if not (resolved_recap or []):
+        recap_html = '\n  <p style="color:var(--ink-faint); font-style:italic;">Nothing settled this week yet.</p>'
+
+    upcoming_sorted = sorted(
+        (upcoming or []),
+        key=lambda u: u.get("close_time") or u.get("close_time_raw") or "",
+    )[:7]
+    upcoming_html = "\n".join(_render_upcoming_resolution(u) for u in upcoming_sorted) if upcoming_sorted else \
+        '\n  <p style="color:var(--ink-faint); font-style:italic;">Nothing scheduled to resolve in the next 7 days.</p>'
+
+    calibration_html = _weekly_calibration_html(brier, market_baseline_brier, win_rate, resolved_n)
+
+    return _WEEKLY_SUBSCRIBER_TEMPLATE.format(
+        editorial_root_css=_editorial_root_css(),
+        issue_date=f"WEEKLY · WEEK ENDING {now_utc.strftime('%d %b %Y').upper()}",
+        n_mkts=n_mkts,
+        n_calls=n_calls,
+        n_yes=n_yes,
+        n_no=n_no,
+        n_high=n_high,
+        win_rate=f"{win_rate:.0f}%" if win_rate is not None else "—",
+        avg_edge=f"{avg_edge * 100:+.1f}pp" if avg_edge is not None else "—",
+        total_pnl=f"${total_pnl:+.2f}" if total_pnl is not None else "—",
+        markets_scanned=f"{markets_scanned_week:,}",
+        n_resolving=len(upcoming or []),
+        recap_html=recap_html,
+        picks_html=picks_html,
+        calibration_html=calibration_html,
+        upcoming_html=upcoming_html,
+        track_record_href=_track_record_href(config),
+    )
 
 
 # ── Send ──────────────────────────────────────────────────────────────────────
