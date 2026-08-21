@@ -40,6 +40,21 @@ no order execution.** See `README.md` for the full 8-step architecture.
   another real source and say so explicitly. This project's own git log and
   backlog notes are full of precedent for this discipline — match it.
 
+## Removed/known-bad things — don't reintroduce without reading why
+
+- **The Odds API integration is gone** (`sources/odds_api.py`, deleted
+  2026-08-21). It hung a live pipeline run for 11+ minutes with zero
+  progress on a single sport's fetch, despite a configured 12s
+  per-request timeout (8 sports max ≈96s worst case) — most likely a
+  slow/stalled connection not respecting the timeout as expected. Removed
+  entirely (config keys, `.env.example`, README mentions, cache file)
+  rather than just disabled, since sports bookmaker consensus prices
+  aren't load-bearing for the project. If a future run hangs on an
+  external-source fetch step (`[ext] Fetching ...`), check that source's
+  own timeout/retry handling in `sources/` before assuming it's Kalshi or
+  Claude — Manifold/PredictIt/Metaculus/Polymarket haven't been
+  specifically audited for the same failure mode.
+
 ## Where to look
 
 | Need | File |
@@ -53,6 +68,7 @@ no order execution.** See `README.md` for the full 8-step architecture.
 | Plain-language project narrative | `docs/STORY.md` |
 | Report/email design system | `leviathan-report-format-decision.md`-derived work — shared editorial tokens live in `core/report.py`'s `_editorial_root_css()`; three consumers: `_SUBSCRIBER_TEMPLATE`, `_TRACK_RECORD_TEMPLATE`, `_WEEKLY_SUBSCRIBER_TEMPLATE`. Not the live daily/weekly email yet — see that file's Phase 4. |
 | Human-triaged, never-read-by-an-agent parking lot | `docs/IDEAS.md` — do not treat as direction. |
+| Whether token-reduction changes (this file, MCP registration) are actually working | `docs/token_usage_baseline.md` + `python scripts/token_usage_report.py --since 2026-08-21` — measured from real Claude Code session transcripts, not assumed. |
 
 ## monday.com
 
@@ -99,6 +115,17 @@ is unverified — that configuration isn't exposed via the API.
   `config.example.json` (tracked, with a `_..._notes` companion key
   explaining any non-obvious value) — check both stay structurally in sync
   (same keys, `config.example.json` may have extra `_notes` keys).
+- **`signals.source` isn't just `'paper'`/`'real_fill'`/`'research_probe'`.**
+  A `source='superseded_paper'` value also exists (added 2026-08-20) for
+  rows where the same still-open market got re-flagged as an
+  "independent" signal weeks apart (a since-fixed repeat-dedup gap — see
+  `scoring.repeat_dedup_days` in config) and would otherwise double/
+  triple-count a single real-world event in `resolved_count` and every
+  other stat. Every stats query in `core/logger.py` already excludes it
+  via the shared `_PAPER` constant (`source = 'paper' OR source IS NULL`)
+  — if you ever write a NEW query against `signals` by hand instead of
+  reusing an existing function, use `_PAPER`/`_NO_PASS`, don't write your
+  own `source = 'paper'` filter that misses this.
 
 ## Windows environment
 
@@ -108,3 +135,11 @@ console-encoding issues when printing em-dashes/emoji — several scripts
 already wrap `sys.stdout` in a UTF-8 `TextIOWrapper` for this
 (`main.py`, `scripts/position_reconciliation.py`, `scripts/verify_liam_report.py`)
 — follow that pattern in new scripts that print non-ASCII text.
+
+Claude Code's own project identity on this machine is anchored at
+`C:\WINDOWS\system32`, not this repo's own root — Bash commands need a
+`cd` (or `cd ... &&` prefix) into `C:\Users\Administrator\Downloads\Leviathan`
+every time; there's no persistent cwd inside it across turns. This also
+means anything registered as "local to the project" (e.g. the `leviathan`
+MCP server, added via `claude mcp add`) is scoped to `C:\WINDOWS\system32`
+in `.claude.json`, not to the Leviathan repo itself.
