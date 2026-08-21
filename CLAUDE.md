@@ -9,7 +9,7 @@ so and names the file that's actually authoritative.
 ## What this is
 
 A solo, self-directed signal-detection pipeline for Kalshi (regulated US
-prediction-market exchange): scans open markets, cross-references 5 external
+prediction-market exchange): scans open markets, cross-references 4 external
 platforms + smart-money wallets, scores flagged markets with Claude, logs to
 SQLite, emails a daily report. **Explicitly read-only / paper-trading only —
 no order execution.** See `README.md` for the full 8-step architecture.

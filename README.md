@@ -2,7 +2,7 @@
 
 # LEVIATHAN // PREDICTION MARKET INTELLIGENCE
 
-Leviathan is an automated signal detection system for [Kalshi](https://kalshi.com), a regulated US exchange where traders buy and sell contracts on the probability of real-world events — elections, economic reports, sports outcomes, and more. Each day it scans thousands of open contracts, cross-references the same events on five external platforms, tracks the open positions of the highest-PnL traders in the space, and scores candidate markets using a combination of heuristics and LLM-based probability estimation. The output is a structured daily email report and a persistent record of every signal — market price at the time of the call, our probability estimate, and eventual outcome — with the long-term goal of determining whether systematic edge is real, where it comes from, and whether it holds under live conditions.
+Leviathan is an automated signal detection system for [Kalshi](https://kalshi.com), a regulated US exchange where traders buy and sell contracts on the probability of real-world events — elections, economic reports, sports outcomes, and more. Each day it scans thousands of open contracts, cross-references the same events on four external platforms, tracks the open positions of the highest-PnL traders in the space, and scores candidate markets using a combination of heuristics and LLM-based probability estimation. The output is a structured daily email report and a persistent record of every signal — market price at the time of the call, our probability estimate, and eventual outcome — with the long-term goal of determining whether systematic edge is real, where it comes from, and whether it holds under live conditions.
 
 **Not a developer?** [`docs/STORY.md`](docs/STORY.md) tells the same project as a plain-language narrative — no code required.
 
@@ -32,7 +32,7 @@ Each daily run executes an 8-step pipeline:
 | 1 | Auth | Connects to Kalshi and resolves any markets that have settled since the last run |
 | 2 | Fetch | Downloads 2,400+ open markets across 400 active events |
 | 3 | Filter | Drops liquid, efficiently-priced, and structurally uninteresting markets; deduplicates by event; tags any market where a tracked smart-money trader holds a position |
-| 4 | Cross-reference | Finds the same question on Polymarket, Manifold, PredictIt, Metaculus, and The Odds API — price gaps between platforms are a primary signal input |
+| 4 | Cross-reference | Finds the same question on Polymarket, Manifold, PredictIt, and Metaculus — price gaps between platforms are a primary signal input |
 | 5 | Whale detection | Flags unusually large individual trades and order-book imbalances that may indicate informed positioning |
 | 6 | Score | Scores flagged markets using Claude with live web search, anchored by 47 calibration rules that ground estimates in category base rates and cross-market evidence |
 | 7 | Log + Smart money | Persists signals to SQLite; runs the watchlist scan (fetches open positions for 20 tracked traders, cross-references to Kalshi markets by title similarity) |
@@ -48,7 +48,7 @@ Each daily run executes an 8-step pipeline:
 
 ## What This Demonstrates
 
-Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across six external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,850-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
+Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across five external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,850-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
 
 The design reflects a deliberate choice to build measurement infrastructure before claiming results. The calibration script (`analysis/calibration.py`) computes Brier scores and win rates broken down by flag path, time horizon, confidence tier, and cross-market alignment. The backlog is explicitly structured around data conditions: several planned features are blocked until the resolved-signal count clears n=20, because prior to that threshold any accuracy metric is too noisy to act on. This is an easy discipline to skip when you're the only one checking.
 
@@ -63,7 +63,7 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | Folder | Purpose |
 |---|---|
 | `core/` | The pipeline engine — auth, scanning, scoring, logging, reporting. Everything `main.py` orchestrates lives here. |
-| `sources/` | External market API clients — Polymarket, Manifold/PredictIt/Metaculus/OddsAPI, and winning-wallet discovery. |
+| `sources/` | External market API clients — Polymarket, Manifold/PredictIt/Metaculus, and winning-wallet discovery. |
 | `analysis/` | Read-only diagnostic and calibration scripts that run against `data/leviathan.db`. Nothing here is part of the daily pipeline. |
 | `backtesting/` | Offline, CSV-based backtest harness (including walk-forward validation), the empirical base-rate scaffold, and the settled-market replay pipeline (`settled_fetcher.py` pulls Kalshi's historical settled markets, `asof_reconstruction.py` rebuilds a market's state as of a past date from snapshots/candlesticks, `replay_runner.py` scores the reconstruction and grades it against the now-known outcome). Doesn't touch the live DB. |
 | `backlog/` | The backlog engine (`engine.py`) and weekly gate checker (`checker.py`) that maintain `backlog/backlog.json` and regenerate `BACKLOG.md`. |
@@ -97,9 +97,8 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `core/fees.py` | Kalshi fee schedule and net-of-fee edge math |
 | `core/sizing.py` | Confidence-weighted hypothetical stake sizing — self-gated on live resolved-signal counts, fully inert until the same threshold as `auto-calibration-loop` clears |
 | `sources/polymarket.py` | Polymarket Gamma API price cross-reference |
-| `sources/external_markets.py` | Manifold + PredictIt + Metaculus + OddsAPI aggregator |
+| `sources/external_markets.py` | Manifold + PredictIt + Metaculus aggregator |
 | `sources/metaculus.py` | Metaculus question search and probability fetch |
-| `sources/odds_api.py` | The Odds API bookmaker lines |
 | `sources/accounts.py` | Winning Polymarket wallet discovery and per-market scan |
 | `config.json` | All thresholds, model settings, watchlist |
 | `analysis/smart_money_scan.py` | Watchlist position fetch and Kalshi cross-reference |
@@ -141,7 +140,6 @@ The codebase is structured as a modular pipeline — each layer is independently
 | Manifold | Community forecaster prices |
 | PredictIt | Regulated US political market prices |
 | Metaculus | Superforecaster consensus (requires free token) |
-| The Odds API | Sharp bookmaker lines for sports markets (requires free key) |
 
 ---
 
@@ -166,7 +164,6 @@ Fill in `.env`:
 | `KALSHI_KEY_ID` | kalshi.com → Settings → API |
 | `KALSHI_PRIVATE_KEY` | Same — RSA private key (PEM format) |
 | `GMAIL_APP_PASSWORD` | Google account → Security → App Passwords |
-| `ODDS_API_KEY` | [the-odds-api.com](https://the-odds-api.com) (free tier: 500 req/month) |
 | `METACULUS_API_TOKEN` | [metaculus.com/api](https://www.metaculus.com/api/) (free) |
 
 ### 3. Configure settings

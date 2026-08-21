@@ -7,7 +7,7 @@ python -m pytest -q
 ```
 
 From the repo root. All tests are **offline-only** — no Kalshi, Polymarket,
-Manifold, PredictIt, OddsAPI, Metaculus, Claude CLI, or email calls are made.
+Manifold, PredictIt, Metaculus, Claude CLI, or email calls are made.
 Network and subprocess boundaries are mocked with `unittest.mock.patch`.
 
 **Current count: 288 tests, 0 failures.**
