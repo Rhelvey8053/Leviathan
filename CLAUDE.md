@@ -143,3 +143,14 @@ every time; there's no persistent cwd inside it across turns. This also
 means anything registered as "local to the project" (e.g. the `leviathan`
 MCP server, added via `claude mcp add`) is scoped to `C:\WINDOWS\system32`
 in `.claude.json`, not to the Leviathan repo itself.
+
+Same limitation hits custom subagents (`.claude/agents/*.md`, present in
+this repo — see `subscriber-ux-designer.md`, `subscriber-hosting-billing.md`,
+`subscriber-growth.md`), confirmed 2026-08-21. Discovery is documented as
+walking from cwd up to the repo root, and the files are correctly in place,
+but a background-job session here never actually has cwd inside the repo —
+`Agent(subagent_type: "subscriber-ux-designer")` fails with "Agent type not
+found" even though nothing is wrong with the file. These agents work
+normally from an interactive Claude Code session actually launched with cwd
+inside this repo (e.g. a terminal opened here running `claude`) — this is a
+background-session-only gap, not a bug in the agent definitions.

@@ -20,7 +20,8 @@ subscribers.json
 __pycache__/
 *.pyc
 .pytest_cache/
-.claude/
+.claude/*
+!.claude/agents/
 data/snapshots/*.json
 data/.leviathan.db-litestream/
 tools/litestream.exe
