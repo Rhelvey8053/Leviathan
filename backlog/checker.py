@@ -208,6 +208,31 @@ def execute_action(item: dict) -> bool:
 # Condition description helper
 # ---------------------------------------------------------------------------
 
+def gate_progress_str(item: dict, metrics: dict) -> str:
+    """Live progress toward an item's own trigger, sentinel-aware (mirrors
+    scripts/verify_liam_report.py's ground-truth logic): shows the current
+    live value and MET/not-met per condition, and flags a sentinel metric
+    (one never computed by compute_metrics -- e.g. api_spend_authorized)
+    as requiring a human decision rather than reporting it as simply
+    "not met", which would wrongly imply it could clear on its own.
+
+    For a still-locked/blocked item, not a newly-unlocked one -- see
+    _gate_str below for that case, where the trigger is by definition
+    already satisfied. Returns '' if the item has no trigger conditions."""
+    conds = item.get("trigger", {}).get("all", [])
+    if not conds:
+        return ""
+    parts = []
+    for c in conds:
+        if c["metric"] not in METRICS_KEYS:
+            parts.append(f"{c['metric']} {c['op']} {c['value']} [requires human decision, never auto-computed]")
+            continue
+        live = metrics.get(c["metric"], 0)
+        met = _OP_FNS[c["op"]](live, c["value"])
+        parts.append(f"{c['metric']}={live} {c['op']} {c['value']} ({'MET' if met else 'not met'})")
+    return "; ".join(parts)
+
+
 def _gate_str(item: dict, metrics: dict) -> str:
     conds = item.get("trigger", {}).get("all", [])
     if not conds:

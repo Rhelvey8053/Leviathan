@@ -70,6 +70,7 @@ sys.path.insert(0, str(ROOT))
 load_dotenv()
 
 from backlog.engine import load_backlog
+from backlog.checker import compute_metrics, gate_progress_str
 
 CONFIG_PATH = ROOT / "config.json"
 BACKLOG_PATH = ROOT / "backlog" / "backlog.json"
@@ -363,37 +364,47 @@ def _update_config_monday_section(board_id: int, schema: dict, backlog_id_col: s
 
 # ─── Phase 2: one-way push sync ────────────────────────────────────────────
 
-def _gate_context(item: dict) -> str:
+def _gate_context(item: dict, metrics: dict) -> str:
     """Appends gate/depends_on context to a locked/blocked item's Detail
-    text, per the handoff's field mapping (section 6)."""
+    text, per the handoff's field mapping (section 6).
+
+    Shows BOTH depends_on AND the item's own trigger progress (with live
+    values) whenever either applies -- previously a "blocked" item only
+    ever showed "Waiting on: <deps>", never its own trigger conditions,
+    even when it had both (e.g. deps done but a sentinel/unmet trigger
+    still gating it). That gap is exactly what let Liam's PM-agent reports
+    recommend unblocking items whose dependencies had cleared but whose
+    trigger hadn't -- see verify_liam_report.py and the 2026-08-2x
+    Liam-alignment note in docs/PROGRESS.md."""
+    parts = []
     status = item.get("status")
-    if status == "locked":
-        conds = item.get("trigger", {}).get("all", [])
-        if conds:
-            gate = "; ".join(f"{c['metric']} {c['op']} {c['value']}" for c in conds)
-            return f"\n\nGate: {gate}"
-    elif status == "blocked":
+    if status == "blocked":
         deps = item.get("depends_on", [])
         if deps:
-            return f"\n\nWaiting on: {', '.join(deps)}"
-    return ""
+            parts.append(f"Waiting on: {', '.join(deps)}")
+    gate = gate_progress_str(item, metrics)
+    if gate:
+        parts.append(f"Gate: {gate}")
+    if not parts:
+        return ""
+    return "\n\n" + "\n".join(parts)
 
 
-def render_detail(item: dict) -> str:
-    text = (item.get("action") or "") + _gate_context(item)
+def render_detail(item: dict, metrics: dict) -> str:
+    text = (item.get("action") or "") + _gate_context(item, metrics)
     if len(text) > DETAIL_MAX_CHARS:
         keep = DETAIL_MAX_CHARS - len(DETAIL_TRUNCATION_NOTE)
         text = text[:keep] + DETAIL_TRUNCATION_NOTE
     return text
 
 
-def expected_fields(item: dict) -> dict:
+def expected_fields(item: dict, metrics: dict) -> dict:
     return {
         "status_label": STATUS_TO_LABEL[item["status"]],
         "group_title": STATUS_TO_GROUP[item["status"]],
         "priority": item["priority"],
         "area": item["area"],
-        "detail": render_detail(item),
+        "detail": render_detail(item, metrics),
     }
 
 
@@ -422,11 +433,11 @@ def current_fields(board_item: dict, col_ids: dict) -> dict:
     }
 
 
-def _diff(item: dict, board_item: dict | None, col_ids: dict) -> dict:
+def _diff(item: dict, board_item: dict | None, col_ids: dict, metrics: dict) -> dict:
     """Returns {field: (old, new)} for fields that actually differ. Never
     includes a field whose current value already matches -- the caller
     uses an empty dict (and no fresh-done transition) as "nothing to do"."""
-    exp = expected_fields(item)
+    exp = expected_fields(item, metrics)
     if board_item is None:
         return {"_create": (None, exp)}
 
@@ -445,8 +456,8 @@ def _diff(item: dict, board_item: dict | None, col_ids: dict) -> dict:
     return changes
 
 
-def _create_board_item(board_id: int, group_id: str, item: dict, col_ids: dict) -> str:
-    exp = expected_fields(item)
+def _create_board_item(board_id: int, group_id: str, item: dict, col_ids: dict, metrics: dict) -> str:
+    exp = expected_fields(item, metrics)
     cvs = {
         col_ids["status"]: {"label": exp["status_label"]},
         col_ids["priority"]: str(exp["priority"]),
@@ -644,6 +655,7 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False,
     bl = load_backlog(BACKLOG_PATH)
     bl_ids = {i["id"] for i in bl["items"]}
     board_items = get_all_items(board_id)
+    metrics = compute_metrics()
 
     log_item_id = None
     if post_progress:
@@ -672,16 +684,16 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False,
     for item in bl["items"]:
         bid = item["id"]
         board_item = by_backlog_id.get(bid)
-        changes = _diff(item, board_item, col_ids)
+        changes = _diff(item, board_item, col_ids, metrics)
 
         if "_create" in changes:
-            exp = expected_fields(item)
+            exp = expected_fields(item, metrics)
             if dry_run:
                 print(f"  [dry-run] would CREATE {bid!r} in group {exp['group_title']!r}")
                 if post_progress:
                     print(f"  [dry-run] would post creation update on {bid!r}")
             else:
-                new_id = _create_board_item(board_id, groups_by_title[exp["group_title"]], item, col_ids)
+                new_id = _create_board_item(board_id, groups_by_title[exp["group_title"]], item, col_ids, metrics)
                 if post_progress:
                     msg = _transition_message(item, {}, False, created=True)
                     _post_update(new_id, msg)
@@ -692,7 +704,7 @@ def phase2_sync(board_id: int = DEFAULT_BOARD_ID, dry_run: bool = False,
         if not changes:
             continue  # already matches -- idempotent no-op
 
-        exp = expected_fields(item)
+        exp = expected_fields(item, metrics)
         cur = current_fields(board_item, col_ids)
         newly_done = cur["status_label"] != "Done" and exp["status_label"] == "Done"
         is_transition = "status" in changes or "group" in changes or newly_done
@@ -745,6 +757,7 @@ def verify_phase2(board_id: int = DEFAULT_BOARD_ID) -> dict:
     col_ids = _resolve_column_ids(schema)
     bl = load_backlog(BACKLOG_PATH)
     board_items = get_all_items(board_id)
+    metrics = compute_metrics()
 
     by_backlog_id = {}
     for bit in board_items:
@@ -758,7 +771,7 @@ def verify_phase2(board_id: int = DEFAULT_BOARD_ID) -> dict:
         if board_item is None:
             mismatches.append({"backlog_id": item["id"], "diff": "missing from board"})
             continue
-        changes = _diff(item, board_item, col_ids)
+        changes = _diff(item, board_item, col_ids, metrics)
         if changes:
             mismatches.append({"backlog_id": item["id"], "diff": changes})
 

@@ -290,42 +290,61 @@ def _bl_item(id="alpha", status="done", priority=1, area="calibration",
 
 def test_render_detail_plain_for_done_item():
     item = _bl_item(status="done", action="Fixed the bug.")
-    assert ms.render_detail(item) == "Fixed the bug."
+    assert ms.render_detail(item, {}) == "Fixed the bug."
 
 
 def test_render_detail_appends_gate_for_locked_item():
     item = _bl_item(status="locked", action="Do the thing.",
                      trigger={"all": [{"metric": "resolved_count", "op": ">=", "value": 25}]})
-    detail = ms.render_detail(item)
+    detail = ms.render_detail(item, {"resolved_count": 10})
     assert detail.startswith("Do the thing.")
-    assert "Gate: resolved_count >= 25" in detail
+    assert "Gate: resolved_count=10 >= 25 (not met)" in detail
+
+
+def test_render_detail_gate_shows_met_when_trigger_satisfied():
+    item = _bl_item(status="locked", action="Do the thing.",
+                     trigger={"all": [{"metric": "resolved_count", "op": ">=", "value": 25}]})
+    detail = ms.render_detail(item, {"resolved_count": 30})
+    assert "Gate: resolved_count=30 >= 25 (MET)" in detail
+
+
+def test_render_detail_flags_sentinel_metric_as_human_decision():
+    """A metric compute_metrics never computes (a policy/human gate, e.g.
+    api_spend_authorized) must read as requiring a decision, not as a
+    live 0 that could clear on its own -- this is the exact signal that
+    was missing from the board and let Liam's PM-agent reports recommend
+    unblocking items still gated behind one (see docs/PROGRESS.md)."""
+    item = _bl_item(status="blocked", action="Do the thing.", depends_on=["dep-a"],
+                     trigger={"all": [{"metric": "api_spend_authorized", "op": ">=", "value": 1}]})
+    detail = ms.render_detail(item, {})
+    assert "requires human decision, never auto-computed" in detail
 
 
 def test_render_detail_appends_waiting_on_for_blocked_item():
     item = _bl_item(status="blocked", action="Do the thing.", depends_on=["other-item"])
-    detail = ms.render_detail(item)
+    detail = ms.render_detail(item, {})
     assert "Waiting on: other-item" in detail
 
 
 def test_render_detail_truncates_long_action():
     item = _bl_item(status="done", action="x" * 3000)
-    detail = ms.render_detail(item)
+    detail = ms.render_detail(item, {})
     assert len(detail) <= ms.DETAIL_MAX_CHARS
     assert "truncated" in detail
 
 
 def test_render_detail_no_truncation_under_cap():
     item = _bl_item(status="done", action="short text")
-    assert "truncated" not in ms.render_detail(item)
+    assert "truncated" not in ms.render_detail(item, {})
 
 
 def test_expected_fields_maps_status_to_group_and_label():
-    assert ms.expected_fields(_bl_item(status="ready"))["group_title"] == "Ready"
-    assert ms.expected_fields(_bl_item(status="ready"))["status_label"] == "Ready"
-    assert ms.expected_fields(_bl_item(status="locked"))["group_title"] == "Locked"
-    assert ms.expected_fields(_bl_item(status="blocked"))["group_title"] == "Blocked"
-    assert ms.expected_fields(_bl_item(status="done"))["group_title"] == "Completed"
-    assert ms.expected_fields(_bl_item(status="done"))["status_label"] == "Done"
+    assert ms.expected_fields(_bl_item(status="ready"), {})["group_title"] == "Ready"
+    assert ms.expected_fields(_bl_item(status="ready"), {})["status_label"] == "Ready"
+    assert ms.expected_fields(_bl_item(status="locked"), {})["group_title"] == "Locked"
+    assert ms.expected_fields(_bl_item(status="blocked"), {})["group_title"] == "Blocked"
+    assert ms.expected_fields(_bl_item(status="done"), {})["group_title"] == "Completed"
+    assert ms.expected_fields(_bl_item(status="done"), {})["status_label"] == "Done"
 
 
 COL_IDS = {"status": "c_status", "priority": "c_pri", "area": "c_area",
@@ -349,14 +368,14 @@ def _board_item(name="alpha", group_title="Completed", status_label="Done",
 def test_diff_empty_when_board_already_matches():
     item = _bl_item(status="done", priority=1, area="calibration", action="Fixed the bug.")
     board_item = _board_item()
-    assert ms._diff(item, board_item, COL_IDS) == {}
+    assert ms._diff(item, board_item, COL_IDS, {}) == {}
 
 
 def test_diff_detects_status_and_group_change():
     item = _bl_item(id="beta", status="ready", priority=1, area="validation", action="x")
     board_item = _board_item(name="beta", group_title="Blocked", status_label="Blocked",
                               priority="1", area="validation", detail="x")
-    changes = ms._diff(item, board_item, COL_IDS)
+    changes = ms._diff(item, board_item, COL_IDS, {})
     assert "status" in changes
     assert "group" in changes
     assert "priority" not in changes
@@ -366,20 +385,20 @@ def test_diff_detects_status_and_group_change():
 def test_diff_detects_priority_change():
     item = _bl_item(priority=3)
     board_item = _board_item(priority="1")
-    changes = ms._diff(item, board_item, COL_IDS)
+    changes = ms._diff(item, board_item, COL_IDS, {})
     assert changes["priority"] == ("1", 3)
 
 
 def test_diff_detects_area_change():
     item = _bl_item(area="infra")
     board_item = _board_item(area="infrastructure")
-    changes = ms._diff(item, board_item, COL_IDS)
+    changes = ms._diff(item, board_item, COL_IDS, {})
     assert changes["area"] == ("infrastructure", "infra")
 
 
 def test_diff_returns_create_marker_when_no_board_item():
     item = _bl_item()
-    changes = ms._diff(item, None, COL_IDS)
+    changes = ms._diff(item, None, COL_IDS, {})
     assert "_create" in changes
 
 
@@ -412,6 +431,10 @@ def tmp_backlog2(tmp_path, monkeypatch):
     ]}
     path.write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setattr(ms, "BACKLOG_PATH", path)
+    # Deterministic live metrics -- gamma's trigger (resolved_count >= 25)
+    # evaluates to "not met" everywhere this fixture is used, rather than
+    # hitting the real DB via the unmocked default.
+    monkeypatch.setattr(ms, "compute_metrics", lambda: {"resolved_count": 10})
     return path
 
 
@@ -428,7 +451,7 @@ def test_phase2_sync_no_writes_when_board_already_matches(tmp_backlog2, monkeypa
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
 
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
@@ -479,7 +502,7 @@ def test_phase2_sync_updates_only_changed_field(tmp_backlog2, monkeypatch, tmp_p
                     priority="1", area="validation", detail="Do the thing."),  # priority wrong
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
 
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
@@ -510,7 +533,7 @@ def test_phase2_sync_stamps_completed_date_only_on_fresh_transition(tmp_backlog2
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
 
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
@@ -540,7 +563,7 @@ def test_phase2_sync_never_stamps_completed_date_for_already_done_item(tmp_backl
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
 
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
@@ -579,7 +602,7 @@ def test_phase2_sync_leaves_unmanaged_board_items_untouched(tmp_backlog2, monkey
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
         {  # unmanaged: no backlog_id column value at all
             "id": "item-pm", "name": "Set up PM", "group": {"id": "g_todo", "title": "To-Do"},
             "column_values": [{"id": COL_IDS["status"], "text": None, "value": None}],
@@ -607,7 +630,7 @@ def test_verify_phase2_ok_when_everything_matches(tmp_backlog2, monkeypatch):
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
          patch("scripts.monday_sync.get_all_items", return_value=board_items):
@@ -625,7 +648,7 @@ def test_verify_phase2_flags_mismatch(tmp_backlog2, monkeypatch):
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
          patch("scripts.monday_sync.get_all_items", return_value=board_items):
@@ -752,7 +775,7 @@ def test_phase3_posts_no_updates_on_no_op_run_but_posts_summary(tmp_backlog2, mo
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
 
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
@@ -789,7 +812,7 @@ def test_phase3_posts_transition_update_and_summary(tmp_backlog2, monkeypatch, t
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
 
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
@@ -848,7 +871,7 @@ def test_phase3_persists_log_item_id_to_config(tmp_backlog2, monkeypatch, tmp_pa
                     priority="2", area="validation", detail="Do the thing."),
         _board_item(name="gamma", group_title="Locked", status_label="Locked",
                     priority="1", area="calibration",
-                    detail="Wait for gate.\n\nGate: resolved_count >= 25"),
+                    detail="Wait for gate.\n\nGate: resolved_count=10 >= 25 (not met)"),
     ]
 
     with patch("scripts.monday_sync.get_board_schema", return_value=schema), \
