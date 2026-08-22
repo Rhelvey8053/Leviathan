@@ -223,6 +223,21 @@ def _gate_str(item: dict, metrics: dict) -> str:
 # BACKLOG.md generator
 # ---------------------------------------------------------------------------
 
+def _summarize_action(action: str, max_len: int = 200) -> str:
+    """First sentence (or a hard cutoff) of an action narrative, for
+    BACKLOG.md's tables. Done items in particular accumulate long
+    retrospective paragraphs (see backlog.json) that would otherwise get
+    re-embedded in full on every regeneration -- backlog.json stays the
+    source of truth for the complete text, this is just a summary."""
+    action = action.replace("|", "/").strip()
+    period = action.find(". ")
+    if 0 < period < max_len:
+        return action[:period + 1]
+    if len(action) <= max_len:
+        return action
+    return action[:max_len].rsplit(" ", 1)[0] + "…"
+
+
 def generate_markdown(backlog: dict, metrics: dict) -> str:
     today = date.today().isoformat()
     rc = metrics.get("resolved_count", 0)
@@ -239,6 +254,10 @@ def generate_markdown(backlog: dict, metrics: dict) -> str:
         "# Leviathan Backlog",
         f"Last updated: {today} | Metrics: resolved={rc}, fills={fc}",
         "",
+        "Action text below is summarized. Full narrative per item is "
+        "`backlog/backlog.json`'s `action` field -- this file is "
+        "auto-generated, never hand-edit it.",
+        "",
     ]
 
     # Ready
@@ -247,7 +266,7 @@ def generate_markdown(backlog: dict, metrics: dict) -> str:
     lines.append("| Priority | ID | Action | Area |")
     lines.append("|----------|-----|--------|------|")
     for item in ready:
-        lines.append(f"| {item['priority']} | {item['id']} | {item['action']} | {item['area']} |")
+        lines.append(f"| {item['priority']} | {item['id']} | {_summarize_action(item['action'])} | {item['area']} |")
     lines.append("")
 
     # Locked
@@ -279,7 +298,7 @@ def generate_markdown(backlog: dict, metrics: dict) -> str:
     lines.append("| Priority | ID | Action | Area |")
     lines.append("|----------|-----|--------|------|")
     for item in done:
-        lines.append(f"| {item['priority']} | {item['id']} | {item['action']} | {item['area']} |")
+        lines.append(f"| {item['priority']} | {item['id']} | {_summarize_action(item['action'])} | {item['area']} |")
     lines.append("")
 
     return "\n".join(lines)
