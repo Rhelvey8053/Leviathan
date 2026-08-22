@@ -88,7 +88,7 @@ own alert if this keeps happening.
    field names Kalshi used to return.
 3. If Kalshi genuinely renamed/removed a field, the fix is in
    `core/kalshi.py` (the fetch functions) — this codebase has already hit
-   this exact failure mode more than once (see `docs/PROGRESS.md`,
+   this exact failure mode more than once (see `docs/PROGRESS_ARCHIVE.md`,
    2026-07-25 bug sweep: `fetch_orderbook`/`fetch_trades` both assumed a
    response shape that turned out not to exist). Verify the real shape
    with a live request before changing code, the same way those fixes

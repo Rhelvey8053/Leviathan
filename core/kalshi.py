@@ -549,7 +549,7 @@ def kalshi_market_url(series_ticker: str | None, event_ticker: str | None = None
     event_ticker) pair, or None if either is missing/empty.
 
     CONFIRMED PATTERN (2026-07-23, superseding the 2026-07-22 "no pattern
-    confirmed" finding — see docs/PROGRESS.md for the full trail):
+    confirmed" finding — see docs/PROGRESS_ARCHIVE.md for the full trail):
 
         https://kalshi.com/markets/{series_ticker.lower()}/{event_ticker.lower()}
 
@@ -587,7 +587,7 @@ def kalshi_market_url(series_ticker: str | None, event_ticker: str | None = None
 
     series_ticker is captured in main.py from the EVENT object (event
     objects have it; raw market objects do not) and threaded through
-    alongside event_ticker (see docs/PROGRESS.md). Rows logged before this
+    alongside event_ticker (see docs/PROGRESS_ARCHIVE.md). Rows logged before this
     existed have series_ticker='' and fall back to bare ticker text.
 
     Never emits a guessed URL when a required field is missing, and never

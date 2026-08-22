@@ -61,7 +61,7 @@ no order execution.** See `README.md` for the full 8-step architecture.
 |---|---|
 | Architecture, 8-step pipeline, setup | `README.md` |
 | Current backlog state (Ready/Locked/Blocked/Done) | `BACKLOG.md` — **auto-generated** by `backlog/checker.py`, never hand-edit. Source of truth is `backlog/backlog.json`. |
-| Recent narrative / session log | `docs/PROGRESS.md` — newest entries at the **top**. Large (~150KB); grep for a date or keyword rather than reading in full. |
+| Recent narrative / session log | `docs/PROGRESS.md` — newest entries at the **top**, covers 2026-08-01 onward (trimmed from ~150KB to ~11KB on 2026-08-22; older entries moved to `docs/PROGRESS_ARCHIVE.md`, same top-down convention, grep by date/keyword rather than reading either in full). |
 | Diagnosing a failed/missing scheduled run | `docs/RUNBOOK.md` |
 | Evaluating a monday.com/Liam (PM agent) report before acting on it | `docs/RUNBOOK.md`'s "Triaging Liam" section + `python scripts/verify_liam_report.py` |
 | Running/diagnosing the monday.com sync itself | `docs/monday_sync_runbook.md` |

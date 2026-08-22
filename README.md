@@ -72,7 +72,7 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, gate-unlock and no-run-completed alerting, Task Scheduler registration. |
 | `tests/` | The full offline test suite (1,850 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), the CSV export directory (`data/powerbi_export/` — name predates the Power BI retirement, kept as-is since renaming touches `core/export_to_csv.py`, `dashboard/data.py`, and tests for no functional gain), market snapshots, and smart-money/whale caches. |
-| `docs/` | Progress log (`PROGRESS.md`), a plain-language project narrative for non-technical readers (`STORY.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
+| `docs/` | Progress log (`PROGRESS.md`, 2026-08-01 onward; older entries in `PROGRESS_ARCHIVE.md`), a plain-language project narrative for non-technical readers (`STORY.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
 ---

@@ -2629,7 +2629,7 @@ def compile_report(
     return "\n".join(out)
 
 
-# ── HTML email (leviathan_report_email_v2.html — see docs/PROGRESS.md) ───────
+# ── HTML email (leviathan_report_email_v2.html — see docs/PROGRESS_ARCHIVE.md) ───────
 
 _HTML_STAT_TILE = (
     '<td style="padding-top:14px;">'

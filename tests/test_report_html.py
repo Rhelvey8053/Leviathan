@@ -162,7 +162,7 @@ def test_html_row_with_series_and_event_ticker_gets_real_href():
     """
     With BOTH series_ticker and event_ticker present, the REAL (unmocked)
     kalshi_market_url now constructs a working link — no mock needed,
-    since the pattern is confirmed (see core/kalshi.py, docs/PROGRESS.md).
+    since the pattern is confirmed (see core/kalshi.py, docs/PROGRESS_ARCHIVE.md 2026-07-23).
     """
     s = _sig(ticker="KXLINKED-01", series_ticker="KXLINKED", event_ticker="KXLINKED-01-EVT")
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
