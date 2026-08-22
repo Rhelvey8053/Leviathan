@@ -136,6 +136,13 @@ already wrap `sys.stdout` in a UTF-8 `TextIOWrapper` for this
 (`main.py`, `scripts/position_reconciliation.py`, `scripts/verify_liam_report.py`)
 — follow that pattern in new scripts that print non-ASCII text.
 
+`dashboard/.venv/` is a full Python virtualenv on disk (~19,000+ files,
+gitignored via `dashboard/.venv*/`). `Grep` respects `.gitignore` and skips
+it automatically, but `Glob` does not — a broad repo-root pattern like
+`**/*.py` floods with pip/virtualenv internals instead of real code. Scope
+`Glob` calls to a specific directory (`core/`, `scripts/`, `tests/`, etc.)
+rather than the repo root.
+
 Claude Code's own project identity on this machine is anchored at
 `C:\WINDOWS\system32`, not this repo's own root — Bash commands need a
 `cd` (or `cd ... &&` prefix) into `C:\Users\Administrator\Downloads\Leviathan`
