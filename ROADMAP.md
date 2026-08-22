@@ -1,5 +1,5 @@
 # Leviathan Roadmap
-Last updated: 2026-08-17, reconciled against BACKLOG.md (55 items: 3 Ready, 5 Locked, 7 Blocked, 60 Done).
+Last updated: 2026-08-22, reconciled against BACKLOG.md (76 items: 1 Ready, 5 Locked, 7 Blocked, 63 Done).
 
 Governing principle, which the backlog already encodes through its gates:
 **validate before you widen.** Every phase below either hardens the
@@ -7,22 +7,19 @@ measurement apparatus (scorer integrity, edge math) or is explicitly gated
 on that apparatus producing enough validated volume before the surface
 grows (more venues, more calibration curves, more automation).
 
-Current sample: the backlog's own metrics header reads `resolved=13,
+Current sample: the backlog's own metrics header reads `resolved=14,
 fills=7`. Most validation/calibration gates in the Locked section
-(`resolved_count >= 20/30/50`, `fills_count >= 20`) are not yet met.
+(`resolved_count >= 20/30/50`, `fills_count >= 20`) are still not met.
 **Volume is the binding constraint on this whole roadmap** — which is
-exactly why Phase 2 outranks any new feature work below.
+exactly why Phase 2 is now the ONLY thing standing between here and
+Phase 4; Phases 1 and 3 have both shipped since this was last updated.
 
-## Phase 1 — Harden the scorer (buildable now, no gate)
-`citations-provenance-grounding` — ground each scorer rationale claim in a
-machine-checkable cited-text span via the Anthropic Citations API, instead
-of the current loose per-call source list. The only genuinely-new,
-no-spend, no-data-gate work in this pass. Compounds with the existing
-`price-blind-arm` scoring-integrity work.
-
-(`scorer-websearch-grounding` was proposed alongside this but dropped —
-web search is already active on both scoring backends; see Reconciliation
-below. Nothing to build there.)
+## Phase 1 — Harden the scorer — SHIPPED
+`citations-provenance-grounding` is Done: scorer rationale claims are now
+grounded in machine-checkable cited-text spans via the Anthropic Citations
+API. (`scorer-websearch-grounding` was proposed alongside this but
+dropped — web search was already active on both scoring backends; see
+Reconciliation below.)
 
 ## Phase 2 — Unblock the replay corpus (the real bottleneck, and a human decision, not a build)
 Approve the metered API spend for `replay-instrument-validation` so
@@ -30,30 +27,33 @@ Approve the metered API spend for `replay-instrument-validation` so
 (0 rows right now, against 12,600 available `settled_markets` — confirmed
 live 2026-08-17). The runner forces the paid API backend at ~5 tickers per
 invocation against the `daily_cost_ceiling_usd=$20/day` cap, so reaching
-n>=300 means dozens of invocations spread over several days.
+n>=300 means dozens of invocations spread over several days. Gated behind
+`api_spend_authorized`, a sentinel metric `backlog/checker.py` deliberately
+never computes — see CLAUDE.md's hard policy constraints and
+`core.llm._check_api_spend_authorized()`. This is a real go/no-go decision
+against the standing Pro-subscription-only policy, not a stale block.
 
 Everything downstream depends on this volume: `calibration-curve`
 (`resolved_count >= 50`), `edge-decay-analysis` (`>= 30`),
-`walk-forward-validation`, `skill-vs-luck-weighting`
-(`resolved_count_per_wallet_max >= 10`). Until this runs, "validate before
-widen" has nothing to validate against. **Highest-leverage unlock in the
-whole backlog — already filed as Blocked, just needs a go/no-go on spend.**
+`skill-vs-luck-weighting` (`resolved_count_per_wallet_max >= 10`).
+`walk-forward-validation` itself has since shipped (Done), but still has
+nothing real to validate against without this corpus. Until this runs,
+"validate before widen" has nothing to validate against. **Highest-leverage
+unlock in the whole backlog, and now the sole blocker on Phase 4 too —
+still Blocked, still just needs a go/no-go on spend.**
 
-## Phase 3 — Fix the edge math
-`net-edge-fee-depth-model` — fees are already netted (`net_edge_after_fee`,
-`ev_after_fee_per_contract` are both shipped), so this phase is narrower
-than it originally sounded: close the executable-depth gap. Right now
-nothing checks whether the order book can actually fill a stated stake at
-a price consistent with the signal's own edge before trusting
-`net_edge_after_fee` at face value. Prerequisite for any cross-venue work —
-no point widening the venue surface on top of edge math that doesn't yet
-account for whether an edge is actually tradeable.
+## Phase 3 — Fix the edge math — SHIPPED
+`net-edge-fee-depth-model` is Done: fees are netted (`net_edge_after_fee`,
+`ev_after_fee_per_contract`) and the order-book depth check now gates on
+whether a stated stake is actually fillable at a price consistent with the
+signal's own edge, closing the executable-depth gap this phase existed to
+close.
 
 ## Phase 4 — Widen the surface
 `cross-venue-expansion` — a normalized multi-venue aggregator layer,
 distinct from the existing two-venue `CROSS_MARKET` (Kalshi/Polymarket)
-corroboration proxy. Blocked on both Phase 2 (a validated corpus to test
-against) and Phase 3 (trustworthy edge math to widen in the first place).
+corroboration proxy. Was blocked on both Phase 2 and Phase 3; with Phase 3
+shipped, **Phase 2 alone is now the only thing standing in its way**.
 Aggregator vendor landscape needs a fresh look before building against
 any of them — Polymarket acquired the main independent aggregator, Dome,
 in early 2026.
