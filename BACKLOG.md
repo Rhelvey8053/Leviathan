@@ -1,11 +1,12 @@
 # Leviathan Backlog
-Last updated: 2026-08-21 | Metrics: resolved=14, fills=7
+Last updated: 2026-08-22 | Metrics: resolved=14, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (0)
+## Ready (1)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 3 | smart-money-discovery-dashboard | User asked (2026-08-22) whether a dashboard insight for winning-trader/whale detection is possible despite the project's low resolved-bet sample size. | reporting |
 
 ## Locked (5)
 | Priority | ID | Gate | Area |

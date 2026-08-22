@@ -42,8 +42,20 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_75_items(backlog_data):
+def test_parses_and_76_items(backlog_data):
     """
+    76, not 75: smart-money-discovery-dashboard added 2026-08-22, in
+    response to the user asking whether any dashboard insight for
+    winning-trader/whale detection was possible despite the project's low
+    resolved-bet sample size. Status "ready" (no trigger, no depends_on) --
+    unlike wallet-tracking-dashboard (blocked on
+    resolved_count_per_wallet_max >= 10), this surfaces two data sources
+    that were already fully computed but never wired into the dashboard:
+    sources/accounts.py's diagnose_discovery() funnel diagnostic over live
+    Polymarket wallet data, and core/whales.py's whale-direction streak
+    tracker (data/whale_history/streak.json) -- both independent of
+    Leviathan's own resolved_count.
+
     75, not 74: graphify-skill-evaluation re-added 2026-08-19, restoring the
     item the 74-count paragraph below describes dropping on 2026-08-17. The
     schema gap that caused that drop (no way to encode "blocked on an
@@ -134,7 +146,7 @@ def test_parses_and_75_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 75
+    assert len(backlog_data["items"]) == 76
 
 
 def test_all_ids_unique(backlog_data):
