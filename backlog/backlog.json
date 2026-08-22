@@ -1123,6 +1123,71 @@
       "depends_on": [],
       "action": "User asked (2026-08-22) whether a dashboard insight for winning-trader/whale detection is possible despite the project's low resolved-bet sample size. Two data sources already exist that are NOT gated by Leviathan's own resolved_count and could be surfaced today: (1) sources/accounts.py's diagnose_discovery()/format_diagnostic_report() -- a funnel diagnostic over live Polymarket wallet data (currently CLI-text-only, never persisted or plotted) showing where wallets die across the five discovery gates (resolved_count, win_rate, position_count, pct_pnl, cash_pnl) plus percentile distributions at each gate -- useful even when winning_accounts.json is empty (it currently is: 0 winners as of this writing), since it explains WHY, not just THAT. (2) core/whales.py's cross-scan whale-direction streak tracker, persisted daily to data/whale_history/streak.json -- real-time Kalshi order-book activity, entirely independent of any resolved outcome. Add a new Streamlit page (dashboard/pages/, following the existing numbered-page convention) with two panels: a discovery funnel chart + gate-distribution table from diagnose_discovery(), and a whale-streak leaderboard (longest current same-direction streaks) from streak.json. Neither panel needs main.py or discover_winners() to run more than they already do -- this is a read-only view over data both functions already produce today.",
       "notes": "Distinct from wallet-tracking-dashboard (blocked on resolved_count_per_wallet_max>=10, which tracks FOLLOWED wallets' hit rate against Leviathan's own resolved signals). This item surfaces Polymarket-side wallet-discovery diagnostics and Kalshi-side whale activity, both computed from live external data with no dependency on Leviathan's own resolved-bet sample size. Directly answers the user's 2026-08-22 question about whale/trader insight when resolved-bet-constrained."
+    },
+    {
+      "id": "market-price-divergence-tracking",
+      "title": "Track win rate by market-price-divergence bucket",
+      "area": "calibration",
+      "priority": 3,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Analysis of the 14 currently-resolved paper signals (2026-08-22) found a specific, quantitatively grounded pattern worth tracking as volume grows, not yet acting on: market_baseline_brier (0.076, EXCELLENT) beats the scorer's own brier_score (0.126, GOOD) over this same population -- the market's implied price has out-forecast the model so far. Row-level inspection shows why: every YES call on a sub-11%-priced long-shot market where our_estimate diverged 3-13x above the market price lost (7/7); the 2 YES wins were on markets that weren't extreme long-shots (51% and 17% priced). Build a bucketed win-rate/brier breakdown by market-price band (or by |our_estimate - market_price| divergence) alongside the existing get_brier_score()/get_market_baseline_brier_score() in core/logger.py, so this pattern can be monitored automatically as resolved_count grows instead of requiring a fresh ad-hoc analysis each time someone asks. No data gate -- buildable now against the resolved rows that already exist; the point is visibility, not a conclusion (n=14 is far too small for one).",
+      "notes": "Follows from this session's 2026-08-22 resolved-signal analysis (market brier 0.076 vs scorer brier 0.126 on n=14). Not a conclusion -- an instrumentation request so the pattern is visible going forward without re-deriving it by hand."
+    },
+    {
+      "id": "rolled-market-repeat-detection",
+      "title": "Detect same-story markets rolled to a new expiry window",
+      "area": "calibration",
+      "priority": 4,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Found while reviewing the 14 resolved paper signals: 3 of them are the same real-world underlying event -- KXCABLEAVE-26MAY22-26JUN/26JUL/26AUG, a \"will this person leave their show by date X\" market re-flagged across three rolling expiry windows -- all YES, all resolved NO. The model didn't discount its estimate as the story kept not happening: it held 65% confidence on two of the three windows (market priced YES at 4.5-10.5% each time) rather than updating toward the market's persistently low price. scoring.repeat_dedup_days (widened this session) only catches exact-ticker repeats; it has no concept of \"same underlying question, rolled to a new expiry ticker.\" Investigate a lightweight heuristic (shared ticker prefix before the date/window suffix, or a shared event_ticker/title stem) to detect this pattern and surface it to the scorer prompt or the report (\"this is the Nth time this story has been flagged and hasn't happened\") rather than scoring each rolled window from a blank slate. Exploratory -- confirm the pattern recurs on more than this one story before building anything more than detection/flagging.",
+      "notes": "Distinct from scoring.repeat_dedup_days, which only catches exact-ticker repeats. Exploratory -- confirm this recurs beyond the one KXCABLEAVE example before building detection logic."
+    },
+    {
+      "id": "kalshi-wa-geofencing-exposure-check",
+      "title": "Confirm exposure to Kalshi's Washington geofencing deadline (2026-09-02)",
+      "area": "infra",
+      "priority": 2,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Verified via live web search 2026-08-22 (not from Liam's report alone): a King County Superior Court judge ordered Kalshi to geofence Washington State users by 2026-09-02 or face $120,000/day in fines, first via an IP/residency geofence required by 2026-08-19. The order specifically restricts sports, elections, politics, entertainment, culture, technology, and science contracts in WA -- commodities, climate, economics, and finance markets are unaffected there. Nevada is separately pursuing similar $120k/day fines over its own geofencing dispute. Confirm whether this project's operation (account jurisdiction, and which market categories main.py's scanner actually touches -- scanner.py's category/keyword filters) is exposed to the WA restriction at all, and if so what happens operationally on/after 2026-09-02 (markets disappearing mid-scan, API errors, etc.) -- distinct from the general \"Kalshi is the sole data source, regulatory fragility is a risk\" framing already in this project's docs; this is a specific, dated action item with a deadline 10 days out as of this writing.",
+      "notes": "Time-sensitive: deadline is 2026-09-02, 10 days out as of this writing. Verified via live web search this session, not taken from Liam's report alone."
+    },
+    {
+      "id": "verify-liam-post-context-doc-alignment",
+      "title": "Re-verify Liam's next report against the expanded context doc + live gate data",
+      "area": "infra",
+      "priority": 4,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per scripts/verify_liam_report.py's ground truth (the first still fails its resolved_count>=30 trigger condition despite clear dependencies; the second is gated behind the api_spend_authorized sentinel, a human policy decision, not a stale block). That report predates two fixes made later the same session: the monday.com context doc's sections 7-8 (posted ~19:40 UTC 2026-08-22, asking Liam to read live gate data and own a standing external-research section) and monday_sync.py's gate-progress fix (posted live ~19:24 UTC 2026-08-22, so every locked/blocked item's Detail field now shows a real \"Gate: <metric>=<live value> <op> <threshold> (MET/not met)\" line instead of just depends_on). Next session: check for any Liam report posted after 2026-08-22 and re-run verify_liam_report.py against it -- if the same depends_on/trigger conflation still appears despite Liam now having the live number directly in front of it, that's real evidence the context doc isn't being consumed as agent context at all (unverified via API per this session's investigation), not just evidence of a stale report.",
+      "notes": "Checks whether this session's monday.com fixes (gate-progress-on-board, expanded context doc) actually changed Liam's behavior, or whether the context doc isn't being consumed as agent context at all."
+    },
+    {
+      "id": "subscriber-hosting-billing-decision",
+      "title": "Decide hosting/billing path for the subscriber product",
+      "area": "reporting",
+      "priority": 5,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. Real state as of 2026-08-22: the subscriber HTML digest and track-record page already render daily and correctly (subscriber-report-wiring, subscriber-report-rework-2026-08, both Done) but config.report.base_url is empty (no external hosting) and subscribers.json's tier field is unenforced (no billing). The open decision is build-vs-buy: hand-roll (Stripe Checkout + self-host the existing HTML) vs. move onto a platform (beehiiv/Substack-style) that bundles paid tiers, hosting, and delivery but takes over control of the custom template. Three repo-scoped Claude Code subagents were built this session to help with this when picked back up -- .claude/agents/subscriber-ux-designer.md, subscriber-hosting-billing.md, subscriber-growth.md -- each with a scoped charter and explicit guardrails (no real payment/hosting changes without fresh confirmation). Confirmed these are NOT usable from a background-job session (cwd never actually inside the repo), but do work from a normal interactive Claude Code session started with cwd in this repo. Low priority by the user's own choice this session -- pick up whenever the subscriber product becomes the active focus again.",
+      "notes": "Explicitly sidelined this session by the user's own choice to focus on token-usage reduction. Not urgent -- pick up whenever the subscriber product becomes the active focus again."
     }
   ]
 }

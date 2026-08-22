@@ -42,8 +42,24 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_76_items(backlog_data):
+def test_parses_and_81_items(backlog_data):
     """
+    81, not 76: five items added 2026-08-22 at the end of the same session,
+    turning open threads from the day's work into tracked, "ready" backlog
+    items rather than letting them live only in conversation history --
+    kalshi-wa-geofencing-exposure-check (priority 2, time-sensitive:
+    confirmed via live web search that Kalshi's Washington geofencing
+    deadline is 2026-09-02), market-price-divergence-tracking (priority 3,
+    instrumentation follow-up on the finding that market_baseline_brier
+    beat the scorer's own brier_score over the 14 resolved signals),
+    rolled-market-repeat-detection (priority 4, the KXCABLEAVE
+    same-story-three-expiry-windows finding), verify-liam-post-context-doc-
+    alignment (priority 4, checks whether Liam's next report still makes
+    the depends_on/trigger mistake now that live gate data is on the
+    board), and subscriber-hosting-billing-decision (priority 5, the
+    build-vs-buy fork the user explicitly sidelined this session in favor
+    of the token-usage-reduction work).
+
     76, not 75: smart-money-discovery-dashboard added 2026-08-22, in
     response to the user asking whether any dashboard insight for
     winning-trader/whale detection was possible despite the project's low
@@ -146,7 +162,7 @@ def test_parses_and_76_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 76
+    assert len(backlog_data["items"]) == 81
 
 
 def test_all_ids_unique(backlog_data):
