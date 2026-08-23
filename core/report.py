@@ -1196,18 +1196,19 @@ def _subscriber_pick_view_model(pick: dict) -> dict:
     reasoning = (pick.get("reasoning") or "").strip()
     if reasoning:
         analysis = _html.escape(reasoning)
+    elif fp in ("HEURISTIC", "DRIFT"):
+        # Rule-flagged picks (core/scanner.py's score_market()) never go
+        # through core/scorer.py's Claude call, so reasoning is genuinely
+        # never generated for them -- not a gap to apologize for. The old
+        # copy here re-stated the market/estimate/gap numbers a third time
+        # (already shown in the gauge above and the "Why flagged" block
+        # right above this), which read as padding, not honesty.
+        analysis = "No written analysis for this call — it was flagged by a rule, not a full model read. See \"Why flagged\" above."
     else:
-        # subscriber-report-rework-2026-08: was "Full written analysis renders
-        # here once reasoning is persisted per signal" -- an internal
-        # implementation note (referencing the DB persistence mechanism)
-        # leaking into subscriber-facing copy. This still says nothing was
-        # saved for this specific call, but reads like a product, not a TODO.
-        analysis = (
-            f"We don't have a saved write-up for this one yet — the numbers "
-            f"above are the read: the market prices this at {mkt_pct}% while "
-            f"our model estimates {est_pct}%, a {gap}-point gap in the "
-            f"{direction} direction."
-        )
+        # A genuinely LLM-scored pick with reasoning missing/dropped before
+        # persistence -- distinct from the HEURISTIC/DRIFT case above, this
+        # one really is a gap.
+        analysis = "No written analysis saved for this call."
 
     return {
         **pick,
@@ -1551,7 +1552,7 @@ _SUBSCRIBER_TEMPLATE = """<!DOCTYPE html>
     <div class="discl">Leviathan is research, not financial advice. Prediction markets carry risk — bet only what you can afford to lose.</div>
     <div class="methodology">
       <div class="src-head">Methodology</div>
-      <p>Estimates come from Claude, cross-referencing live web search, Kalshi's own order book and trade history, Polymarket's prices on the same or related events, and a tracked set of historically sharp Kalshi wallets. Every call above shows the specific sources checked for that market.</p>
+      <p>Estimates come from Claude, cross-referencing live web search, Kalshi's own order book and trade history, Polymarket's prices on the same or related events, and a tracked set of historically sharp Kalshi wallets. Where a call has cited sources, they're listed below it — some calls are flagged by a rule (a price move or a keyword match) rather than a full model read, and won't have any.</p>
     </div>
     <div class="links" style="margin-top:12px;"><a href="{track_record_href}">Full track record</a> &nbsp; <a href="#">Manage subscription</a> &nbsp; <a href="#">Unsubscribe</a></div>
   </footer>
@@ -1889,7 +1890,12 @@ def _render_track_record_log_row(r: dict) -> str:
     drift_s   = f"{drift:+.0f}pt" if drift is not None else "—"
     row_class = "tr-win" if result == "WIN" else ("tr-loss" if result == "LOSS" else "")
     return (
-        f'<tr class="{row_class}"><td>{ts}</td><td>{title}</td><td>{direction}</td>'
+        # title="" is the CSS ellipsis truncation's escape hatch -- a long
+        # market title (e.g. a full legalistic Cabinet-member definition)
+        # is clipped visually so it doesn't blow one row out to 10x every
+        # other row's height, but the full text is still there on hover,
+        # never silently dropped.
+        f'<tr class="{row_class}"><td>{ts}</td><td title="{title}">{title}</td><td>{direction}</td>'
         f"<td>{conf}</td><td>{mp_s}</td><td>{est_s}</td><td>{result}</td>"
         f"<td>{pnl_s}</td><td>{drift_s}</td></tr>"
     )
@@ -1930,6 +1936,7 @@ _TRACK_RECORD_TEMPLATE = """<!DOCTYPE html>
   table{{width:100%; border-collapse:collapse; font-size:13px;}}
   th{{text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--ink-faint); padding:8px 6px; border-bottom:1px solid var(--line);}}
   td{{padding:8px 6px; border-bottom:1px solid var(--line-soft); font-family:var(--mono); font-size:12.5px;}}
+  td:nth-child(2){{max-width:340px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}}
   tr.tr-win td:nth-child(7){{color:var(--edge);}}
   tr.tr-loss td:nth-child(7){{color:var(--amber);}}
   .table-wrap{{overflow-x:auto;}}

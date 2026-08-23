@@ -165,18 +165,34 @@ def test_real_reasoning_used_when_present():
     assert "We don't have a saved write-up for this one yet" not in out
 
 
-def test_placeholder_analysis_when_reasoning_absent():
+def test_placeholder_analysis_for_rule_flagged_pick_with_no_reasoning():
     """
-    backlog: subscriber-report-rework-2026-08. Was "Full written analysis
-    renders here once reasoning is persisted per signal" -- an internal
-    implementation note (referencing the DB persistence mechanism) leaking
-    into subscriber-facing copy. Still says nothing was saved for this call,
-    but reads like a product, not a TODO.
+    2026-08-23 UI-refresh fix: rule-flagged picks (flag_path HEURISTIC/DRIFT)
+    never go through the Claude scorer, so reasoning is genuinely never
+    generated for them. The old copy here re-stated the market/estimate/gap
+    numbers a third time (already shown in the gauge and the "Why flagged"
+    block above it) -- honest but redundant padding. Was also, before that,
+    "Full written analysis renders here once reasoning is persisted per
+    signal" -- an internal implementation note leaking into subscriber copy.
     """
-    signals = [_sig(ticker="KXA", direction="YES", confidence="HIGH")]
+    signals = [_sig(ticker="KXA", direction="YES", confidence="HIGH", flag_path="DRIFT")]
     out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
-    assert "We don't have a saved write-up for this one yet" in out
+    assert "flagged by a rule, not a full model read" in out
     assert "renders here once reasoning is persisted" not in out
+    assert "We don't have a saved write-up for this one yet" not in out
+
+
+def test_placeholder_analysis_for_llm_scored_pick_with_missing_reasoning():
+    """A non-HEURISTIC/DRIFT flag_path (e.g. EDGE) is a pick that DID go
+    through the Claude scorer -- if reasoning is still missing, that's a
+    genuine gap, not an expected rule-flagged case, so the copy should be
+    plain rather than explaining a rule that wasn't actually the reason."""
+    signals = [_sig(ticker="KXB", direction="YES", confidence="HIGH", flag_path="EDGE")]
+    out = report.render_subscriber_html(signals, _run_meta(), _CFG, now_utc=_FIXED_NOW)
+    assert "No written analysis saved for this call." in out
+    # the per-pick analysis paragraph specifically, not the page-wide
+    # methodology footer, which legitimately mentions rule-flagged picks
+    assert '<p class="analysis">No written analysis saved for this call.</p>' in out
 
 
 def test_sources_checked_freeform_never_rendered_as_link():

@@ -239,3 +239,19 @@ def test_title_escaped_in_log_row(tmp_db):
     out = report.render_track_record_html(now_utc=_FIXED_NOW)
     assert "&#x27;" in out
     assert "Trump's Cabinet" not in out
+
+
+def test_long_market_title_kept_in_title_attribute_not_dropped(tmp_db):
+    """2026-08-23 UI-refresh fix: a very long market title (e.g. a full
+    legalistic Cabinet-member definition) blew one table row out to ~10x
+    every other row's height with no truncation at all. CSS now clips it
+    visually (see the .md's UI skill design pass), but the fix must not
+    silently drop the full text -- it has to survive somewhere in the
+    markup, via the native title="" tooltip attribute."""
+    long_title = "Will any member of the Cabinet (defined as: " + "a very long clause, " * 20 + "leave office?)"
+    _insert_resolved("t19", "KXLONG", "YES", 0.04, 0.06, "LOSS", "NO", -0.04)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET title=? WHERE call_id='t19'", (long_title,))
+    out = report.render_track_record_html(now_utc=_FIXED_NOW)
+    assert f'title="{long_title}"' in out
+    assert long_title in out  # cell body text -- CSS truncates visually, HTML keeps it full
