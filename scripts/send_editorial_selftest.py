@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from core.report import send_report
+from core.report import send_report, _flatten_editorial_vars
 from scripts.render_subscriber_preview import render as render_editorial_daily
 from scripts.render_weekly_subscriber_preview import render as render_editorial_weekly
 
@@ -44,6 +44,18 @@ def _load_config() -> dict:
 
 
 def _send_one(kind: str, html_body: str, config: dict, now_utc: datetime, dry_run: bool) -> None:
+    # 2026-08-23 fix: _flatten_editorial_vars() has existed and been tested
+    # since Phase 1 but was never actually called anywhere in production --
+    # the editorial CSS's var(--sp-3)/var(--sp-6) etc. custom properties
+    # rendered fine in a real browser (which is what the standalone preview
+    # file and Playwright screenshots use) but Gmail's email renderer
+    # doesn't reliably resolve CSS custom properties, so every var()-based
+    # spacing value silently collapsed in the actual received email while
+    # literal-pixel values rendered fine. Flatten before this HTML goes
+    # into an email body; the standalone file-writing path
+    # (render_subscriber_preview.py) is untouched and keeps real var().
+    html_body = _flatten_editorial_vars(html_body)
+
     text_body = (
         f"Leviathan -- Editorial design self-test ({kind}).\n\n"
         "This is a dogfood send of the editorial design "
