@@ -391,6 +391,24 @@ def _gate_context(item: dict, metrics: dict) -> str:
 
 
 def render_detail(item: dict, metrics: dict) -> str:
+    """
+    Renders an item's action + gate context for the board's Detail column
+    (a "long_text" column type).
+
+    QUIRK (found 2026-08-23): monday.com silently strips anything shaped
+    like an HTML tag -- "<word>" -- from Detail column values written via
+    change_simple_column_value/change_multiple_column_values, with no
+    error and no length mismatch signal beyond the resulting text being
+    shorter than expected. A backlog item's action/notes text that quotes
+    a literal "<metric>=<value>" placeholder format will render as
+    "=" with the placeholders silently gone. This is specific to the
+    Detail COLUMN, not monday Docs -- create_doc_block's content (used
+    for docs/liam_context_doc.md) preserves angle brackets verbatim,
+    confirmed by direct content comparison. Avoid literal <angle-bracket>
+    placeholder syntax in any backlog.json action/notes text; use a
+    concrete example instead (e.g. "resolved_count=14 >= 30 (not met)"
+    rather than "<metric>=<value> <op> <threshold>").
+    """
     text = (item.get("action") or "") + _gate_context(item, metrics)
     if len(text) > DETAIL_MAX_CHARS:
         keep = DETAIL_MAX_CHARS - len(DETAIL_TRUNCATION_NOTE)
