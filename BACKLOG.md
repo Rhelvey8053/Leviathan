@@ -1,12 +1,13 @@
 # Leviathan Backlog
-Last updated: 2026-08-23 | Metrics: resolved=15, fills=7
+Last updated: 2026-08-23 | Metrics: resolved=17, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (6)
+## Ready (7)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | kalshi-wa-geofencing-exposure-check | Verified via live web search 2026-08-22 (not from Liam's report alone): a King County Superior Court judge ordered Kalshi to geofence Washington State users by 2026-09-02 or face $120,000/day in… | infra |
+| 2 | polymarket-data-api-rate-limit-pacing | User shared Polymarket's own API docs overview (2026-08-23); live-fetched the linked rate-limits page and found a real, previously-undiagnosed root cause for a pattern visible in every pipeline run… | smart-money |
 | 3 | market-price-divergence-tracking | Analysis of the 14 currently-resolved paper signals (2026-08-22) found a specific, quantitatively grounded pattern worth tracking as volume grows, not yet acting on: market_baseline_brier (0.076,… | calibration |
 | 3 | smart-money-discovery-dashboard | User asked (2026-08-22) whether a dashboard insight for winning-trader/whale detection is possible despite the project's low resolved-bet sample size. | reporting |
 | 4 | rolled-market-repeat-detection | Found while reviewing the 14 resolved paper signals: 3 of them are the same real-world underlying event -- KXCABLEAVE-26MAY22-26JUN/26JUL/26AUG, a "will this person leave their show by date X" market… | calibration |

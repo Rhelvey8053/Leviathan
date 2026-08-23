@@ -42,8 +42,23 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_81_items(backlog_data):
+def test_parses_and_82_items(backlog_data):
     """
+    82, not 81: polymarket-data-api-rate-limit-pacing added 2026-08-23
+    (priority 2). User shared Polymarket's own API docs; live-fetching the
+    linked rate-limits page revealed a real root cause for a pattern seen
+    in every pipeline run this session -- dozens of wallets excluded with
+    "no positions returned from API" and data/winning_accounts.json stuck
+    at 0 cached winners. sources/accounts.py's _get() has a bare
+    "except Exception: return None" indistinguishable from a genuinely
+    empty result, and zero pacing between calls; discover_winners() and
+    analysis/smart_money_scan.py's watchlist scan both hammer the Data
+    API's /positions endpoint (documented cap: 150 req/10s, IP-based,
+    over-limit requests throttled/queued not rejected) with no delay,
+    plausibly timing out past _get()'s timeout=12 and getting silently
+    swallowed. Fix scoped but not yet built: pacing + real-error
+    visibility, not implemented this session (user was near usage limit).
+
     81, not 76: five items added 2026-08-22 at the end of the same session,
     turning open threads from the day's work into tracked, "ready" backlog
     items rather than letting them live only in conversation history --
@@ -162,7 +177,7 @@ def test_parses_and_81_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 81
+    assert len(backlog_data["items"]) == 82
 
 
 def test_all_ids_unique(backlog_data):
