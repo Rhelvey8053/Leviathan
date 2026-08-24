@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -172,3 +173,40 @@ else:
 
     win_rate = resolved["is_win"].mean() * 100
     st.markdown(f"Win rate: **{win_rate:.1f}%** (n={n_resolved}) {small_n_badge(n_resolved)} -- secondary read, not the primary credibility metric above.", unsafe_allow_html=True)
+
+st.divider()
+st.subheader("Win Rate by Market-Price Band")
+st.caption(
+    "backlog: market-price-divergence-tracking. 2026-08-22 analysis of the "
+    "then-14 resolved signals found every YES call on a sub-11%-priced "
+    "long-shot where our_estimate diverged 3-13x above the market price "
+    "lost (7/7), while market_baseline_brier beat the scorer's own "
+    "brier_score over that same population -- the market out-forecast the "
+    "model. This tracks whether that pattern holds, fades, or was noise as "
+    "resolved_count grows -- not a conclusion on its own at any n shown here."
+)
+band_resolved = view[view["is_win"].notna() & view["market_price"].notna()].copy()
+if band_resolved.empty:
+    st.info("No resolved bets with a market_price in the current filter.")
+else:
+    bands = [0, 0.10, 0.30, 0.70, 0.90, 1.01]
+    band_labels = ["<10% (long-shot)", "10-30%", "30-70%", "70-90%", ">90% (long-shot)"]
+    band_resolved["price_band"] = pd.cut(
+        band_resolved["market_price"], bins=bands, labels=band_labels, right=False,
+    )
+    band_stats = band_resolved.groupby("price_band", observed=True).agg(
+        n=("is_win", "size"), win_rate=("is_win", "mean"),
+    ).reindex(band_labels).dropna(subset=["n"])
+    band_stats["win_rate_pct"] = band_stats["win_rate"] * 100
+    fig = px.bar(
+        band_stats, x=band_stats.index, y="win_rate_pct",
+        labels={"x": "market price band", "win_rate_pct": "win rate %"},
+        text=band_stats["n"].astype(int).map(lambda n: f"n={n}"),
+    )
+    fig.add_hline(y=50, line_dash="dot", line_color="#9E9E9E")
+    fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=300)
+    fig.update_traces(marker_color=PLOTLY_TEMPLATE["layout"]["colorway"][0], textposition="outside")
+    st.plotly_chart(fig, use_container_width=True)
+    thin = int(band_stats["n"].lt(10).sum())
+    if thin:
+        st.caption(f"{thin} of {len(band_stats)} bands shown have n<10 -- read those as noise, not signal.")

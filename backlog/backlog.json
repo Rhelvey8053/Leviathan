@@ -1129,12 +1129,12 @@
       "title": "Track win rate by market-price-divergence bucket",
       "area": "calibration",
       "priority": 3,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
       "depends_on": [],
-      "action": "Analysis of the 14 currently-resolved paper signals (2026-08-22) found a specific, quantitatively grounded pattern worth tracking as volume grows, not yet acting on: market_baseline_brier (0.076, EXCELLENT) beats the scorer's own brier_score (0.126, GOOD) over this same population -- the market's implied price has out-forecast the model so far. Row-level inspection shows why: every YES call on a sub-11%-priced long-shot market where our_estimate diverged 3-13x above the market price lost (7/7); the 2 YES wins were on markets that weren't extreme long-shots (51% and 17% priced). Build a bucketed win-rate/brier breakdown by market-price band (or by |our_estimate - market_price| divergence) alongside the existing get_brier_score()/get_market_baseline_brier_score() in core/logger.py, so this pattern can be monitored automatically as resolved_count grows instead of requiring a fresh ad-hoc analysis each time someone asks. No data gate -- buildable now against the resolved rows that already exist; the point is visibility, not a conclusion (n=14 is far too small for one).",
+      "action": "Built and verified 2026-08-23/24. Added a \"Win Rate by Market-Price Band\" section to dashboard/pages/2_Signal_Breakdown.py, right after the existing resolved-bets analysis -- buckets resolved signals into <10%/10-30%/30-70%/70-90%/>90% market-price bands (pd.cut) and shows win rate per band as a bar chart against a 50% reference line, flagging any band with n<10 as noise rather than signal. Reuses the page's existing filtered `view` dataframe and dashboard/theme.py's palette, no new data source needed -- market_price/is_win were already loaded columns. Verified three ways, not just read: (1) AST syntax check, (2) streamlit.testing.v1.AppTest headless run against real signals.csv with zero exceptions and the new subheader confirmed present, (3) actually launched the Streamlit server and screenshotted the live page via Playwright -- renders correctly with real data. Live observation at render time (n=21 resolved bets, up from the 14 the finding was based on): the <10% long-shot band's win rate has already visibly risen off zero, an early (still n<10, still noise-level) sign the original stark pattern may be softening as volume grows -- exactly the kind of thing this instrumentation exists to catch instead of re-deriving by hand each time someone asks.",
       "notes": "Follows from this session's 2026-08-22 resolved-signal analysis (market brier 0.076 vs scorer brier 0.126 on n=14). Not a conclusion -- an instrumentation request so the pattern is visible going forward without re-deriving it by hand."
     },
     {
