@@ -3840,3 +3840,35 @@ def test_get_repeat_family_only_latest_row_per_sibling_ticker(tmp_db):
     family = logger.get_repeat_family("KXCABLEAVE-26MAY22-26AUG")
     assert len(family) == 1
     assert family[0]["our_estimate"] == 0.65
+
+
+# ─── get_titles_for_tickers (Smart Money dashboard readability fix) ───────────
+
+def test_get_titles_for_tickers_returns_latest_title_per_ticker(tmp_db):
+    _insert_repeat("t1", "KXFOO-26AUG01", 0.5, 0.5, title="Old title",
+                    timestamp="2026-08-01T00:00:00Z")
+    _insert_repeat("t2", "KXFOO-26AUG01", 0.5, 0.5, title="Latest title",
+                    timestamp="2026-08-10T00:00:00Z")
+    titles = logger.get_titles_for_tickers(["KXFOO-26AUG01"])
+    assert titles == {"KXFOO-26AUG01": "Latest title"}
+
+
+def test_get_titles_for_tickers_omits_unknown_tickers(tmp_db):
+    """A ticker with no signals row at all must be absent from the dict,
+    not mapped to '' or None -- callers fall back to the raw ticker
+    themselves on a missing key."""
+    titles = logger.get_titles_for_tickers(["KXNOTREAL-99ZZZ99"])
+    assert "KXNOTREAL-99ZZZ99" not in titles
+
+
+def test_get_titles_for_tickers_empty_list_returns_empty_dict(tmp_db):
+    assert logger.get_titles_for_tickers([]) == {}
+
+
+def test_get_titles_for_tickers_exact_match_not_substring(tmp_db):
+    """Two tickers where one is a prefix of the other must not cross-
+    contaminate -- an exact IN() match, not a LIKE."""
+    _insert_repeat("t1", "KXFOO", 0.5, 0.5, title="Short ticker title")
+    _insert_repeat("t2", "KXFOO-26AUG01", 0.5, 0.5, title="Long ticker title")
+    titles = logger.get_titles_for_tickers(["KXFOO"])
+    assert titles == {"KXFOO": "Short ticker title"}

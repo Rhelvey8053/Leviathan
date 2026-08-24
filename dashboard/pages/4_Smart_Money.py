@@ -13,6 +13,13 @@ data sources that are NOT gated by Leviathan's own resolved-bet count:
      direction streak data (data/whale_history/streak.json), a plain file
      read, no network call.
 
+The whale streak leaderboard also does a small, local read against
+data/leviathan.db via core.logger.get_titles_for_tickers() (2026-08-24) --
+streak.json only ever stored the bare ticker, which tells a reader nothing
+about what the bet actually is (e.g. "KXFDAAPPROVE-MDMA-27JAN01"). Looks up
+the real question text for just the 20 rows actually shown, falls back to
+the raw ticker if a ticker has no signals row on file.
+
 Requires config.json (falls back to config.example.json if absent) for
 sources.accounts.diagnose_discovery()'s accounts.* thresholds -- the only
 page in this dashboard that reads project config rather than just the CSV
@@ -31,6 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 from sources import accounts as _accounts
 from core import whales as _whales
+from core import logger as _logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from theme import PLOTLY_TEMPLATE, inject_css, page_header
@@ -132,10 +140,24 @@ else:
             "days ago": days_ago,
         })
     streak_df = pd.DataFrame(rows).sort_values("streak", ascending=False).head(20)
+
+    # A bare ticker (e.g. "KXFDAAPPROVE-MDMA-27JAN01") doesn't tell a reader
+    # what the bet actually is -- look up each shown ticker's real question
+    # text from signals, once, only for the 20 rows actually displayed.
+    titles = _logger.get_titles_for_tickers(streak_df["ticker"].tolist())
+    streak_df.insert(0, "market", streak_df["ticker"].map(lambda t: titles.get(t, t)))
+
     st.dataframe(
         streak_df, use_container_width=True, hide_index=True,
-        column_config={"last updated": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm")},
+        column_config={
+            "market": st.column_config.TextColumn("market", width="large"),
+            "ticker": st.column_config.TextColumn("ticker", width="small"),
+            "last updated": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm"),
+        },
     )
+    missing_titles = int((streak_df["market"] == streak_df["ticker"]).sum())
+    if missing_titles:
+        st.caption(f"{missing_titles} of {len(streak_df)} shown have no title on file (ticker no longer in signals) -- showing the raw ticker for those.")
     stale = int((streak_df["days ago"].fillna(0) > 7).sum())
     if stale:
         st.caption(f"{stale} of the {len(streak_df)} shown haven't updated in over a week -- likely a closed or no-longer-scanned market, not an active streak.")

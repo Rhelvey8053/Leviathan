@@ -1234,6 +1234,39 @@ def get_repeat_family(ticker: str) -> list[dict]:
         return []
 
 
+def get_titles_for_tickers(tickers: list[str]) -> dict[str, str]:
+    """
+    Latest known title per ticker, for surfaces that only have the raw
+    ticker (e.g. data/whale_history/streak.json, which predates title
+    ever being persisted alongside it) and need something a human can
+    actually read. One batched exact-match query, not N calls to
+    get_market_data()'s LIKE-based lookup -- correct (no substring
+    over-matching between tickers that share a prefix) and cheap even
+    for a large ticker list. Tickers with no signals row at all are
+    simply absent from the returned dict, not mapped to '' or None --
+    callers should fall back to showing the raw ticker themselves.
+    """
+    if not tickers:
+        return {}
+    try:
+        with _db() as conn:
+            placeholders = ",".join("?" for _ in tickers)
+            rows = conn.execute(
+                f"""
+                SELECT ticker, title FROM signals s
+                WHERE ticker IN ({placeholders}) AND title != '' AND title IS NOT NULL
+                  AND timestamp = (
+                      SELECT MAX(timestamp) FROM signals
+                      WHERE ticker = s.ticker AND title != '' AND title IS NOT NULL
+                  )
+                """,
+                tickers,
+            ).fetchall()
+        return {r["ticker"]: r["title"] for r in rows}
+    except Exception:
+        return {}
+
+
 def get_market_data(ticker: str | None = None, date: str | None = None) -> list[dict]:
     """
     Scored market data for a ticker (partial match) or a signal date
