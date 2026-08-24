@@ -3,10 +3,9 @@ Last updated: 2026-08-23 | Metrics: resolved=17, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (4)
+## Ready (3)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 3 | smart-money-discovery-dashboard | User asked (2026-08-22) whether a dashboard insight for winning-trader/whale detection is possible despite the project's low resolved-bet sample size. | reporting |
 | 4 | rolled-market-repeat-detection | Found while reviewing the 14 resolved paper signals: 3 of them are the same real-world underlying event -- KXCABLEAVE-26MAY22-26JUN/26JUL/26AUG, a "will this person leave their show by date X" market… | calibration |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
@@ -31,7 +30,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (66)
+## Done (67)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -82,6 +81,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
+| 3 | smart-money-discovery-dashboard | Built and verified 2026-08-23/24. | reporting |
 | 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |
