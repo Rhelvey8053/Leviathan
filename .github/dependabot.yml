@@ -1,0 +1,47 @@
+# Recommendation #3 from the 2026-08-24 automation-research pass: this
+# session found `requests` missing from dashboard/requirements.txt --
+# it only worked because streamlit happens to pull it in transitively.
+# Dependabot catches this class of gap (and real CVEs) automatically
+# instead of relying on someone noticing.
+#
+# Two pip manifests exist (root requirements.txt, used by
+# .github/workflows/tests.yml; dashboard/requirements.txt, not CI-checked
+# but still a real dependency list) plus the GitHub Actions themselves
+# (actions/checkout, actions/setup-python in tests.yml) -- all three
+# covered below.
+#
+# Patch/minor updates are grouped into one weekly PR per ecosystem rather
+# than one PR per package, since a solo operator reviewing N separate
+# trivial-bump PRs a week is exactly the kind of toil this research pass
+# was about reducing. Major version bumps are left ungrouped -- those can
+# carry real breaking changes and deserve their own PR/review, not to be
+# silently bundled in with routine patch bumps.
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      routine-updates:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "pip"
+    directory: "/dashboard"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      routine-updates:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      routine-updates:
+        update-types: ["minor", "patch"]
