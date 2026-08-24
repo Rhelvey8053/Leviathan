@@ -720,6 +720,32 @@ def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
                 f"Default to PASS unless you find a very recent, specific, primary-source catalyst."
             )
 
+        # Repeat-story context -- same real-world question previously flagged
+        # under a different rolling-window expiry ticker (backlog:
+        # rolled-market-repeat-detection, the KXCABLEAVE finding). Visibility
+        # only, no automatic confidence adjustment -- the 2026-08-24
+        # investigation found the pattern's effect on calibration was mixed
+        # (badly overconfident in one family, fine-to-good including two
+        # wins in three others), so the model gets the history to weigh
+        # itself rather than a blanket penalty baked into the prompt.
+        _family = m.get("repeat_family") or []
+        if _family:
+            lines.append(
+                f"   [!] REPEAT STORY: This exact question has been asked "
+                f"{len(_family)} time(s) before under a different expiry ticker:"
+            )
+            for f in _family:
+                f_est    = f.get("our_estimate")
+                f_mkt    = f.get("market_price")
+                f_est_s  = f"{f_est * 100:.0f}%" if f_est is not None else "?"
+                f_mkt_s  = f"{f_mkt * 100:.0f}%" if f_mkt is not None else "?"
+                f_outcome = f.get("outcome") or "unresolved"
+                lines.append(
+                    f"     - {f.get('ticker', '?')} ({(f.get('timestamp') or '')[:10]}): "
+                    f"you estimated {f_est_s}, market priced {f_mkt_s}, outcome: {f_outcome}"
+                )
+            lines.append("     Consider whether this history should inform your confidence here.")
+
         # Cross-market conflict warnings — explicitly flag when key sources disagree.
         _hd  = m.get("heuristic_direction")
         _pg  = float((m.get("poly") or {}).get("price_gap") or 0)

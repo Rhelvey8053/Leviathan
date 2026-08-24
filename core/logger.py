@@ -7,6 +7,7 @@ Auto-migrates calls.csv / runs.csv to the database on first import.
 import csv
 import json
 import os
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -1157,6 +1158,78 @@ def get_resolved_track_record(days: int | None = None) -> list[dict]:
                 params,
             ).fetchall()
         return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+_TICKER_DATE_SUFFIX_RE = re.compile(r"-\d{2}[A-Z]{3}\d{0,2}$")
+
+
+def _ticker_stem(ticker: str) -> str:
+    """
+    Strips exactly one trailing rolling-window expiry token (e.g. -26AUG,
+    -27JAN01) from a ticker, leaving the part that identifies the
+    underlying real-world question. Two tickers sharing a stem are the
+    same story re-flagged under a new expiry window, not independent
+    markets -- see backlog: rolled-market-repeat-detection (the
+    KXCABLEAVE-26MAY22-{26JUN,26JUL,26AUG,26SEP} finding, later confirmed
+    to recur across at least 4 distinct stories, 2026-08-24).
+
+    Strips ONE token, not "+" (one-or-more) -- a ticker like
+    KXCABLEAVE-26MAY22-26JUN has two date-shaped segments (a creation
+    date and an expiry date; "26MAY22" itself matches the same
+    \\d{2}[A-Z]{3}\\d{0,2} shape as the expiry token it's paired with).
+    Stripping both would collapse it to bare "KXCABLEAVE" and wrongly
+    merge it with any other, unrelated KXCABLEAVE-prefixed story that
+    happens to exist. Confirmed against the real ticker format: for this
+    project's actual KX<TOPIC>-<created>-<expiry> shape, the creation-date
+    segment is part of what identifies a distinct real-world question,
+    only the expiry segment rolls.
+    """
+    return _TICKER_DATE_SUFFIX_RE.sub("", ticker)
+
+
+def get_repeat_family(ticker: str) -> list[dict]:
+    """
+    Every OTHER ticker sharing `ticker`'s stem (see _ticker_stem) -- the
+    same real-world question, previously flagged under a different expiry
+    window. One row per sibling ticker: its most recent signal (timestamp,
+    direction, our_estimate, market_price, outcome). Empty list if `ticker`
+    has no stem-mates, including when the stem is the whole ticker (no
+    trailing date suffix matched) -- a bare, unrolled ticker never has
+    siblings by definition.
+
+    Deliberately no automatic confidence penalty derived from this --
+    the 2026-08-24 investigation found the pattern's actual effect on
+    calibration was mixed (badly overconfident in one family, fine to
+    good, including two wins, in three others). This is visibility for
+    the scorer prompt to weigh, not a rule.
+    """
+    stem = _ticker_stem(ticker)
+    if stem == ticker:
+        return []
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT s.* FROM signals s
+                INNER JOIN (
+                    SELECT ticker, MAX(timestamp) AS max_ts
+                    FROM signals
+                    WHERE ({_PAPER}) AND ticker != ? AND ticker LIKE ?
+                    GROUP BY ticker
+                ) latest ON s.ticker = latest.ticker AND s.timestamp = latest.max_ts
+                WHERE ({_PAPER})
+                ORDER BY s.timestamp ASC
+                """,
+                (ticker, f"{stem}%"),
+            ).fetchall()
+        # LIKE '<stem>%' over-matches any ticker sharing the stem as a
+        # prefix, not just ones matching the full date-suffix pattern
+        # (e.g. a genuinely different ticker that happens to start with
+        # the same characters) -- filter to true stem equality before
+        # returning, not just prefix match.
+        return [dict(r) for r in rows if _ticker_stem(r["ticker"]) == stem]
     except Exception:
         return []
 

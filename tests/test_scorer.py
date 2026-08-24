@@ -1798,3 +1798,44 @@ def test_rescore_single_market_cli_backend():
         result, info = scorer.rescore_single_market(market, config)
     assert result == score
     assert info == {}
+
+
+# ─── Repeat-story context (rolled-market-repeat-detection) ────────────────────
+
+def test_repeat_story_shown_when_family_present():
+    m = _base_market(repeat_family=[
+        {"ticker": "KXCABLEAVE-26MAY22-26JUN", "timestamp": "2026-05-29T00:00:00Z",
+         "our_estimate": 0.15, "market_price": 0.045, "outcome": "NO"},
+        {"ticker": "KXCABLEAVE-26MAY22-26JUL", "timestamp": "2026-06-19T00:00:00Z",
+         "our_estimate": 0.65, "market_price": 0.105, "outcome": "NO"},
+    ])
+    prompt = scorer.build_prompt([m])
+    assert "REPEAT STORY" in prompt
+    assert "asked 2 time(s) before" in prompt
+    assert "KXCABLEAVE-26MAY22-26JUN" in prompt
+    assert "you estimated 65%" in prompt
+    assert "outcome: NO" in prompt
+
+
+def test_repeat_story_not_shown_when_no_family():
+    m = _base_market(repeat_family=[])
+    prompt = scorer.build_prompt([m])
+    assert "REPEAT STORY" not in prompt
+
+
+def test_repeat_story_not_shown_when_field_absent():
+    """Markets that never went through main.py's repeat_family attach step
+    (e.g. any other caller of build_prompt) must not crash or show a
+    bogus empty section -- m.get("repeat_family") defaults to falsy."""
+    m = _base_market()
+    prompt = scorer.build_prompt([m])
+    assert "REPEAT STORY" not in prompt
+
+
+def test_repeat_story_handles_unresolved_sibling():
+    m = _base_market(repeat_family=[
+        {"ticker": "KXCABLEAVE-26MAY22-26SEP", "timestamp": "2026-07-25T00:00:00Z",
+         "our_estimate": 0.40, "market_price": 0.235, "outcome": ""},
+    ])
+    prompt = scorer.build_prompt([m])
+    assert "outcome: unresolved" in prompt

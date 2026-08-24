@@ -800,6 +800,18 @@ def main():
         )
     )
 
+    # backlog: rolled-market-repeat-detection. Attaches each flagged
+    # market's repeat-family history (same real-world story, previously
+    # flagged under a different rolling-window ticker -- see
+    # logger.get_repeat_family()) so build_prompt() can surface it as
+    # context. Deliberately visibility only, no automatic confidence
+    # penalty -- see get_repeat_family()'s own docstring for why.
+    for m in flagged_markets:
+        try:
+            m["repeat_family"] = logger.get_repeat_family(m.get("ticker", ""))
+        except Exception:
+            m["repeat_family"] = []
+
     # Step 6 — Score with Claude + web search
     print("[6/8] Scoring with Claude...")
 

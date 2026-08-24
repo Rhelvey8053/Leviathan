@@ -3758,3 +3758,85 @@ def test_get_stats_by_confluence_excludes_pass_direction(tmp_db):
         """)
     stats = logger.get_stats_by_confluence()
     assert stats["2+"]["total"] == 1
+
+
+# ─── _ticker_stem / get_repeat_family (rolled-market-repeat-detection) ────────
+
+def _insert_repeat(call_id, ticker, our_estimate, market_price, outcome="",
+                    timestamp=None, title="Test rolled market"):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             direction, confidence, outcome, source, run_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, timestamp or datetime.now(timezone.utc).isoformat(),
+            ticker, title, market_price, our_estimate,
+            "YES", "MED", outcome, "paper", "run-test",
+        ))
+
+
+@pytest.mark.parametrize("ticker,expected_stem", [
+    ("KXCABLEAVE-26MAY22-26JUN", "KXCABLEAVE-26MAY22"),
+    ("KXCABLEAVE-26MAY22-26AUG", "KXCABLEAVE-26MAY22"),
+    ("KXIMPEACHCABINET-27JAN01", "KXIMPEACHCABINET"),
+    ("KXMLBDEBUT-KANDERSON-26NOV01", "KXMLBDEBUT-KANDERSON"),
+    ("KXSIMPLE", "KXSIMPLE"),  # no trailing date token -- stem == whole ticker
+])
+def test_ticker_stem_strips_trailing_date_tokens(ticker, expected_stem):
+    assert logger._ticker_stem(ticker) == expected_stem
+
+
+def test_get_repeat_family_finds_siblings_excludes_self(tmp_db):
+    _insert_repeat("r1", "KXCABLEAVE-26MAY22-26JUN", 0.15, 0.045, "NO",
+                    timestamp="2026-05-29T00:00:00Z")
+    _insert_repeat("r2", "KXCABLEAVE-26MAY22-26JUL", 0.65, 0.105, "NO",
+                    timestamp="2026-06-19T00:00:00Z")
+    _insert_repeat("r3", "KXCABLEAVE-26MAY22-26AUG", 0.65, 0.05, "",
+                    timestamp="2026-07-27T00:00:00Z")
+
+    family = logger.get_repeat_family("KXCABLEAVE-26MAY22-26AUG")
+    tickers = [f["ticker"] for f in family]
+    assert "KXCABLEAVE-26MAY22-26AUG" not in tickers  # self excluded
+    assert tickers == ["KXCABLEAVE-26MAY22-26JUN", "KXCABLEAVE-26MAY22-26JUL"]
+    assert family[0]["our_estimate"] == 0.15
+    assert family[1]["outcome"] == "NO"
+
+
+def test_get_repeat_family_empty_when_no_siblings(tmp_db):
+    _insert_repeat("r1", "KXLONELY-26AUG01", 0.5, 0.5)
+    assert logger.get_repeat_family("KXLONELY-26AUG01") == []
+
+
+def test_get_repeat_family_empty_when_ticker_has_no_date_suffix(tmp_db):
+    """A ticker with no trailing date token has a stem equal to itself --
+    it can't have "siblings" by definition, even if another literal
+    duplicate row exists."""
+    _insert_repeat("r1", "KXBARE", 0.5, 0.5)
+    _insert_repeat("r2", "KXBARE", 0.6, 0.55)
+    assert logger.get_repeat_family("KXBARE") == []
+
+
+def test_get_repeat_family_does_not_prefix_match_unrelated_tickers(tmp_db):
+    """A ticker that happens to start with the same characters as another
+    stem, but isn't actually date-suffix-shaped, must not be pulled in via
+    a loose LIKE '<stem>%' match."""
+    _insert_repeat("r1", "KXCABLEAVE-26MAY22-26JUN", 0.15, 0.045)
+    _insert_repeat("r2", "KXCABLEAVE-26MAY22-26JUNEXTRA-NOTASIBLING", 0.9, 0.9)
+    family = logger.get_repeat_family("KXCABLEAVE-26MAY22-26AUG")
+    tickers = [f["ticker"] for f in family]
+    assert "KXCABLEAVE-26MAY22-26JUNEXTRA-NOTASIBLING" not in tickers
+    assert tickers == ["KXCABLEAVE-26MAY22-26JUN"]
+
+
+def test_get_repeat_family_only_latest_row_per_sibling_ticker(tmp_db):
+    """Multiple scans of the same sibling ticker over time -- only its
+    most recent row should appear, not every historical scan."""
+    _insert_repeat("r1", "KXCABLEAVE-26MAY22-26JUL", 0.20, 0.10,
+                    timestamp="2026-06-10T00:00:00Z")
+    _insert_repeat("r2", "KXCABLEAVE-26MAY22-26JUL", 0.65, 0.105,
+                    timestamp="2026-06-19T00:00:00Z")
+    family = logger.get_repeat_family("KXCABLEAVE-26MAY22-26AUG")
+    assert len(family) == 1
+    assert family[0]["our_estimate"] == 0.65
