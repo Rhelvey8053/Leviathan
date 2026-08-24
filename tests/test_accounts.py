@@ -420,5 +420,51 @@ class TestDiagnoseDiscoveryEndToEnd(unittest.TestCase):
         self.assertEqual(mock_pos.call_count, 3)
 
 
+# ── _get() rate-limit pacing + real-error visibility (2026-08-23) ─────────────
+# Root cause of "no positions returned from API" excluding real wallets in
+# every pipeline run: no pacing at all against Polymarket's own documented
+# 150 req/10s (IP-based) /positions cap, and a bare except that couldn't
+# distinguish a timeout from a genuinely empty result. requests.get and
+# time.sleep are both mocked -- no live network calls, no real sleeping.
+
+class TestGetPacingAndErrorVisibility(unittest.TestCase):
+
+    def test_sleeps_before_every_request(self):
+        from sources import accounts
+        with patch("sources.accounts.requests.get") as mock_get, \
+             patch("sources.accounts.time.sleep") as mock_sleep:
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = []
+            accounts._get("positions", {"user": "0xabc"})
+        mock_sleep.assert_called_once_with(accounts._MIN_REQUEST_INTERVAL_S)
+
+    def test_successful_empty_response_prints_nothing(self):
+        """A wallet with genuinely zero positions is silent -- not a failure."""
+        from sources import accounts
+        with patch("sources.accounts.requests.get") as mock_get, \
+             patch("sources.accounts.time.sleep"), \
+             patch("builtins.print") as mock_print:
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = []
+            result = accounts._get("positions", {"user": "0xabc"})
+        self.assertEqual(result, [])
+        mock_print.assert_not_called()
+
+    def test_timeout_is_visible_and_distinct_from_empty_result(self):
+        """A real failure (timeout, connection error, non-2xx) must print,
+        so it's distinguishable in logs from a genuinely empty response --
+        both still return None to the caller (unchanged contract)."""
+        from sources import accounts
+        import requests as _requests
+        with patch("sources.accounts.requests.get", side_effect=_requests.exceptions.Timeout("timed out")), \
+             patch("sources.accounts.time.sleep"), \
+             patch("builtins.print") as mock_print:
+            result = accounts._get("positions", {"user": "0xabc"})
+        self.assertIsNone(result)
+        mock_print.assert_called_once()
+        self.assertIn("positions", mock_print.call_args[0][0])
+        self.assertIn("failed", mock_print.call_args[0][0])
+
+
 if __name__ == "__main__":
     unittest.main()
