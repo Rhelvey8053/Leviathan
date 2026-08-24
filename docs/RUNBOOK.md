@@ -61,6 +61,61 @@ The `runs` table is completely empty. Either:
 
 ---
 
+## "Leviathan ALERT — automation health: N problem(s) found" (from scripts/automation_health_check.py)
+
+Unlike the heartbeat above (which watches only `main.py`'s own completion),
+this checks the *other* scheduled tasks (gate notifier, position
+reconciliation, weekly audit, etc.) plus Litestream's continuous DB
+backup. The email body lists each specific problem; the two shapes are:
+
+1. **A scheduled task listed with "no run in Xh"** — Task Scheduler's
+   `LastRunTime` for that task is older than its expected cadence. Check
+   its actual state:
+   ```powershell
+   Get-ScheduledTaskInfo -TaskName <TaskName>
+   ```
+   If `State` is `Disabled`, re-enable it. If the task is missing
+   entirely (alert says "not found in Task Scheduler"), it was deleted or
+   never registered — re-run the matching `scripts/setup_*.ps1` for it.
+   A common root cause for a task that's `Ready` but still stale: a prior
+   run left a zombie process alive, and `MultipleInstances: IgnoreNew`
+   (the default in this project's task setup scripts) silently skips every
+   relaunch attempt rather than erroring — check for a leftover process
+   with the task's own executable name and kill it before restarting the
+   task.
+
+2. **A task listed with "result code N"** — its last run exited non-zero
+   (and N isn't 267014, the one code seen often enough without a
+   corroborating failure that it's allowlisted as benign — see
+   `BENIGN_RESULT_CODES` in the script). Decode any other code:
+   ```powershell
+   [System.ComponentModel.Win32Exception]::new(<N>).Message
+   ```
+
+3. **"Litestream replica: replica is Xh behind the live DB"** — the
+   continuous backup has stopped keeping up with `data/leviathan.db`. This
+   is exactly the 2026-08-23 incident: a zombie `litestream.exe` blocked
+   by `MultipleInstances: IgnoreNew` from ever relaunching after a
+   restart. Check for a stray process, kill it, then restart the task:
+   ```powershell
+   Get-Process litestream
+   Stop-Process -Id <PID> -Force   # only the stale one, if more than one shows up
+   Start-ScheduledTask -TaskName Leviathan-Litestream
+   ```
+   Verify the fix actually replicates, don't just trust the process is
+   alive — restore and compare row counts against the live DB:
+   ```powershell
+   tools\litestream.exe restore -config tools\litestream.yml -o <output.db> data\leviathan.db
+   ```
+
+**To resolve:** unlike the heartbeat above, this alert has no
+automatically-detectable "resolved" signal, so it re-alerts once per UTC
+day for as long as the underlying problem is still present on the next
+check — fixing the task/process is what stops it, not any manual state
+reset.
+
+---
+
 ## "API shape anomaly detected, run aborted" (from main.py step 2)
 
 More than `config.markets.shape_anomaly_threshold` (default 50%) of the
@@ -226,6 +281,8 @@ already-known false claim).
 | Check scheduled task status | `Get-ScheduledTaskInfo -TaskName Leviathan-DailyRun` |
 | Re-register the daily run scheduler | `powershell -ExecutionPolicy Bypass -File scripts\schedule_setup.ps1` |
 | Re-register the heartbeat scheduler | `powershell -ExecutionPolicy Bypass -File scripts\setup_heartbeat_scheduler.ps1` |
+| Check scheduled-task drift + Litestream lag without waiting | `python scripts\automation_health_check.py --dry-run` |
+| Re-register the automation health scheduler | `powershell -ExecutionPolicy Bypass -File scripts\setup_automation_health_scheduler.ps1` |
 | Check today's LLM daily spend (metered API only) | `python -c "from core.llm import get_daily_cost_usd; print(get_daily_cost_usd())"` |
 | Check DB location | `python -c "from core import logger; print(logger.DB_PATH)"` |
 | Full test suite | `python -m pytest -q` |
