@@ -3,10 +3,9 @@ Last updated: 2026-08-23 | Metrics: resolved=17, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (6)
+## Ready (5)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 2 | kalshi-wa-geofencing-exposure-check | Verified via live web search 2026-08-22 (not from Liam's report alone): a King County Superior Court judge ordered Kalshi to geofence Washington State users by 2026-09-02 or face $120,000/day in… | infra |
 | 3 | market-price-divergence-tracking | Analysis of the 14 currently-resolved paper signals (2026-08-22) found a specific, quantitatively grounded pattern worth tracking as volume grows, not yet acting on: market_baseline_brier (0.076,… | calibration |
 | 3 | smart-money-discovery-dashboard | User asked (2026-08-22) whether a dashboard insight for winning-trader/whale detection is possible despite the project's low resolved-bet sample size. | reporting |
 | 4 | rolled-market-repeat-detection | Found while reviewing the 14 resolved paper signals: 3 of them are the same real-world underlying event -- KXCABLEAVE-26MAY22-26JUN/26JUL/26AUG, a "will this person leave their show by date X" market… | calibration |
@@ -33,7 +32,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (64)
+## Done (65)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -72,6 +71,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 2 | email-html-render | Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can… | reporting |
 | 2 | fix-fetch-market-history-endpoint | core.kalshi.fetch_market_history() calls /markets/{ticker}/history, which does not exist on Kalshi's API -- confirmed empirically on 2026-07-25: every ticker tried, including active high-volume… | data-quality |
 | 2 | kalshi-event-ticker-capture | Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern. | data-quality |
+| 2 | kalshi-wa-geofencing-exposure-check | Investigated 2026-08-24, confirmed with the user directly: the Kalshi account/operator is NOT based in Washington State, so the WA geofencing order does not restrict this project's own market access. | infra |
 | 2 | llm-cost-ceiling | Add a configurable daily spend cap in core/llm.py that accumulates cost_usd across calls and raises once breached. | infra |
 | 2 | polymarket-data-api-rate-limit-pacing | Root-caused and fixed 2026-08-23. | smart-money |
 | 2 | powerbi-schema-hardening | Add run_id to data/powerbi_export/signals.csv as a foreign key to runs.csv. | reporting |
