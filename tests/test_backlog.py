@@ -42,8 +42,23 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_82_items(backlog_data):
+def test_parses_and_88_items(backlog_data):
     """
+    88, not 82: six items added 2026-08-24 from the solo-operator
+    automation-research pass. Four shipped-and-done: automation-health-
+    monitoring, daily-operations-digest, dependabot-setup, and
+    wake-triggered-task-catchup (the last built directly off a real
+    same-day incident -- the machine slept through Leviathan-DailyRun's
+    6am trigger and Task Scheduler never caught it up despite
+    StartWhenAvailable=True). Two ready, from real findings made while
+    verifying the above: fix-weekly-code-audit-timeout (a genuine,
+    previously-silent subprocess.TimeoutExpired caught by daily-
+    operations-digest's first real run) and task-scheduler-manual-
+    trigger-stuck-queued (manually-triggered Start-ScheduledTask calls
+    getting stuck "Queued" forever on this machine, reproduced on both a
+    newly-registered task and the long-established Leviathan-Heartbeat
+    task -- root cause not yet identified).
+
     82, not 81: polymarket-data-api-rate-limit-pacing added 2026-08-23
     (priority 2). User shared Polymarket's own API docs; live-fetching the
     linked rate-limits page revealed a real root cause for a pattern seen
@@ -177,7 +192,7 @@ def test_parses_and_82_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 82
+    assert len(backlog_data["items"]) == 88
 
 
 def test_all_ids_unique(backlog_data):

@@ -1,11 +1,13 @@
 # Leviathan Backlog
-Last updated: 2026-08-23 | Metrics: resolved=17, fills=7
+Last updated: 2026-08-24 | Metrics: resolved=17, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (2)
+## Ready (4)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 2 | fix-weekly-code-audit-timeout | Found 2026-08-24 via daily_digest.py's new weekly-log-tail section -- previously silent, since output only ever went to logs/weekly_code_audit.log, which nobody had reason to open. | infra |
+| 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
 
@@ -29,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (68)
+## Done (72)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -63,6 +65,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 1 | whale-flag-lv-guarantee | User asked why the run header's whale-flag count (e.g. | calibration |
 | 1 | whale-only-none-direction-crash | Real production incident, same day as whale-flag-lv-guarantee shipped: a manually-triggered 2026-08-05 run (real Kalshi/Claude calls, same as any scheduled run) crashed inside compile_report() with… | reporting |
 | 1 | win-catchall-recalibration | analysis/heuristic_backtest.py (2026-08-01, free/no-LLM-cost study against the 12,600-row settled_markets corpus) found core.scanner's generic `" win "` catch-all pattern (base_rate 0.52, the single… | calibration |
+| 2 | automation-health-monitoring | Built and verified 2026-08-24. | infra |
 | 2 | citations-provenance-grounding | Ground scorer output in the market's supplied sources via the Anthropic Citations API, so each rationale claim carries a machine-checkable cited-text span (document index + char offset) rather than… | validation |
 | 2 | discovery-funnel-diagnostic | Per-stage drop-off counter + gating-metric distributions for discover_winners; diagnoses why the winner gate finds zero (sample sourcing vs. | smart-money |
 | 2 | email-html-render | Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can… | reporting |
@@ -75,8 +78,11 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 2 | replay-asof-reconstruction | Given a ticker and a historical date, reconstruct the market state as it stood then, sourcing from data/snapshots where available and Kalshi history beyond that. | backtesting |
 | 2 | replay-settled-fetcher | Pull Kalshi settled markets with their final outcomes, reaching further back than the local snapshot archive begins. | backtesting |
 | 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
+| 2 | wake-triggered-task-catchup | Built 2026-08-24, registered and confirmed State=Ready (not stuck Queued, unlike the two tasks registered earlier the same day). | infra |
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
+| 3 | daily-operations-digest | Built and verified 2026-08-24. | infra |
+| 3 | dependabot-setup | .github/dependabot.yml added 2026-08-24, covering pip (root requirements.txt, used by CI; dashboard/requirements.txt, not CI-checked but a real dependency manifest) and github-actions… | infra |
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
