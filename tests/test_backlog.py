@@ -42,8 +42,20 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_90_items(backlog_data):
+def test_parses_and_91_items(backlog_data):
     """
+    91, not 90: subscriber-report-removed-2026-08 added 2026-08-25 (done),
+    recording the day's removal of the entire subscriber-report feature --
+    triggered by the user asking why send picks to subscribers instead of
+    trading a proven strategy directly. Investigation found neither usual
+    justification held: no bankroll/position-limit config exists anywhere
+    in the codebase, subscribers.json never existed (zero real
+    subscribers), and Leviathan-SubscriberReport only ever rendered a
+    local HTML preview -- no email was ever sent externally. Also flips
+    subscriber-hosting-billing-decision to done (superseded, not answered
+    -- the product itself was removed rather than given a hosting/billing
+    path).
+
     90, not 89: dailyrun-logontype-interactive added 2026-08-25, found
     while re-registering Leviathan-DailyRun for a RestartCount change --
     it's still LogonType Interactive (can't run if the account is fully
@@ -209,7 +221,7 @@ def test_parses_and_90_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 90
+    assert len(backlog_data["items"]) == 91
 
 
 def test_all_ids_unique(backlog_data):

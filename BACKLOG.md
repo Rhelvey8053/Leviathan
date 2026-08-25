@@ -3,14 +3,13 @@ Last updated: 2026-08-24 | Metrics: resolved=17, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (5)
+## Ready (4)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | smart-money-fills-table-missing | Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a… | infra |
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
-| 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
 
 ## Locked (5)
 | Priority | ID | Gate | Area |
@@ -32,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (73)
+## Done (75)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -107,4 +106,6 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
 | 5 | heuristic-sunsetting | Ran analysis/heuristic_backtest.py fresh and screened every label with n>=10 for underperformance -- but the correct comparison isn't raw Brier vs. | calibration |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
+| 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
+| 5 | subscriber-report-removed-2026-08 | User question: if the strategy is proven profitable, why send picks to subscribers instead of trading it directly? Investigated before acting -- found neither justification for the feature actually… | infra |
 | 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |
