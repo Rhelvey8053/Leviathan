@@ -40,9 +40,19 @@ nothing here re-runs a scan or hits a live API:
 Sends once daily, unconditionally -- not alert-only. For a digest,
 "nothing wrong" is itself useful information (it confirms the whole
 chain actually ran), so there's no silent-when-healthy behavior the way
-heartbeat/automation-health have. The subject line is prefixed with
-[ATTENTION] when task health or reconciliation surfaced something, so a
-clean day is still skimmable from the inbox list without opening it.
+heartbeat/automation-health have.
+
+2026-08-25: restructured on request into an explicit per-task checklist
+(every monitored task listed by name with [x]/[!], not collapsed into a
+"N healthy" summary) plus a dedicated NEEDS YOUR ATTENTION section at
+the top of the email, aggregating every problem found across sections so
+there's one place to look rather than scanning each section for a stray
+[!]. Scope of what counts as "needs attention" is currently task health
++ reconciliation only (the two sections that already had a has_problem
+signal) -- smart-money staleness and resolve-first counts stay
+informational-only for now, a deliberate boundary, not an oversight.
+The subject line keeps the same [ATTENTION] prefix, driven by the same
+problem list the top section renders.
 
 Usage:
     python scripts/daily_digest.py              # normal run
@@ -87,29 +97,52 @@ def _today_utc_str(now: datetime | None = None) -> str:
     return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
 
 
-def section_task_health(now: datetime | None = None) -> tuple[str, bool]:
-    """Returns (section text, has_problem)."""
+def section_task_health(now: datetime | None = None) -> tuple[str, list[str]]:
+    """
+    Returns (checklist text, problems) -- one [x]/[!] line per monitored
+    task rather than a collapsed "N healthy" summary, so a clean day still
+    shows every task by name (what actually ran), not just an aggregate.
+    problems is a flat list of "Task: reason" strings, consumed by
+    compose_digest() to build the NEEDS YOUR ATTENTION section.
+    """
     now = now or datetime.now(timezone.utc)
     task_results = _ahc.check_scheduled_tasks(now=now)
     litestream = _ahc.check_litestream_replica()
     last_run = _hb.get_last_run()
     hb_hours = _hb.hours_since(last_run["timestamp"]) if last_run else None
 
-    lines = ["TASK HEALTH"]
-    lines.append(f"  Daily pipeline: last run {hb_hours:.1f}h ago ({last_run['run_id']})"
-                 if last_run else "  Daily pipeline: no runs recorded")
+    problems: list[str] = []
+    lines = ["TASK CHECKLIST"]
 
-    problems = [(r["task"], r["problem"]) for r in task_results if r["problem"]]
-    if litestream["problem"]:
-        problems.append(("Litestream replica", litestream["problem"]))
-
-    if problems:
-        for task, problem in problems:
-            lines.append(f"  [!] {task}: {problem}")
+    if last_run is None:
+        lines.append("  [!] Daily pipeline (main.py) -- no runs recorded")
+        problems.append("Daily pipeline (main.py): no runs recorded")
+    elif hb_hours > _hb.DEFAULT_MAX_SILENCE_HOURS:
+        lines.append(f"  [!] Daily pipeline (main.py) -- no successful run in {hb_hours:.1f}h")
+        problems.append(f"Daily pipeline (main.py): no successful run in {hb_hours:.1f}h")
     else:
-        lines.append(f"  All {len(task_results)} other scheduled tasks + Litestream replica: healthy")
+        lines.append(f"  [x] Daily pipeline (main.py) -- last run {hb_hours:.1f}h ago")
 
-    return "\n".join(lines), bool(problems)
+    for r in task_results:
+        label = r["task"].replace("Leviathan-", "")
+        # Weekly-cadence tasks (192h threshold) pass this check on every day
+        # of their week, not just the day they actually ran -- "(weekly)"
+        # keeps a bare [x] from reading as "ran today" on a Tuesday.
+        cadence_hours = _ahc.TASK_CADENCE_HOURS.get(r["task"], 24.0)
+        suffix = " (weekly)" if cadence_hours > 48.0 else ""
+        if r["problem"]:
+            lines.append(f"  [!] {label}{suffix} -- {r['problem']}")
+            problems.append(f"{label}: {r['problem']}")
+        else:
+            lines.append(f"  [x] {label}{suffix}")
+
+    if litestream["problem"]:
+        lines.append(f"  [!] Litestream replica -- {litestream['problem']}")
+        problems.append(f"Litestream replica: {litestream['problem']}")
+    else:
+        lines.append("  [x] Litestream replica")
+
+    return "\n".join(lines), problems
 
 
 def section_reconciliation(now: datetime | None = None) -> tuple[str, bool]:
@@ -182,19 +215,35 @@ def section_weekly_logs(now: datetime | None = None) -> str | None:
     return "WEEKLY AUDITS\n" + "\n\n".join(blocks) if blocks else None
 
 
+def _attention_section(problems: list[str]) -> str:
+    lines = ["NEEDS YOUR ATTENTION"]
+    if not problems:
+        lines.append("  Nothing -- every task on the checklist below completed normally.")
+    else:
+        for p in problems:
+            lines.append(f"  - {p}")
+    return "\n".join(lines)
+
+
 def compose_digest(now: datetime | None = None) -> tuple[str, str]:
     now = now or datetime.now(timezone.utc)
 
-    task_text, task_problem = section_task_health(now)
+    task_text, task_problems = section_task_health(now)
     recon_text, recon_problem = section_reconciliation(now)
-    sections = [task_text, recon_text, section_smart_money(now), section_resolve_first(now)]
+
+    problems = list(task_problems)
+    if recon_problem:
+        problems.append("Reconciliation: misaligned signal(s) found -- see RECONCILIATION section below")
+
+    sections = [_attention_section(problems), task_text, recon_text,
+                section_smart_money(now), section_resolve_first(now)]
 
     weekly = section_weekly_logs(now)
     if weekly:
         sections.append(weekly)
 
     body = "\n\n".join(sections)
-    flag = "[ATTENTION] " if (task_problem or recon_problem) else ""
+    flag = "[ATTENTION] " if problems else ""
     subject = f"Leviathan Daily Digest — {flag}{now.strftime('%Y-%m-%d')}"
     return body, subject
 

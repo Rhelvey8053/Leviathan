@@ -60,19 +60,40 @@ def test_section_task_health_all_healthy():
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}):
-        text, has_problem = dd.section_task_health(now=NOW)
-    assert has_problem is False
-    assert "healthy" in text
+        text, problems = dd.section_task_health(now=NOW)
+    assert problems == []
+    assert "[!]" not in text
+    # every monitored task listed by name, not collapsed into a summary line
+    for name in dd._ahc.TASK_CADENCE_HOURS:
+        assert name.replace("Leviathan-", "") in text
+    assert "[x] Litestream replica" in text
+    assert "[x] Daily pipeline (main.py)" in text
+
+
+def test_section_task_health_labels_weekly_tasks():
+    # CodeAudit/WeeklyAudit pass their 192h cadence check on every day of
+    # the week, not just the day they ran -- a bare [x] would misread as
+    # "ran today" on, say, a Tuesday. Daily tasks get no such suffix.
+    with patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()), \
+         patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
+         patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}):
+        text, _ = dd.section_task_health(now=NOW)
+    assert "[x] CodeAudit (weekly)" in text
+    assert "[x] WeeklyAudit (weekly)" in text
+    assert "[x] Heartbeat (weekly)" not in text
+    assert "[x] GateNotifier (weekly)" not in text
 
 
 def test_section_task_health_flags_task_problem():
     results = _healthy_task_results()
     results[0]["problem"] = "no run in 40.0h (threshold 30h)"
+    flagged_task = results[0]["task"]
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=results), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}):
-        text, has_problem = dd.section_task_health(now=NOW)
-    assert has_problem is True
+        text, problems = dd.section_task_health(now=NOW)
+    assert len(problems) == 1
+    assert flagged_task.replace("Leviathan-", "") in problems[0]
     assert "[!]" in text
 
 
@@ -81,8 +102,8 @@ def test_section_task_health_flags_litestream_problem():
          patch.object(dd._ahc, "check_litestream_replica",
                        return_value={"problem": "replica is 6.0h behind the live DB", "lag_hours": 6.0}), \
          patch.object(dd._hb, "get_last_run", return_value=None):
-        text, has_problem = dd.section_task_health(now=NOW)
-    assert has_problem is True
+        text, problems = dd.section_task_health(now=NOW)
+    assert len(problems) == 2  # no runs recorded + litestream lag
     assert "Litestream replica" in text
     assert "no runs recorded" in text
 
@@ -222,7 +243,9 @@ def test_compose_digest_clean_subject_has_no_attention_flag(tmp_path):
          patch.object(dd, "WEEKLY_LOGS", {}):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" not in subject
-    assert "TASK HEALTH" in body and "RECONCILIATION" in body
+    assert "NEEDS YOUR ATTENTION" in body
+    assert "Nothing --" in body
+    assert "TASK CHECKLIST" in body and "RECONCILIATION" in body
 
 
 def test_compose_digest_flags_attention_in_subject(tmp_path):
@@ -236,6 +259,27 @@ def test_compose_digest_flags_attention_in_subject(tmp_path):
          patch.object(dd, "WEEKLY_LOGS", {}):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" in subject
+    attention_section = body.split("\n\n")[0]
+    assert "NEEDS YOUR ATTENTION" in attention_section
+    assert "no run in 40.0h" in attention_section
+    assert "Nothing --" not in attention_section
+
+
+def test_compose_digest_attention_aggregates_reconciliation_too(tmp_path):
+    data = {"run_at": NOW.isoformat(), "paper_open": 1, "positions_fetched": 1,
+            "aligned": [], "misaligned": [{"ticker": "ABC", "signal": "YES", "position": "NO"}],
+            "unplaced": [], "unexpected": []}
+    (tmp_path / "2026-08-24.json").write_text(json.dumps(data), encoding="utf-8")
+    with patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()), \
+         patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
+         patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}), \
+         patch.object(dd, "RECONCILIATION_DIR", tmp_path), \
+         patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"), \
+         patch.object(dd, "WEEKLY_LOGS", {}):
+        body, subject = dd.compose_digest(now=NOW)
+    assert "[ATTENTION]" in subject
+    attention_section = body.split("\n\n")[0]
+    assert "Reconciliation" in attention_section
 
 
 # ─── check(): end-to-end ────────────────────────────────────────────────
