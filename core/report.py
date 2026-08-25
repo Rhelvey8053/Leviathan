@@ -843,8 +843,8 @@ def _html_close_date(s: dict) -> str:
     Formats a signal's close date for the HTML pick card, e.g. "closes Jan 1
     2027". Parses the SAME fields (close_time/expiration_time) with the same
     fromisoformat logic as _close_and_urgency — only the final string style
-    differs (matching leviathan_report_email_v2.html's cosmetic format),
-    never the underlying date value.
+    differs (a cosmetic format for the HTML card), never the underlying
+    date value.
     """
     close_raw = s.get("close_time") or s.get("expiration_time", "")
     if not close_raw:
@@ -876,7 +876,7 @@ def _kalshi_link_or_bare(ticker: str, series_ticker: str, event_ticker: str,
     url = kalshi_market_url(series_ticker, event_ticker)
     if not url:
         return display
-    return f'<a href="{_esc(url)}" class="klink" style="color:#84b6fb;text-decoration:none;">{display}</a>'
+    return f'<a href="{_esc(url)}" class="klink" style="color:#0B6E63;text-decoration:none;">{display}</a>'
 
 
 def _coerce_sources(raw) -> list[dict]:
@@ -1669,72 +1669,75 @@ def compile_report(
     return "\n".join(out)
 
 
-# ── HTML email (leviathan_report_email_v2.html — see docs/PROGRESS_ARCHIVE.md) ───────
+# ── HTML email (2026-08-25 light "field instrument" redesign; prior dark-theme history in docs/PROGRESS_ARCHIVE.md) ───────
 
 _HTML_STAT_TILE = (
     '<td style="padding-top:14px;">'
-    '<div class="plex" style="font-family:\'IBM Plex Mono\',ui-monospace,Consolas,Menlo,monospace;'
-    'font-size:9px;letter-spacing:1px;text-transform:uppercase;color:#8695ac;">{label}</div>'
-    '<div class="plex" style="font-family:\'IBM Plex Mono\',ui-monospace,Consolas,Menlo,monospace;'
-    'font-size:15px;font-weight:600;color:{color};padding-top:3px;">{value}</div></td>'
+    '<div style="font-family:-apple-system,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;'
+    'font-size:9px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">{label}</div>'
+    '<div style="font-family:ui-monospace,\'SF Mono\',\'Cascadia Code\',Consolas,Menlo,monospace;'
+    'font-variant-numeric:tabular-nums;font-size:16px;font-weight:600;color:{color};padding-top:3px;">{value}</div></td>'
 )
 
 
 def _pick_card_html(pick: dict) -> str:
-    """Renders one TOP PICKS card matching leviathan_report_email_v2.html."""
-    dir_color = "#3ddc9f" if pick["direction"] == "YES" else "#f9bd74"
-    dir_bg    = "#0f2a1f" if pick["direction"] == "YES" else "#33260f"
-    stars     = f"{'★' * min(pick['strength'], 3)}" if pick["strength"] >= 2 else ""
-    star_html = (f'<td class="plex" style="font-family:\'IBM Plex Mono\',ui-monospace,Consolas,Menlo,monospace;'
-                 f'font-size:12px;color:#f5c451;letter-spacing:1px;">{stars}</td>') if stars else ""
+    """
+    Renders one TOP PICKS card. 2026-08-25 redesign -- see render_html's
+    docstring for the palette/type rationale; this mirrors it at the
+    component level (serif rank numeral, sans meta, mono data only where
+    digits actually need columnar alignment).
+    """
+    is_yes    = pick["direction"] == "YES"
+    dir_color = "#1F7A45" if is_yes else "#A85327"
+    dir_bg    = "#E7F3EB" if is_yes else "#F5E9E0"
+    stars     = "★" * min(pick["strength"], 3) if pick["strength"] >= 2 else ""
+    star_html = (f'<span style="font-family:ui-monospace,\'SF Mono\',Consolas,Menlo,monospace;'
+                 f'font-size:11px;color:#C9962F;letter-spacing:1px;padding-left:8px;">{stars}</span>') if stars else ""
     fp_html = ""
     if pick["flag_path"]:
         fp_html = (
-            '<td style="padding-right:7px;"><span class="plex" style="font-family:\'IBM Plex Mono\','
-            'ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#aab6ca;'
-            f'background-color:#1a2334;padding:4px 9px;border-radius:5px;">{_esc(pick["flag_path"])}</span></td>'
+            f'<span style="font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:10px;'
+            f'font-weight:600;letter-spacing:.3px;color:#5B6B6C;background-color:#EDF1F0;'
+            f'padding:3px 8px;border-radius:3px;margin-left:7px;">{_esc(pick["flag_path"])}</span>'
         )
 
     kalshi_link = _kalshi_link_or_bare(pick["ticker"], pick["series_ticker"], pick["event_ticker"],
                                        label="Trade on Kalshi&nbsp;↗")
     ticker_link = _kalshi_link_or_bare(pick["ticker"], pick["series_ticker"], pick["event_ticker"])
 
-    rep_s = (f" · REPEAT ×{pick['repeat_count']}" if pick["repeat_count"] >= 2
-             else (" · REPEAT" if pick["is_repeat"] else ""))
+    rep_s = (f" · Repeat ×{pick['repeat_count']}" if pick["repeat_count"] >= 2
+             else (" · Repeat" if pick["is_repeat"] else ""))
     meta_bits = " · ".join(x for x in [pick["horizon"], pick.get("_close_html", "")] if x)
 
     kelly_html = ""
     if pick["kelly"]:
-        kelly_html = _HTML_STAT_TILE.format(label="Kelly¼", color="#f2f5fa",
+        kelly_html = _HTML_STAT_TILE.format(label="Kelly ¼", color="#14191B",
                                              value=f"{pick['kelly'][1]*100:.1f}%")
     ev_html = ""
     if pick["ev"]:
-        ev_html = _HTML_STAT_TILE.format(label="EV/ct", color="#3ddc9f", value=_esc(pick["ev"]))
+        ev_html = _HTML_STAT_TILE.format(label="EV / ct", color="#0B6E63", value=_esc(pick["ev"]))
 
     return f'''
     <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #D9E0DD;border-radius:3px;">
         <tr>
-          <td width="3" bgcolor="#f7ad57" style="background-color:#f7ad57;font-size:0;line-height:0;border-radius:10px 0 0 10px;">&nbsp;</td>
-          <td style="padding:18px 22px;">
+          <td width="4" bgcolor="{dir_color}" style="background-color:{dir_color};font-size:0;line-height:0;">&nbsp;</td>
+          <td style="padding:20px 24px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-              <td>
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-                  <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;font-weight:600;color:#8695ac;padding-right:10px;">{pick['rank']:02d}</td>
-                  <td style="padding-right:7px;"><span class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;font-weight:700;color:{dir_color};background-color:{dir_bg};padding:4px 9px;border-radius:5px;">BUY&nbsp;{_esc(pick['direction'])}</span></td>
-                  <td style="padding-right:7px;"><span class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;font-weight:600;color:#93bdf7;background-color:#152a48;padding:4px 9px;border-radius:5px;">{_esc(pick['confidence'])}</span></td>
-                  {fp_html}
-                  {star_html}
-                </tr></table>
+              <td style="font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:19px;font-style:italic;color:#B9C0BE;padding-right:12px;vertical-align:middle;">{pick['rank']:02d}</td>
+              <td style="vertical-align:middle;">
+                <span style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:.4px;color:{dir_color};background-color:{dir_bg};padding:4px 10px;border-radius:3px;">{_esc(pick['direction'])}</span>
+                <span style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:11px;font-weight:600;color:#5B6B6C;padding-left:9px;">{_esc(pick['confidence'])} confidence</span>
+                {fp_html}{star_html}
               </td>
-              <td align="right" valign="top" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;">{kalshi_link}</td>
+              <td align="right" valign="middle" style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:11px;font-weight:600;">{kalshi_link}</td>
             </tr></table>
-            <div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15.5px;font-weight:500;color:#f2f5fa;line-height:1.45;padding:14px 0 4px;">{_esc(pick['title'])}</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;padding-bottom:15px;">{ticker_link} <span style="color:#7c8aa1;">&nbsp;·&nbsp; {_esc(meta_bits)}{_esc(rep_s)}</span></div>
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #1e2838;"><tr>
-              {_HTML_STAT_TILE.format(label="Market", color="#f2f5fa", value=_esc(pick["market_pct"]))}
-              {_HTML_STAT_TILE.format(label="Est", color="#f2f5fa", value=_esc(pick["est_pct"]))}
-              {_HTML_STAT_TILE.format(label="Edge", color="#3ddc9f", value=_esc(f"{pick['edge']*100:+.1f}"))}
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16.5px;font-weight:500;color:#14191B;line-height:1.42;padding:15px 0 5px;">{_esc(pick['title'])}</div>
+            <div style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:11.5px;color:#5B6B6C;padding-bottom:16px;">{ticker_link}&nbsp;&nbsp;·&nbsp;&nbsp;{_esc(meta_bits)}{_esc(rep_s)}</div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E7ECEA;"><tr>
+              {_HTML_STAT_TILE.format(label="Market", color="#14191B", value=_esc(pick["market_pct"]))}
+              {_HTML_STAT_TILE.format(label="Est.", color="#14191B", value=_esc(pick["est_pct"]))}
+              {_HTML_STAT_TILE.format(label="Edge", color="#0B6E63", value=_esc(f"{pick['edge']*100:+.1f}"))}
               {ev_html}
               {kelly_html}
             </tr></table>
@@ -1742,25 +1745,25 @@ def _pick_card_html(pick: dict) -> str:
         </tr>
       </table>
     </td></tr>
-    <tr><td height="13" style="font-size:0;line-height:0;">&nbsp;</td></tr>'''
+    <tr><td height="14" style="font-size:0;line-height:0;">&nbsp;</td></tr>'''
 
 
 def _betting_row_html(row: dict) -> str:
-    """Renders one BETTING QUEUE table row matching leviathan_report_email_v2.html."""
-    dir_color = "#3ddc9f" if row["direction"] == "YES" else "#f9bd74"
+    """Renders one BETTING QUEUE table row. 2026-08-25 redesign."""
+    dir_color = "#1F7A45" if row["direction"] == "YES" else "#A85327"
     ev_s = row["ev_s"] if row["ev_s"] != "—" else "—"
     link = _kalshi_link_or_bare(row["ticker"], row["series_ticker"], row["event_ticker"],
                                 label=f"{_esc(row['ticker'])}&nbsp;↗")
     title_s = _esc(row["title"]) if row["title"] else ""
     return f'''
         <tr>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:{dir_color};font-weight:600;padding:13px 8px 13px 16px;border-bottom:1px solid #1e2838;vertical-align:top;">{_esc(row['direction'])}</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:#f2f5fa;padding:13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;">{_esc(row['conf'])}</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:#3ddc9f;padding:13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;white-space:nowrap;">{row['edge']*100:.1f}%</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;color:#3ddc9f;padding:13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;white-space:nowrap;">{_esc(ev_s)}</td>
-          <td style="padding:13px 16px 13px 8px;border-bottom:1px solid #1e2838;vertical-align:top;">
+          <td style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:12px;color:{dir_color};font-weight:700;padding:13px 8px 13px 18px;border-bottom:1px solid #E7ECEA;vertical-align:top;">{_esc(row['direction'])}</td>
+          <td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:12px;color:#14191B;padding:13px 8px;border-bottom:1px solid #E7ECEA;vertical-align:top;">{_esc(row['conf'])}</td>
+          <td align="right" style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-variant-numeric:tabular-nums;font-size:12px;color:#0B6E63;font-weight:600;padding:13px 8px;border-bottom:1px solid #E7ECEA;vertical-align:top;white-space:nowrap;">{row['edge']*100:.1f}%</td>
+          <td align="right" style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-variant-numeric:tabular-nums;font-size:12px;color:#0B6E63;font-weight:600;padding:13px 8px;border-bottom:1px solid #E7ECEA;vertical-align:top;white-space:nowrap;">{_esc(ev_s)}</td>
+          <td style="padding:13px 18px 13px 8px;border-bottom:1px solid #E7ECEA;vertical-align:top;">
             {link}
-            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:12px;color:#b3bdd0;line-height:1.4;padding-top:3px;">{title_s}</div>
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:12px;color:#5B6B6C;line-height:1.4;padding-top:3px;">{title_s}</div>
           </td>
         </tr>'''
 
@@ -1772,9 +1775,19 @@ def render_html(
     lv_stats=None, db_path=None, now_utc=None,
 ) -> str:
     """
-    Renders the daily report as email-safe HTML matching
-    leviathan_report_email_v2.html (dark theme, table-based, inline CSS,
-    600px container). Presentation-layer only — every value here comes
+    Renders the daily report as email-safe HTML. 2026-08-25 redesign:
+    light "field instrument" aesthetic (paper ground, white panels, a
+    single deep-teal accent, a serif masthead/rank-numeral/section-label
+    face paired with a sans body face and a tabular monospace used
+    strictly for numeric/ticker data) -- replaces the prior dark
+    monospace-everywhere terminal look entirely, on request. Deliberately
+    light-only (color-scheme/supported-color-schemes both "light") rather
+    than attempting dark-mode support: Gmail's automatic dark-mode
+    re-coloring of raw HTML email is unreliable enough client-to-client
+    that a custom palette is safer pinned to one mode than fought.
+    Still table-based with inline styles + MSO conditional comments --
+    that engineering was already sound and is unchanged; only the visual
+    language changed. Presentation-layer only — every value here comes
     from the SAME shared computations compile_report uses (_header_data,
     _rank_top_picks, _betting_queue_data): the two bodies of one email can
     never show different numbers for the same run. No Track Record section
@@ -1819,11 +1832,11 @@ def render_html(
             next_res_short = next_res_s = hdr["next_resolution_date"]
 
     picks_html = "".join(_pick_card_html(p) for p in picks) if picks else (
-        '<tr><td style="padding:24px 0;color:#8695ac;" class="plex">'
+        '<tr><td style="padding:28px 0;color:#5B6B6C;font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:13px;">'
         'No qualifying picks this run.</td></tr>'
     )
     bq_rows_html = "".join(_betting_row_html(r) for r in bq_rows) if bq_rows else (
-        '<tr><td colspan="5" style="padding:16px;color:#8695ac;" class="plex">'
+        '<tr><td colspan="5" style="padding:18px;color:#5B6B6C;font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:13px;">'
         'No unplaced signals in queue.</td></tr>'
     )
 
@@ -1836,135 +1849,125 @@ def render_html(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="color-scheme" content="dark light">
-<meta name="supported-color-schemes" content="dark light">
-<title>Leviathan — Intelligence Report</title>
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Leviathan — Field Report</title>
 <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
   body,table,td{{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}}
-  a{{color:#84b6fb;}}
-  .plex{{font-family:'IBM Plex Mono','SFMono-Regular',ui-monospace,Consolas,Menlo,monospace !important;}}
-  .klink{{color:#84b6fb !important;text-decoration:none;}}
+  a{{color:#0B6E63;}}
+  .klink{{color:#0B6E63 !important;text-decoration:none;}}
   .klink:hover{{text-decoration:underline;}}
-  @media only screen and (max-width:620px){{
+  @media only screen and (max-width:640px){{
     .container{{width:100% !important;}}
     .stack{{display:block !important;width:100% !important;box-sizing:border-box !important;}}
     .px{{padding-left:20px !important;padding-right:20px !important;}}
   }}
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:#070a12;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#070a12;font-size:1px;line-height:1px;">{_esc(preheader)}</div>
+<body style="margin:0;padding:0;background-color:#F4F6F5;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#F4F6F5;font-size:1px;line-height:1px;">{_esc(preheader)}</div>
 
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#070a12" style="background-color:#070a12;">
-<tr><td align="center" style="padding:34px 12px 56px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F4F6F5" style="background-color:#F4F6F5;">
+<tr><td align="center" style="padding:40px 12px 56px;">
 
-  <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+  <table role="presentation" class="container" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;">
 
-    <!-- HEADER -->
-    <tr><td bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:12px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-        <tr><td class="px" style="padding:24px 28px 8px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td align="left" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#f2f5fa;">LEVIATHAN<span style="color:#4a90f2;">//</span></td>
-            <td align="right" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;font-weight:500;letter-spacing:3px;color:#aab6ca;text-transform:uppercase;">Intelligence&nbsp;Report</td>
-          </tr></table>
-        </td></tr>
-        <tr><td class="px" style="padding:16px 28px 0;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td width="50" height="2" bgcolor="#4a90f2" style="background-color:#4a90f2;font-size:0;line-height:0;">&nbsp;</td>
-            <td height="2" bgcolor="#273246" style="background-color:#273246;font-size:0;line-height:0;">&nbsp;</td>
-          </tr></table>
-        </td></tr>
-        <tr><td class="px plex" style="padding:15px 28px 24px;font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11.5px;color:#aeb9cd;line-height:1.7;">
-          <span style="color:#3ddc9f;">●</span> <span style="color:#f2f5fa;">{_esc(env)}</span>&nbsp;&nbsp;·&nbsp;&nbsp;<span style="color:#f2f5fa;">{_esc(date_str)}</span>&nbsp;&nbsp;·&nbsp;&nbsp;{_esc(time_str)}&nbsp;&nbsp;·&nbsp;&nbsp;scanned <span style="color:#f2f5fa;">{n_mkt:,}</span>&nbsp;&nbsp;·&nbsp;&nbsp;runtime <span style="color:#f2f5fa;">{runtime_s:.0f}s</span>
-        </td></tr>
-      </table>
+    <!-- MASTHEAD -->
+    <tr><td class="px" style="padding:0 4px 22px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td align="left" style="font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:27px;font-style:italic;color:#14191B;">Leviathan</td>
+        <td align="right" style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:#5B6B6C;">Field&nbsp;Report</td>
+      </tr></table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;"><tr>
+        <td width="34" height="2" bgcolor="#0B6E63" style="background-color:#0B6E63;font-size:0;line-height:0;">&nbsp;</td>
+        <td height="2" bgcolor="#D9E0DD" style="background-color:#D9E0DD;font-size:0;line-height:0;">&nbsp;</td>
+      </tr></table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:11px;"><tr>
+        <td style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:11.5px;color:#5B6B6C;">
+          <span style="color:#1F7A45;">●</span>&nbsp; {_esc(env)} &nbsp;·&nbsp; {_esc(date_str)} &nbsp;·&nbsp; {_esc(time_str)} &nbsp;·&nbsp; {n_mkt:,} scanned &nbsp;·&nbsp; {runtime_s:.0f}s
+        </td>
+      </tr></table>
     </td></tr>
 
-    <tr><td height="18" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-
-    <!-- SUMMARY -->
+    <!-- SUMMARY READOUT -->
     <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#273246" style="background-color:#273246;border:1px solid #273246;border-radius:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #D9E0DD;border-radius:3px;">
         <tr>
-          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-radius:12px 0 0 0;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">New</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{hdr['new_count']}</div>
+          <td class="stack" width="20%" style="padding:18px 10px 18px 22px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">New</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['new_count']}</div>
           </td>
-          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Repeat</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{hdr['repeat_count']}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="20%" style="padding:18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Repeat</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['repeat_count']}</div>
           </td>
-          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;border-radius:0 12px 0 0;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Whale Flags</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{hdr['whale_count']}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="20%" style="padding:18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Whale</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['whale_count']}</div>
           </td>
-        </tr>
-        <tr>
-          <td class="stack" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-top:1px solid #273246;border-radius:0 0 0 12px;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Smart-Money X-refs</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:15px;font-weight:500;color:#c6cfde;padding-top:5px;">{hdr['smart_money_xref_count']} active</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="20%" style="padding:18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Smart&nbsp;$</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['smart_money_xref_count']}</div>
           </td>
-          <td class="stack" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-top:1px solid #273246;border-left:1px solid #273246;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Next Resolution</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:15px;font-weight:500;color:#c6cfde;padding-top:5px;">{_esc(next_res_s or "—")}</div>
-          </td>
-          <td class="stack" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-top:1px solid #273246;border-left:1px solid #273246;border-radius:0 0 12px 0;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Model</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:15px;font-weight:500;color:#c6cfde;padding-top:5px;">{_esc(model)}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="20%" style="padding:18px 22px 18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Next&nbsp;Res.</div>
+            <div style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:14px;font-weight:600;color:#14191B;padding-top:6px;">{_esc(next_res_s or "—")}</div>
           </td>
         </tr>
       </table>
     </td></tr>
 
-    <tr><td height="34" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td height="36" style="font-size:0;line-height:0;">&nbsp;</td></tr>
 
     <!-- TOP PICKS -->
     <tr><td class="px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Top Picks</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#8695ac;white-space:nowrap;padding-left:14px;">best {len(picks)} · conviction × edge</td>
+        <td style="font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:18px;font-style:italic;color:#14191B;white-space:nowrap;padding-right:14px;">Top picks</td>
+        <td width="100%" style="border-bottom:1px solid #D9E0DD;">&nbsp;</td>
+        <td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#5B6B6C;white-space:nowrap;padding-left:14px;">best {len(picks)} · conviction × edge</td>
       </tr></table>
     </td></tr>
     <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
     {picks_html}
 
-    <tr><td height="34" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td height="24" style="font-size:0;line-height:0;">&nbsp;</td></tr>
 
     <!-- BETTING QUEUE -->
     <tr><td class="px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Betting Queue</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#8695ac;white-space:nowrap;padding-left:14px;">urgency × edge · after-fee floor</td>
+        <td style="font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:18px;font-style:italic;color:#14191B;white-space:nowrap;padding-right:14px;">Betting queue</td>
+        <td width="100%" style="border-bottom:1px solid #D9E0DD;">&nbsp;</td>
+        <td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#5B6B6C;white-space:nowrap;padding-left:14px;">urgency × edge · after-fee floor</td>
       </tr></table>
     </td></tr>
     <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
     <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
-        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Dir</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Conf</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Edge</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">EV</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">Market</td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #D9E0DD;border-radius:3px;">
+        <tr bgcolor="#F4F6F5" style="background-color:#F4F6F5;">
+          <td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#5B6B6C;padding:11px 8px 11px 18px;border-bottom:1px solid #D9E0DD;">Dir</td>
+          <td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#5B6B6C;padding:11px 8px;border-bottom:1px solid #D9E0DD;">Conf</td>
+          <td align="right" style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#5B6B6C;padding:11px 8px;border-bottom:1px solid #D9E0DD;">Edge</td>
+          <td align="right" style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#5B6B6C;padding:11px 8px;border-bottom:1px solid #D9E0DD;">EV</td>
+          <td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#5B6B6C;padding:11px 18px 11px 8px;border-bottom:1px solid #D9E0DD;">Market</td>
         </tr>
         {bq_rows_html}
       </table>
     </td></tr>
-    <tr><td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#8695ac;padding:10px 2px 0;">— {bq_below_floor} candidates filtered (EV &lt; {min_ev_pct*100:.0f}% of ${unit_size:.0f} unit)</td></tr>
+    <tr><td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:11px;color:#5B6B6C;padding:11px 2px 0;">{bq_below_floor} candidates filtered (EV &lt; {min_ev_pct*100:.0f}% of ${unit_size:.0f} unit)</td></tr>
 
-    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td height="32" style="font-size:0;line-height:0;">&nbsp;</td></tr>
 
     <!-- FOOTER -->
-    <tr><td class="px" style="border-top:1px solid #273246;padding-top:18px;">
-      <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10.5px;color:#8695ac;line-height:1.9;">
-        signals generated <span style="color:#c6cfde;">{run_meta.get('signals_generated', 0)}</span> &nbsp;·&nbsp; filtered (high price) <span style="color:#c6cfde;">{run_meta.get('high_price_filtered', 0)}</span> &nbsp;·&nbsp; model <span style="color:#c6cfde;">{_esc(model)}</span> &nbsp;·&nbsp; cost <span style="color:#c6cfde;">${run_meta.get('cost_usd') or 0:.2f} · Pro</span> &nbsp;·&nbsp; LLM daily spend <span style="color:#c6cfde;">${get_daily_cost_usd():.2f} / ${float(config.get('llm', {}).get('daily_cost_ceiling_usd', DEFAULT_DAILY_COST_CEILING_USD)):.2f}</span>
+    <tr><td class="px" style="border-top:1px solid #D9E0DD;padding-top:18px;">
+      <div style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:10.5px;color:#5B6B6C;line-height:1.9;">
+        signals <span style="color:#14191B;">{run_meta.get('signals_generated', 0)}</span> &nbsp;·&nbsp; filtered <span style="color:#14191B;">{run_meta.get('high_price_filtered', 0)}</span> &nbsp;·&nbsp; model <span style="color:#14191B;">{_esc(model)}</span> &nbsp;·&nbsp; cost <span style="color:#14191B;">${run_meta.get('cost_usd') or 0:.2f} · Pro</span> &nbsp;·&nbsp; daily spend <span style="color:#14191B;">${get_daily_cost_usd():.2f} / ${float(config.get('llm', {}).get('daily_cost_ceiling_usd', DEFAULT_DAILY_COST_CEILING_USD)):.2f}</span>
       </div>
-      <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#66738a;padding-top:11px;letter-spacing:1px;">LEVIATHAN // PREDICTION-MARKET INTELLIGENCE</div>
+      <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#8A9694;padding-top:12px;letter-spacing:.5px;">Leviathan — Prediction-Market Intelligence</div>
     </td></tr>
 
   </table>
