@@ -81,7 +81,9 @@ For every task named `Leviathan-*`:
 - `git log --oneline -20` and `git diff <last audit's base commit if
   known, else HEAD~10>...HEAD --stat` — get a bounded view of what
   changed since the last audit.
-- For commits since the last audit report in `reports/code_audits/`, do
+- For commits since the last audit report in `reports/code_audits/` (or
+  the last 10 commits if no prior audit report exists yet — do not
+  attempt to real-read every diff since project start), do
   a real read of the actual diffs (not just commit messages) for
   anything touching `core/`, `main.py`, or scheduled-task setup scripts
   under `scripts/setup_*.ps1` — these are the highest-consequence files.

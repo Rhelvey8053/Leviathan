@@ -116,6 +116,49 @@ reset.
 
 ---
 
+## `weekly_code_audit.py` timed out / raw traceback in logs/weekly_code_audit.log
+
+The Sunday 11am `claude --print` audit run ran out of its time budget
+(`TIMEOUT_SECONDS` in scripts/weekly_code_audit.py, currently 3600s) and
+no report landed in `reports/code_audits/`. Two ways this surfaces:
+
+- `automation_health_check.py`'s task-health section flags
+  `Leviathan-CodeAudit` with a non-zero/non-benign result code (it's one
+  of the 8 tasks that script monitors).
+- `daily_digest.py`'s weekly-audit-log-tail section shows the failure
+  the next day it's included (log modified within the last ~20h).
+
+Both can fire for the same underlying event — that's expected, not a
+double-count bug.
+
+**Known root cause (2026-08-23, fixed 2026-08-24):** the first-ever run
+had no prior report in `reports/code_audits/` to diff against, and
+`weekly_code_audit_prompt.md`'s "real read every diff since the last
+audit" instruction had no fallback bound for that case (unlike the
+diff `--stat` step just above it, which already fell back to `HEAD~10`)
+— so it was effectively unbounded against the project's full history
+(412 commits at the time). Fixed by bounding that instruction to the
+last 10 commits on a from-scratch run, and by raising the timeout from
+1800s to 3600s for real margin on top of that. The subprocess call also
+used to crash with a raw Python traceback on timeout instead of a clean
+failure message — fixed too (`run_audit()` now catches
+`subprocess.TimeoutExpired` and logs a clean one-line failure instead).
+
+**If this recurs anyway:** check `reports/code_audits/` for the most
+recent report's date — if one exists, the from-scratch-run bound above
+doesn't apply and the timeout is being hit on a normal, already-bounded
+week's worth of work. That would mean something else is slow or
+genuinely stuck: check whether the full `py -m pytest tests/ -q` step
+alone is taking unexpectedly long, or whether a specific `PowerShell`/
+`git` call in the checklist might be hanging (e.g. a `Get-WinEvent`
+query with no filter narrow enough to return quickly).
+
+**To resolve:** the next Sunday run either succeeds cleanly or fails
+with a clear one-line timeout message instead of a crash — no manual
+state to reset either way.
+
+---
+
 ## "API shape anomaly detected, run aborted" (from main.py step 2)
 
 More than `config.markets.shape_anomaly_threshold` (default 50%) of the
