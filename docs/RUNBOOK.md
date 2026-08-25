@@ -124,7 +124,7 @@ no report landed in `reports/code_audits/`. Two ways this surfaces:
 
 - `automation_health_check.py`'s task-health section flags
   `Leviathan-CodeAudit` with a non-zero/non-benign result code (it's one
-  of the 8 tasks that script monitors).
+  of the 7 tasks that script monitors).
 - `daily_digest.py`'s weekly-audit-log-tail section shows the failure
   the next day it's included (log modified within the last ~20h).
 

@@ -67,7 +67,6 @@ TASK_CADENCE_HOURS = {
     "Leviathan-PositionReconciliation":  30.0,   # daily ~9:15am
     "Leviathan-ResolveFirst":            30.0,   # daily ~8:30am
     "Leviathan-SmartMoneyScan":          30.0,   # daily ~7:07am
-    "Leviathan-SubscriberReport":        30.0,   # daily 9am
     "Leviathan-Heartbeat":               24.0,   # twice daily (2pm, 8pm) -- worst-case gap
                                                   # between runs is 18h (8pm -> next 2pm), so
                                                   # 14h would false-positive every single

@@ -92,7 +92,6 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `core/llm.py` | Anthropic Messages API client — forced tool_choice structured output, server-side web search, prompt caching, daily cost ceiling shared by the main scorer, replay-runner, and the blind arm |
 | `core/logger.py` | SQLite persistence — signals, runs, fills, probes |
 | `core/report.py` | Report compiler and email sender |
-| `core/subscribers.py` | Newsletter subscriber management |
 | `core/export_to_csv.py` | Exports `data/leviathan.db` tables to `data/powerbi_export/` |
 | `core/fees.py` | Kalshi fee schedule and net-of-fee edge math |
 | `core/sizing.py` | Confidence-weighted hypothetical stake sizing — self-gated on live resolved-signal counts, fully inert until the same threshold as `auto-calibration-loop` clears |
@@ -293,18 +292,6 @@ python analysis/eval_rescore.py --check    # separate: proves re-score reproduci
 ```
 
 **Live determinism check (2026-07-14, `backend="cli"`, the current config default):** re-scored the 8 frozen markets twice — **not identical**, as caveated above, since the CLI backend has no temperature control. Estimates shifted by a few points on most markets (e.g. 0.06 → 0.05), but one market swung sharply: the Cabinet-departure signal (original at-signal-time estimate 0.65, resolved NO) came back at 0.92 and 0.97 on re-score — *more* confidently wrong than the original call, not less. This is exactly the contamination risk documented above (re-scoring an already-resolved, publicly-known market) compounded by `backend="cli"`'s lack of reproducibility guarantees; it is not evidence about the scorer's quality and isn't used as one. Proving true reproducibility requires `backend="api"` with `temperature=0` (supported in code — `core/llm.py score_via_api(..., temperature=...)` — but untested live here due to an invalid `ANTHROPIC_API_KEY` in this environment).
-
----
-
-## Managing Subscribers
-
-```bash
-python core/subscribers.py add someone@example.com
-python core/subscribers.py list
-python core/subscribers.py remove <token>
-```
-
-Each subscriber receives the report with a unique unsubscribe token in the footer.
 
 ---
 

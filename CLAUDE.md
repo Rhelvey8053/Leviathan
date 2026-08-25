@@ -66,7 +66,6 @@ no order execution.** See `README.md` for the full 8-step architecture.
 | Evaluating a monday.com/Liam (PM agent) report before acting on it | `docs/RUNBOOK.md`'s "Triaging Liam" section + `python scripts/verify_liam_report.py` |
 | Running/diagnosing the monday.com sync itself | `docs/monday_sync_runbook.md` |
 | Plain-language project narrative | `docs/STORY.md` |
-| Report/email design system | `leviathan-report-format-decision.md`-derived work — shared editorial tokens live in `core/report.py`'s `_editorial_root_css()`; three consumers: `_SUBSCRIBER_TEMPLATE`, `_TRACK_RECORD_TEMPLATE`, `_WEEKLY_SUBSCRIBER_TEMPLATE`. Not the live daily/weekly email yet — see that file's Phase 4. |
 | Human-triaged, never-read-by-an-agent parking lot | `docs/IDEAS.md` — do not treat as direction. |
 | Whether token-reduction changes (this file, MCP registration) are actually working | `docs/token_usage_baseline.md` + `python scripts/token_usage_report.py --since 2026-08-21` — measured from real Claude Code session transcripts, not assumed. |
 
@@ -151,13 +150,13 @@ means anything registered as "local to the project" (e.g. the `leviathan`
 MCP server, added via `claude mcp add`) is scoped to `C:\WINDOWS\system32`
 in `.claude.json`, not to the Leviathan repo itself.
 
-Same limitation hits custom subagents (`.claude/agents/*.md`, present in
-this repo — see `subscriber-ux-designer.md`, `subscriber-hosting-billing.md`,
-`subscriber-growth.md`), confirmed 2026-08-21. Discovery is documented as
-walking from cwd up to the repo root, and the files are correctly in place,
-but a background-job session here never actually has cwd inside the repo —
-`Agent(subagent_type: "subscriber-ux-designer")` fails with "Agent type not
-found" even though nothing is wrong with the file. These agents work
-normally from an interactive Claude Code session actually launched with cwd
-inside this repo (e.g. a terminal opened here running `claude`) — this is a
-background-session-only gap, not a bug in the agent definitions.
+Same limitation hits custom subagents (`.claude/agents/*.md`) -- confirmed
+2026-08-21 against three now-removed subscriber-* agent files. Discovery is
+documented as walking from cwd up to the repo root, but a background-job
+session here never actually has cwd inside the repo, so `Agent(subagent_type:
+"whatever-was-defined")` fails with "Agent type not found" even with a
+correctly-placed file. These agents work normally from an interactive Claude
+Code session actually launched with cwd inside this repo (e.g. a terminal
+opened here running `claude`) -- a background-session-only gap, not a bug in
+the agent definitions themselves. No custom agents currently exist in this
+repo; keep this in mind if any get added later.

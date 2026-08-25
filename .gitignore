@@ -16,7 +16,6 @@ data/leviathan.db-wal
 data/leviathan.db-shm
 data/leviathan.db.bak*
 data/db_backups/*
-subscribers.json
 __pycache__/
 *.pyc
 .pytest_cache/

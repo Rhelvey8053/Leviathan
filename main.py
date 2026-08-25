@@ -115,11 +115,11 @@ def _rescore_shortlist_for_clean_sources(
     Anthropic's web_search_tool_result blocks aren't tagged per-market --
     every score in that batch shares one `sources` list, which is a real
     misattribution once rendered as "the sources behind THIS pick." Only
-    the handful of markets about to be published as subscriber calls need
-    this -- cost is ~N_published extra API calls, not O(flagged_markets).
+    the handful of top-ranked markets need this -- cost is ~N_published
+    extra API calls, not O(flagged_markets).
 
     Mutates each shortlisted signal's `sources` key in place (same object
-    identity report.determine_subscriber_shortlist returns, per its own
+    identity report.determine_top_shortlist returns, per its own
     docstring) and returns accounting info for the caller to fold into
     run_meta: {"rescored_count": n, "shortlist_size": n, "tokens": n,
     "cost_usd": float}. A market re-score that comes back empty leaves that
@@ -134,7 +134,7 @@ def _rescore_shortlist_for_clean_sources(
     `sources` re-score above: it never removes or downgrades `sources`,
     it just leaves `citations` unset on that signal.
     """
-    shortlist = report.determine_subscriber_shortlist(final_signals, config)
+    shortlist = report.determine_top_shortlist(final_signals, config)
     markets_by_ticker = {m.get("ticker", ""): m for m in flagged_markets}
     rescored_count = 0
     tokens = 0

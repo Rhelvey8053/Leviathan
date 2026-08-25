@@ -252,8 +252,7 @@ def test_send_report_with_html_body_is_multipart_alternative():
 
     mock_smtp.sendmail.side_effect = _fake_sendmail
 
-    with patch.object(report, "smtplib") as mock_smtplib, \
-         patch("core.subscribers.get_active_subscribers", return_value=[]):
+    with patch.object(report, "smtplib") as mock_smtplib:
         mock_smtplib.SMTP.return_value = mock_smtp
         report.send_report("plain text body", [], 0, _cfg_with_report(),
                            html_body="<html><body>hi</body></html>")
@@ -277,8 +276,7 @@ def test_send_report_without_html_body_stays_single_part():
     captured = {}
     mock_smtp.sendmail.side_effect = lambda f, t, m: captured.update(msg_string=m)
 
-    with patch.object(report, "smtplib") as mock_smtplib, \
-         patch("core.subscribers.get_active_subscribers", return_value=[]):
+    with patch.object(report, "smtplib") as mock_smtplib:
         mock_smtplib.SMTP.return_value = mock_smtp
         report.send_report("plain only", [], 0, _cfg_with_report())
 
@@ -294,8 +292,7 @@ def test_send_report_preserves_subject_and_recipients():
     sent_to = []
     mock_smtp.sendmail.side_effect = lambda f, t, m: sent_to.append(t)
 
-    with patch.object(report, "smtplib") as mock_smtplib, \
-         patch("core.subscribers.get_active_subscribers", return_value=[]):
+    with patch.object(report, "smtplib") as mock_smtplib:
         mock_smtplib.SMTP.return_value = mock_smtp
         report.send_report("body", [], 0, _cfg_with_report(),
                            subject_override="Custom Subject",
@@ -346,82 +343,3 @@ def test_dry_run_prints_shared_values_check(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "SHARED VALUES CHECK" in captured.out
     assert "No SMTP call made" in captured.out
-
-
-# ─── Editorial design system (leviathan-report-format-decision.md Phase 1) ───
-#
-# _editorial_root_css / _flatten_editorial_vars are the single source the
-# subscriber, track-record, and (Phase 2) weekly editorial templates all
-# draw their design tokens from. Byte-stability of _editorial_root_css's
-# default output is a real regression guard, not busywork: the whole point
-# of Phase 1 was that the subscriber template's rendered HTML must stay
-# byte-for-byte identical to the pre-extraction version.
-
-class TestEditorialDesignSource:
-
-    def test_editorial_root_css_byte_stable_output(self):
-        """
-        Locks the exact string every editorial template's .format() call
-        embeds -- a regression guard against ACCIDENTAL drift, not a freeze
-        on the design. Deliberate design changes (like ink-faint's
-        2026-08-20 contrast fix, #949AA5 -> #646B77) update this test
-        intentionally; an unexpected diff here means something changed the
-        shared tokens without meaning to.
-        """
-        expected = (
-            ":root{\n"
-            "    --paper:#FBFAF7; --ink:#15181E; --ink-soft:#525A67; --ink-faint:#646B77;\n"
-            "    --line:#E7E4DC; --line-soft:#EFEDE7; --slate:#1C2A3A;\n"
-            "    --edge:#0B6E52; --edge-soft:#E7F0EB; --amber:#9A5A12; --amber-soft:#F4ECDE;\n"
-            "    --whale:#2F4C8C; --whale-soft:#E8ECF5;\n"
-            "    --serif:\"Newsreader\",Georgia,serif; --sans:\"Inter\",-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;\n"
-            "    --mono:\"IBM Plex Mono\",ui-monospace,Consolas,Menlo,monospace;\n"
-            "    --sp-3:24px; --sp-6:48px;\n"
-            "  }"
-        )
-        assert report._editorial_root_css() == expected
-
-    def test_editorial_root_css_uses_passed_tokens_not_default(self):
-        custom = {"paper": "#FFFFFF"}
-        # Only tokens present in the passed dict that also appear in the
-        # line-group layout are rendered -- passing a minimal dict missing
-        # most keys should raise, proving the function doesn't silently
-        # fall back to the default for missing entries.
-        with pytest.raises(KeyError):
-            report._editorial_root_css(custom)
-
-    def test_flatten_editorial_vars_substitutes_known_tokens(self):
-        css = "body{background:var(--paper); color:var(--ink);}"
-        out = report._flatten_editorial_vars(css)
-        assert out == "body{background:#FBFAF7; color:#15181E;}"
-        assert "var(" not in out
-
-    def test_flatten_editorial_vars_unknown_token_raises(self):
-        with pytest.raises(KeyError, match="unknown-token"):
-            report._flatten_editorial_vars("a{color:var(--unknown-token);}")
-
-    def test_flatten_editorial_vars_no_vars_passthrough(self):
-        css = "a{color:#000;}"
-        assert report._flatten_editorial_vars(css) == css
-
-    def test_flatten_editorial_vars_multiline_and_repeated(self):
-        css = "a{color:var(--edge);}\nb{color:var(--edge); background:var(--edge-soft);}"
-        out = report._flatten_editorial_vars(css)
-        assert out == "a{color:#0B6E52;}\nb{color:#0B6E52; background:#E7F0EB;}"
-
-    def test_subscriber_template_embeds_editorial_root_css(self):
-        html = report.render_subscriber_html([], {"markets_scanned": 0}, {}, now_utc=datetime(2026, 1, 1, tzinfo=timezone.utc))
-        assert report._editorial_root_css() in html
-
-    def test_track_record_template_embeds_editorial_root_css(self, tmp_path, monkeypatch):
-        from core import logger as _logger
-        db_file = str(tmp_path / "test_editorial.db")
-        monkeypatch.setattr(_logger, "DB_PATH", db_file)
-        _logger._init_db()
-        html = report.render_track_record_html(now_utc=datetime(2026, 1, 1, tzinfo=timezone.utc))
-        assert report._editorial_root_css() in html
-        # Track record's pre-extraction :root block never had these tokens
-        # (documented, intentional reconciliation, not drift) -- confirms
-        # the shared source actually reached this template.
-        assert "--whale:#2F4C8C" in html
-        assert "--sp-3:24px" in html

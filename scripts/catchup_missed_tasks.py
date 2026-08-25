@@ -37,9 +37,9 @@ session -- the first real wake is the real test, not this script's own
 tests, which only cover its decision logic (which tasks it judges
 stale), not whether Windows actually delivers the launch.
 
-Scope: Leviathan-DailyRun + the 8 tasks automation_health_check.py
+Scope: Leviathan-DailyRun + the 7 tasks automation_health_check.py
 already monitors (GateNotifier, PositionReconciliation, ResolveFirst,
-SmartMoneyScan, SubscriberReport, Heartbeat, CodeAudit, WeeklyAudit).
+SmartMoneyScan, Heartbeat, CodeAudit, WeeklyAudit).
 Deliberately excludes Litestream (a continuous process, not a
 daily-batch task -- its own failure mode was a zombie process blocking
 relaunch, which restarting the task doesn't reliably fix on its own; see
