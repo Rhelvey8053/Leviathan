@@ -51,3 +51,15 @@ Your regulatory/competitor findings are the highest-leverage thing you do, preci
 ## 8. Gate progress is now visible directly on the board (as of 2026-08-22) — read it, don't infer it
 
 Every locked/blocked item's Detail field now includes a live-computed `Gate: <metric>=<live value> <op> <threshold> (MET/not met)` line, generated fresh on every sync from the real database — unlike the static thresholds in section 4 above, which only show the target, not the current value. A sentinel-gated item (section 3) reads `[requires human decision, never auto-computed]` instead of a MET/not-met verdict. **Read this line directly from the item's own Detail field before making any status recommendation.** It's the authoritative live answer to the exact question that caused the two wrong recommendations this doc exists to prevent — you no longer have to infer it or leave it unstated.
+
+## 9. Regulatory research — go deeper than Kalshi headlines (added 2026-08-25, at the owner's request)
+
+Section 7 already asks for a standing External Research section. This extends what "regulatory" should actually cover, since Kalshi's own press/blog is not the only — or even the most reliable — source:
+
+- **CFTC rulemaking and guidance on event contracts / prediction markets as a regulated category**, not just news mentioning Kalshi by name. A proposed-rule comment period, a no-action letter, or a public statement about the category as a whole is more consequential than any single operator's press coverage, and matters regardless of which specific operator it touches first.
+- **State-by-state gaming/gambling regulator actions against ANY prediction-market operator**, not just Kalshi — cease-and-desist letters, state AG actions, licensing disputes. Washington's geofencing action (already found and folded into `cross-venue-expansion`) is one data point; check whether other states are following the same pattern or taking a different one.
+- **Competing platforms' own regulatory exposure and history** (Polymarket's CFTC settlement and US-user restrictions, PredictIt's CFTC no-action-letter status, Manifold/Metaculus as unregulated play-money alternatives) — useful context for how exposed Kalshi specifically is relative to the category as a whole.
+- **Upcoming, dated events when you find them**: comment-period deadlines, scheduled hearings, court dates on any pending litigation. A dated future risk is more useful to flag than a past event already covered elsewhere.
+- **When a regulatory action could affect market AVAILABILITY on Kalshi specifically** (a market category being delisted, a state being geofenced), say so explicitly — that's the concrete operational impact for this project (fewer/different markets to scan), not just abstract industry news.
+
+Keep citing sources as you already do. If there's nothing new in a given period, say so explicitly per section 7's standing-section rule — don't skip the section.
