@@ -32,7 +32,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (75)
+## Done (76)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -107,6 +107,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
 | 5 | heuristic-sunsetting | Ran analysis/heuristic_backtest.py fresh and screened every label with n>=10 for underperformance -- but the correct comparison isn't raw Brier vs. | calibration |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
+| 5 | metaculus-community-prediction-inaccessible | Found 2026-08-25 while setting up the (previously dormant, missing-token) Metaculus integration at the owner's request. | data-quality |
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
 | 5 | subscriber-report-removed-2026-08 | User question: if the strategy is proven profitable, why send picks to subscribers instead of trading it directly? Investigated before acting -- found neither justification for the feature actually… | infra |
 | 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |

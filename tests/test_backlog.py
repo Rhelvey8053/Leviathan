@@ -42,8 +42,21 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_92_items(backlog_data):
+def test_parses_and_93_items(backlog_data):
     """
+    93, not 92: metaculus-community-prediction-inaccessible added
+    2026-08-25 (done). Set up the previously-dormant Metaculus
+    integration (missing token) at the owner's request -- got a real
+    free token, confirmed auth works, but the probability data
+    _extract_probability() needs doesn't exist under the field name the
+    code looks for, and even the new nested field
+    (aggregations.unweighted.latest) came back null on every one of 50
+    tested questions. Likely gated behind a higher access tier than a
+    free personal token grants. Owner decision: leave as a documented
+    dead end (token/config stay in place, code untouched) rather than
+    patch to a field that's null anyway, pursue research-partner access,
+    or rip the integration out.
+
     92, not 91: cftc-rule-40-11-event-contract-rulemaking added 2026-08-25,
     found via direct research (CFTC.gov, Federal Register, legal-firm
     summary of the actual NPRM -- not secondary news) prompted by
@@ -232,7 +245,7 @@ def test_parses_and_92_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 92
+    assert len(backlog_data["items"]) == 93
 
 
 def test_all_ids_unique(backlog_data):
