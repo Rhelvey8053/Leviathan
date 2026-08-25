@@ -7,6 +7,7 @@ import textwrap
 from datetime import datetime, date, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formatdate, make_msgid
 from dotenv import load_dotenv
 from analysis.smart_money_scan import _is_sports_title
 from core.fees import kalshi_fee
@@ -2674,9 +2675,14 @@ def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
             msg.attach(MIMEText(html_body, "html", "utf-8"))
         else:
             msg = MIMEText(full_body, "plain", "utf-8")
-        msg["Subject"] = subject
-        msg["From"]    = email_from
-        msg["To"]      = email_to
+        msg["Subject"]    = subject
+        msg["From"]       = email_from
+        msg["To"]         = email_to
+        # 2026-08-25: neither header was ever set -- automated mail with no
+        # Date/Message-ID is a real spam-filter risk, especially self-
+        # addressed mail sent via SMTP+app-password with no prior thread.
+        msg["Date"]       = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain=email_from.rsplit("@", 1)[-1] or "localhost")
         server.sendmail(email_from, email_to, msg.as_string())
 
     print(f"  [report] Sent to {email_to}")

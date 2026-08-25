@@ -301,6 +301,29 @@ def test_send_report_preserves_subject_and_recipients():
     assert sent_to == ["owner@example.com"]
 
 
+def test_send_report_sets_date_and_message_id_headers():
+    """
+    2026-08-25: neither header was ever set -- real spam-filter risk for
+    automated, self-addressed mail sent via SMTP+app-password with no
+    prior thread. Regression guard against that gap reappearing.
+    """
+    mock_smtp = MagicMock()
+    mock_smtp.__enter__ = MagicMock(return_value=mock_smtp)
+    mock_smtp.__exit__ = MagicMock(return_value=False)
+
+    captured = {}
+    mock_smtp.sendmail.side_effect = lambda f, t, m: captured.update(msg_string=m)
+
+    with patch.object(report, "smtplib") as mock_smtplib:
+        mock_smtplib.SMTP.return_value = mock_smtp
+        report.send_report("plain only", [], 0, _cfg_with_report())
+
+    raw = captured["msg_string"]
+    assert "\nDate: " in raw
+    assert "\nMessage-ID: <" in raw
+    assert "@example.com>" in raw  # domain derived from email_from
+
+
 # ─── Track Record guard ───────────────────────────────────────────────────────
 
 def test_html_never_contains_track_record():
