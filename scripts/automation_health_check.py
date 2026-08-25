@@ -82,18 +82,39 @@ TASK_CADENCE_HOURS = {
 # and Leviathan-DailyRun without any corroborating sign of real failure
 # (2026-08-23 audit) -- not fully explained, so it's allowlisted as benign
 # rather than silenced by assumption; worth digging into further if it's
-# ever seen alongside an actual symptom.
-BENIGN_RESULT_CODES = {0, 267014}
+# ever seen alongside an actual symptom. 267011 (SCHED_S_TASK_HAS_NOT_RUN,
+# 0x00041303) is the documented Win32 code for "registered but hasn't
+# fired yet" -- confirmed 2026-08-25 pairing with the LastRunTime sentinel
+# _parse_dotnet_date() now filters, on both Leviathan-DailyRun and
+# Leviathan-CodeAudit right after re-registering them.
+BENIGN_RESULT_CODES = {0, 267011, 267014}
 
 
 def _parse_dotnet_date(raw) -> datetime | None:
-    """Parses PowerShell ConvertTo-Json's '/Date(ms)/' epoch format."""
+    """
+    Parses PowerShell ConvertTo-Json's '/Date(ms)/' epoch format.
+
+    2026-08-25: Task Scheduler serializes a task's LastRunTime as a
+    sentinel date (observed as 1999-11-30 on Leviathan-DailyRun and
+    Leviathan-CodeAudit immediately after re-registering them the same
+    day) rather than a null/missing value when the task hasn't fired
+    since its last (re-)registration. Treated as None here -- same as a
+    genuinely missing LastRunTime -- so hours_since_run in
+    check_scheduled_tasks() doesn't compute a nonsense ~234,000-hour
+    staleness figure for a task that simply hasn't reached its next
+    natural trigger yet. year < 2020 is a robust general check (this
+    project didn't exist before then) rather than hardcoding the exact
+    sentinel date, in case Windows' actual sentinel value ever shifts.
+    """
     if not raw:
         return None
     m = re.search(r"/Date\((\d+)\)/", raw)
     if not m:
         return None
-    return datetime.fromtimestamp(int(m.group(1)) / 1000, tz=timezone.utc)
+    parsed = datetime.fromtimestamp(int(m.group(1)) / 1000, tz=timezone.utc)
+    if parsed.year < 2020:
+        return None
+    return parsed
 
 
 def get_raw_task_info() -> list[dict]:
