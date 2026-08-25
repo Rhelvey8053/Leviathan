@@ -1292,6 +1292,19 @@
       "action": "Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a smart_money_fills table that does not exist in data/leviathan.db (confirmed directly via sqlite_master), so the query's exception is caught and the metric silently pins at 0 instead of surfacing an error. Effect: any backlog item gated on resolved_count_per_wallet_max can never unlock as currently wired, with no visible signal that the gate itself is broken vs. legitimately unmet. Needs: find where this table was supposed to be created (migration that was never run, or a schema that was renamed/dropped) and either create it or repoint the metric at whatever table actually holds this data now.",
       "notes": "Found via the same run that confirmed the weekly_code_audit.py Write->Edit permission fix (see git history around 2026-08-24/25) -- the audit agent surfaced this before the run ended without ever reaching its own report-write step, so this was captured from the run's stdout narrative, not from a written reports/code_audits/*.md file.",
       "status": "ready"
+    },
+    {
+      "id": "dailyrun-logontype-interactive",
+      "title": "Leviathan-DailyRun still registered with LogonType Interactive, not S4U",
+      "area": "infra",
+      "priority": 3,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other Leviathan-* scheduled task, which uses S4U (runs whether or not a user is logged on). Leviathan-SubscriberReport and Leviathan-WeeklyAudit were flagged with this exact same gap in a 2026-08-17 audit and have SINCE been fixed to S4U (confirmed live -- the comment about them in setup_weekly_code_audit_scheduler.ps1 is now stale). DailyRun is the last one still on Interactive, meaning it cannot run at all if the account is logged off (as opposed to merely asleep/locked) at its 7am trigger or any WakeCatchup retry. Needs: switch schedule_setup.ps1's Principal to S4U (matching every other setup_*.ps1's pattern) and re-register live -- deliberately not done in the same pass that found it, since a logon-type change is credential/session-behavior-affecting and worth its own explicit go-ahead rather than folding into an unrelated fix.",
+      "notes": "Same class of gap as the 2026-08-17 SubscriberReport/WeeklyAudit finding, just the one task that didn't get swept up when those two were fixed.",
+      "status": "ready"
     }
   ]
 }

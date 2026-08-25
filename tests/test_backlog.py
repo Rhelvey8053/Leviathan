@@ -42,8 +42,18 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_89_items(backlog_data):
+def test_parses_and_90_items(backlog_data):
     """
+    90, not 89: dailyrun-logontype-interactive added 2026-08-25, found
+    while re-registering Leviathan-DailyRun for a RestartCount change --
+    it's still LogonType Interactive (can't run if the account is fully
+    logged off, only if merely asleep/locked), unlike every other
+    Leviathan-* task, which is S4U. SubscriberReport and WeeklyAudit had
+    this exact gap flagged in a 2026-08-17 audit and were since fixed;
+    DailyRun is the one that didn't get swept up in that fix. Priority 3,
+    ready -- deliberately not auto-fixed inline since a logon-type change
+    affects credential/session behavior and warrants its own go-ahead.
+
     89, not 88: smart-money-fills-table-missing added 2026-08-25, found by
     weekly_code_audit.py's live verification run -- resolved_count_per_
     wallet_max silently pins at 0 because the smart_money_fills table it
@@ -199,7 +209,7 @@ def test_parses_and_89_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 89
+    assert len(backlog_data["items"]) == 90
 
 
 def test_all_ids_unique(backlog_data):
