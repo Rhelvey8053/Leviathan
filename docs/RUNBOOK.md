@@ -157,6 +157,25 @@ query with no filter narrow enough to return quickly).
 with a clear one-line timeout message instead of a crash — no manual
 state to reset either way.
 
+**Second, separate bug found by this fix's own live verification run
+(2026-08-24/25, fixed same day):** the run completed within the new
+3600s budget — exit code 0, no timeout, no crash — and *still* wrote no
+report to `reports/code_audits/`. Root cause was in the run's own
+stderr: `Write(reports/code_audits/*.md)` in `ALLOWED_TOOLS` is not
+matched by the permission system's file-write checks at all (only
+`Edit(path)` rules are — per the CLI's own error message, "Edit rules
+cover all file-editing tools," Write included). The audit's one Write
+call to create its report file was silently denied for the entire life
+of this script, and exit 0 gave no hint anything was wrong. Fixed by
+expressing the same path scope as `Edit(reports/code_audits/*.md)`
+instead, and by dropping the blanket `Edit` that used to sit in
+`DISALLOWED_TOOLS` (it would have shadowed the new scoped allow — a
+disallow wins over an allow on the same tool name). **If a Sunday run
+ever again produces exit 0 with no new file in `reports/code_audits/`,
+check `logs/weekly_code_audit.log` for a similar
+"is not matched by file permission checks" stderr line before assuming
+the audit is just quiet that week.**
+
 ---
 
 ## "API shape anomaly detected, run aborted" (from main.py step 2)

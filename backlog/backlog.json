@@ -1264,8 +1264,8 @@
       },
       "depends_on": [],
       "action": "Found 2026-08-24 via daily_digest.py's new weekly-log-tail section -- previously silent, since output only ever went to logs/weekly_code_audit.log, which nobody had reason to open. scripts/weekly_code_audit.py's claude --print subprocess call (its Claude-CLI code-audit run) hit subprocess.TimeoutExpired after the full 1800s timeout the day before (2026-08-23). Not yet root-caused -- could be prompt/scope size, the allowed-tools loop genuinely taking that long, or a real hang. Needs: check whether this is a one-off vs. recurring (watch the next few Monday runs via logs/weekly_code_audit.log or daily_digest's weekly-audit section), then either fix whatever's making it slow or deliberately raise the timeout with a stated reason rather than just papering over it.",
-      "notes": "Same class of gap the whole 2026-08-24 automation-research pass was about: a real scheduled-task failure sitting silently in a log file. Distinct from weekly_audit.py (a separate script, same claude --print pattern, not observed to have this problem).",
-      "status": "ready"
+      "notes": "Same class of gap the whole 2026-08-24 automation-research pass was about: a real scheduled-task failure sitting silently in a log file. Distinct from weekly_audit.py (a separate script, same claude --print pattern, not observed to have this problem). RESOLVED 2026-08-25: TIMEOUT_SECONDS raised to 3600 + graceful subprocess.TimeoutExpired handling, committed 1f7f78e. A second, separate bug (Write(reports/code_audits/*.md) not matched by permission checks -- silently produced no report despite exit 0) was found and fixed alongside it, committed a3383f9; live re-verification in progress.",
+      "status": "done"
     },
     {
       "id": "task-scheduler-manual-trigger-stuck-queued",
@@ -1278,6 +1278,19 @@
       "depends_on": [],
       "action": "Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets the task stuck in \"Queued\" state permanently -- Get-ScheduledTaskInfo reports LastTaskResult=0 (looks like success) but the Task Scheduler operational event log shows no \"started\"/\"action launched\"/\"completed\" events at all; the process never actually spawns. Confirmed NOT specific to newly-registered tasks: manually triggering the long-established Leviathan-Heartbeat task produced the identical stuck-Queued result. Task Scheduler service itself is Running/healthy; RunOnlyIfIdle is False (ruled out); task settings are identical to the working Heartbeat task. Root cause not identified -- stopped short of chasing into Task Scheduler service internals or session/logon management, since fixes there (restarting services, touching logon sessions) cross into system-settings territory needing the user's own say. Possibly related to (but not confirmed to be the same issue as) DailyRun's missed 6am trigger during sleep the same day -- see wake-triggered-task-catchup. Investigate: does this recur on a NATURAL (non-manual) trigger; does it correlate with the active interactive console session on the same account; does a Task Scheduler service restart or a machine reboot clear it.",
       "notes": "Genuinely unresolved. Worth revisiting before trusting any future live scheduled-task verification: Get-ScheduledTaskInfo's LastTaskResult=0 alone is NOT reliable proof a real run happened on this machine -- cross-check the Task Scheduler operational event log for actual started/completed events too.",
+      "status": "ready"
+    },
+    {
+      "id": "smart-money-fills-table-missing",
+      "title": "smart_money_fills table missing from live DB -- resolved_count_per_wallet_max gate metric silently pinned at 0",
+      "area": "infra",
+      "priority": 2,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a smart_money_fills table that does not exist in data/leviathan.db (confirmed directly via sqlite_master), so the query's exception is caught and the metric silently pins at 0 instead of surfacing an error. Effect: any backlog item gated on resolved_count_per_wallet_max can never unlock as currently wired, with no visible signal that the gate itself is broken vs. legitimately unmet. Needs: find where this table was supposed to be created (migration that was never run, or a schema that was renamed/dropped) and either create it or repoint the metric at whatever table actually holds this data now.",
+      "notes": "Found via the same run that confirmed the weekly_code_audit.py Write->Edit permission fix (see git history around 2026-08-24/25) -- the audit agent surfaced this before the run ended without ever reaching its own report-write step, so this was captured from the run's stdout narrative, not from a written reports/code_audits/*.md file.",
       "status": "ready"
     }
   ]

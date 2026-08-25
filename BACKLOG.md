@@ -6,7 +6,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 ## Ready (4)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 2 | fix-weekly-code-audit-timeout | Found 2026-08-24 via daily_digest.py's new weekly-log-tail section -- previously silent, since output only ever went to logs/weekly_code_audit.log, which nobody had reason to open. | infra |
+| 2 | smart-money-fills-table-missing | Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a… | infra |
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
@@ -31,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (72)
+## Done (73)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -70,6 +70,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 2 | discovery-funnel-diagnostic | Per-stage drop-off counter + gating-metric distributions for discover_winners; diagnoses why the winner gate finds zero (sample sourcing vs. | smart-money |
 | 2 | email-html-render | Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can… | reporting |
 | 2 | fix-fetch-market-history-endpoint | core.kalshi.fetch_market_history() calls /markets/{ticker}/history, which does not exist on Kalshi's API -- confirmed empirically on 2026-07-25: every ticker tried, including active high-volume… | data-quality |
+| 2 | fix-weekly-code-audit-timeout | Found 2026-08-24 via daily_digest.py's new weekly-log-tail section -- previously silent, since output only ever went to logs/weekly_code_audit.log, which nobody had reason to open. | infra |
 | 2 | kalshi-event-ticker-capture | Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern. | data-quality |
 | 2 | kalshi-wa-geofencing-exposure-check | Investigated 2026-08-24, confirmed with the user directly: the Kalshi account/operator is NOT based in Washington State, so the WA geofencing order does not restrict this project's own market access. | infra |
 | 2 | llm-cost-ceiling | Add a configurable daily spend cap in core/llm.py that accumulates cost_usd across calls and raises once breached. | infra |

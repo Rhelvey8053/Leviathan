@@ -42,20 +42,27 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_88_items(backlog_data):
+def test_parses_and_89_items(backlog_data):
     """
+    89, not 88: smart-money-fills-table-missing added 2026-08-25, found by
+    weekly_code_audit.py's live verification run -- resolved_count_per_
+    wallet_max silently pins at 0 because the smart_money_fills table it
+    queries doesn't exist in the live DB, so any item gated on that metric
+    can never unlock. fix-weekly-code-audit-timeout flipped to done the
+    same day: its TimeoutExpired crash was root-caused and fixed (commit
+    1f7f78e), and a second bug the fix's own verification run surfaced
+    (Write(reports/code_audits/*.md) silently denied by the permission
+    system) was fixed alongside it (commit a3383f9).
+
     88, not 82: six items added 2026-08-24 from the solo-operator
     automation-research pass. Four shipped-and-done: automation-health-
     monitoring, daily-operations-digest, dependabot-setup, and
     wake-triggered-task-catchup (the last built directly off a real
     same-day incident -- the machine slept through Leviathan-DailyRun's
     6am trigger and Task Scheduler never caught it up despite
-    StartWhenAvailable=True). Two ready, from real findings made while
-    verifying the above: fix-weekly-code-audit-timeout (a genuine,
-    previously-silent subprocess.TimeoutExpired caught by daily-
-    operations-digest's first real run) and task-scheduler-manual-
-    trigger-stuck-queued (manually-triggered Start-ScheduledTask calls
-    getting stuck "Queued" forever on this machine, reproduced on both a
+    StartWhenAvailable=True). task-scheduler-manual-trigger-stuck-queued
+    stays ready: manually-triggered Start-ScheduledTask calls getting
+    stuck "Queued" forever on this machine, reproduced on both a
     newly-registered task and the long-established Leviathan-Heartbeat
     task -- root cause not yet identified).
 
@@ -192,7 +199,7 @@ def test_parses_and_88_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 88
+    assert len(backlog_data["items"]) == 89
 
 
 def test_all_ids_unique(backlog_data):
