@@ -28,8 +28,14 @@ $Action = New-ScheduledTaskAction `
 # reasoning: clear of the daily 6-9:15am cluster.
 $Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "11:00AM"
 
+# 65 min, not 30 -- 2026-08-24: weekly_code_audit.py's own internal
+# TIMEOUT_SECONDS was raised to 3600s (60 min), but this Task-Scheduler-
+# level limit was left at 30 min, which would have hard-killed the
+# process a full 30 min before the Python-level timeout could ever fire.
+# 5 min of buffer past 60 min so the script's own graceful handling gets
+# to run first.
 $Settings = New-ScheduledTaskSettingsSet `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 65) `
     -RestartCount 1 `
     -RestartInterval (New-TimeSpan -Minutes 5) `
     -StartWhenAvailable `

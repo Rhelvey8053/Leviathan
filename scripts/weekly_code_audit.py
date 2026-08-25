@@ -8,8 +8,8 @@ only, never edits code, never touches Task Scheduler or a live process,
 never commits. Sibling to scripts/weekly_audit.py (that one drafts
 calibration fixes to core/scanner.py under its own strict rules; this one
 is pure read-only investigation, no draft-a-fix step at all, so its tool
-permissions are correspondingly tighter -- no Edit at all, Write scoped
-only to this run's report file).
+permissions are correspondingly tighter -- Edit scoped only to this run's
+report file, nowhere else).
 
 Scheduled via Windows Task Scheduler -- see
 scripts/setup_weekly_code_audit_scheduler.ps1. Output also captured to
@@ -29,6 +29,18 @@ weekly_code_audit_prompt.md (bounded to the last 10 commits on a
 from-scratch run, matching the already-bounded stat step) and here
 (TIMEOUT_SECONDS raised for real margin on top of that fix, and the
 subprocess call now fails gracefully instead of crashing raw).
+
+That fix's own live verification run (2026-08-24) completed within
+budget but STILL produced no report -- a separate, sneakier bug:
+Write(reports/code_audits/*.md) in ALLOWED_TOOLS isn't matched by the
+permission system's file-write checks at all (confirmed via the CLI's
+own stderr: "Edit rules cover all file-editing tools", including Write),
+so the one Write call this run ever needed was silently denied the
+entire time. Exit code was still 0 -- looks like success unless someone
+actually checks reports/code_audits/ for a new file. Fixed by expressing
+the same scope as Edit(reports/code_audits/*.md) instead (and dropping
+the blanket "Edit" that used to sit in DISALLOWED_TOOLS, since it would
+have shadowed the new scoped allow).
 """
 
 import os
@@ -41,14 +53,18 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 PROMPT_FILE = ROOT / "scripts" / "weekly_code_audit_prompt.md"
 
-# Report-only: Edit is deliberately absent (unlike weekly_audit.py, which
-# may draft a scoped calibration fix). Write is scoped to reports/code_audits/
-# only, via the underlying permission system's path-glob support -- if that
-# proves too strict in the first live run, the fallback the prompt would hit
-# is a failed write reported as a finding, not a wrong-place write.
+# Report-only: no source-file edits, only the one report file this run
+# writes. 2026-08-24: the first successful (non-timeout) live run still
+# produced no report -- `Write(reports/code_audits/*.md)` isn't matched by
+# the permission system's file checks at all; per the CLI's own error,
+# "Edit rules cover all file-editing tools" including Write, so the path
+# scope has to be expressed as Edit(...) even though the model calls the
+# Write tool to create the new file. Matches weekly_audit.py's own
+# already-working pattern (Edit(core/scanner.py) Edit(tests/test_scanner.py)),
+# which is how this should have been written from the start.
 ALLOWED_TOOLS = (
     "Read Grep Glob "
-    "Write(reports/code_audits/*.md) "
+    "Edit(reports/code_audits/*.md) "
     "Bash(git status) Bash(git log*) Bash(git diff*) Bash(git show*) "
     "Bash(py -m pytest*) Bash(py -c*) "
     "PowerShell(Get-ScheduledTask*) PowerShell(Get-Process*) "
@@ -56,8 +72,12 @@ ALLOWED_TOOLS = (
     "PowerShell(Get-CimInstance*) PowerShell(Get-ChildItem*) "
     "PowerShell(Get-Content*)"
 )
+# NotebookEdit stays blocked; the blanket "Edit" that used to sit here was
+# removed -- it would have shadowed the scoped Edit(reports/code_audits/*.md)
+# allow above (a disallow wins over an allow on the same tool). Deny-by-
+# default already keeps Edit off every other path with no explicit rule.
 DISALLOWED_TOOLS = (
-    "NotebookEdit Edit "
+    "NotebookEdit "
     "Bash(git commit*) Bash(git push*) Bash(git add*) "
     "PowerShell(Set-ScheduledTask*) PowerShell(Register-ScheduledTask*) "
     "PowerShell(Unregister-ScheduledTask*) PowerShell(Start-ScheduledTask*) "
