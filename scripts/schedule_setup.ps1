@@ -31,8 +31,18 @@ $Action = New-ScheduledTaskAction `
 
 $Trigger = New-ScheduledTaskTrigger -Daily -At $RunTime
 
+# RestartCount/RestartInterval added 2026-08-25: main.py now sys.exit(1)s
+# specifically when markets were flagged but the Claude CLI scoring call
+# hard-failed (e.g. a Claude usage-limit exhaustion) -- see the
+# scoring_hard_failed comment in main.py. 1 hour is a guess, not a
+# confirmed number: there is no CLI/API-exposed way to query this
+# account's actual usage-reset window, so this may retry too early or
+# later than strictly needed. 3 attempts, 1 hour apart, covers roughly a
+# 3-hour window past the original 7:00 AM run.
 $Settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Hours 1) `
     -StartWhenAvailable `
     -RunOnlyIfNetworkAvailable
 

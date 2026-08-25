@@ -816,6 +816,16 @@ def main():
     print("[6/8] Scoring with Claude...")
 
     claude_scores = []
+    # Set only inside the except below -- that branch is only reachable when
+    # flagged_markets was non-empty and scorer.score_markets() raised (e.g.
+    # the CLI backend exhausted its usage limit and every retry in
+    # scorer.py's own backoff loop still failed), never for a legitimately
+    # quiet day with nothing flagged. Drives the sys.exit(1) at the very end
+    # of main() -- everything else in this function still runs and still
+    # reports/logs normally; this only changes the process's final exit
+    # code so Task Scheduler's RestartCount on Leviathan-DailyRun (see
+    # schedule_setup.ps1) has something real to catch and retry.
+    scoring_hard_failed = False
     try:
         if flagged_markets:
             # Pass historical calibration so Claude can self-correct if overconfident
@@ -835,6 +845,7 @@ def main():
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
+        scoring_hard_failed = True
 
     cost = estimate_cost(token_info, run_meta["model_used"])
     run_meta["tokens_used"] = token_info.get("input_tokens", 0) + token_info.get("output_tokens", 0)
@@ -1276,6 +1287,15 @@ def main():
             winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
         except Exception:
             pass
+
+    # Deliberately last -- unlike the winsound call above (an accidental
+    # crash the 2026-08-18 incident specifically fixed away from), this is
+    # an intentional signal: markets WERE flagged today but the CLI scoring
+    # call never produced a single score, so today's report undercounts by
+    # construction. A nonzero exit here is what lets Task Scheduler's
+    # RestartCount actually retry -- see scoring_hard_failed above.
+    if scoring_hard_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
