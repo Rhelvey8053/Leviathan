@@ -1,4 +1,4 @@
-# Leviathan — Windows Task Scheduler Setup
+# Leviathan -- Windows Task Scheduler Setup
 # Run this once as Administrator to schedule daily runs.
 # Default: every day at 7:00 AM local time.
 #
@@ -10,7 +10,16 @@
 # To change the time, edit $RunTime below.
 
 $TaskName   = "Leviathan-DailyRun"
-$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+# 2026-08-25: $MyInvocation.MyCommand.Path always resolves to this file's
+# real on-disk location (scripts\schedule_setup.ps1) regardless of the
+# caller's cwd, despite the usage comment above implying a project-root
+# invocation -- main.py itself lives one level up, at the project root,
+# not alongside this script. Using $ScriptDir directly here previously
+# pointed the registered task at a nonexistent scripts\main.py (confirmed
+# live via Get-ScheduledTask after a re-registration run). Matches the
+# $WorkDir = Split-Path $PSScriptRoot -Parent pattern every other
+# setup_*.ps1 in this directory already uses.
+$ScriptDir  = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $PythonExe  = (Get-Command python -ErrorAction SilentlyContinue).Source
 $MainScript = Join-Path $ScriptDir "main.py"
 $LogFile    = Join-Path $ScriptDir "leviathan_scheduler.log"
@@ -57,7 +66,7 @@ Register-ScheduledTask `
     -Trigger   $Trigger `
     -Settings  $Settings `
     -Principal $Principal `
-    -Description "Leviathan prediction market scanner — daily run" | Out-Null
+    -Description "Leviathan prediction market scanner -- daily run" | Out-Null
 
 Write-Host ""
 Write-Host "Scheduled task created: $TaskName"
