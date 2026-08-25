@@ -1,6 +1,6 @@
 # Heuristic Backtest — Leviathan v1
 
-**Generated:** 2026-08-18T21:47:07.166270+00:00  
+**Generated:** 2026-08-23T16:51:25.122291+00:00  
 **Source:** settled_markets (real Kalshi resolutions, no LLM cost)  
 **Total settled markets (binary result):** 12600  
 **Heuristic coverage:** 2154 / 12600 (17.1%)  
