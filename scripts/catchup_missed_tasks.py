@@ -1,6 +1,6 @@
 """
-scripts/catchup_missed_tasks.py -- Wake-triggered catch-up for missed
-scheduled runs.
+scripts/catchup_missed_tasks.py -- Catch-up for missed scheduled runs,
+fired on wake, on logon, and once daily.
 
 2026-08-24 finding: the machine slept through Leviathan-DailyRun's 6am
 trigger (asleep roughly 12:18am-10:16am local) and, despite
@@ -12,10 +12,17 @@ own catch-up behavior, it explicitly checks each task's real staleness
 (reusing heartbeat_check's and automation_health_check's own detection
 logic -- not reinventing it) and re-launches anything that's overdue.
 
-Registered to fire on wake-from-sleep (Kernel-Power Event ID 1) rather
-than at logon, since this machine's console session stays "Active"
-through sleep/resume without necessarily generating a fresh logon event
--- see scripts/setup_wake_catchup_scheduler.ps1.
+Registered on three separate triggers -- see
+scripts/setup_wake_catchup_scheduler.ps1:
+  - Wake-from-sleep (Kernel-Power Event ID 1), not logon alone, since
+    this machine's console session stays "Active" through sleep/resume
+    without necessarily generating a fresh logon event.
+  - At logon, specifically for a full shutdown -> cold boot, which a
+    wake event never fires for at all.
+  - A fixed daily time (noon), for the case neither of the above covers
+    at all: the machine just left on and awake the whole day. Without
+    this, a genuinely missed task could sit unfixed indefinitely on a
+    machine that never sleeps or logs out.
 
 Caveat, stated plainly rather than assumed away: 2026-08-24 also found
 that manually-triggered Start-ScheduledTask calls on this machine were,

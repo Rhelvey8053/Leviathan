@@ -1,19 +1,28 @@
-# Registers a Windows Task Scheduler job that fires when the machine wakes
-# from sleep, and re-launches any Leviathan-* task that was missed while
-# asleep (scripts/catchup_missed_tasks.py).
+# Registers a Windows Task Scheduler job that re-launches any Leviathan-*
+# task that was missed (scripts/catchup_missed_tasks.py), on three
+# separate triggers: wake-from-sleep, logon (covers a full shutdown ->
+# cold boot, which a sleep/wake event trigger alone would miss), and a
+# fixed daily time (covers "the laptop was just left on and awake" --
+# neither of the other two triggers fires in that case at all, so
+# without this a stale task could sit unfixed indefinitely on a machine
+# that's never actually slept or been logged out of).
 # Run once as Administrator: powershell -ExecutionPolicy Bypass -File scripts\setup_wake_catchup_scheduler.ps1
 #
 # 2026-08-24: the machine slept through Leviathan-DailyRun's 6am trigger
 # and, despite StartWhenAvailable=True, Task Scheduler never actually
-# caught it up on wake. Bound to the Kernel-Power wake event (ID 1)
-# rather than "At log on" -- this machine's console session stays
-# "Active" through sleep/resume without necessarily generating a fresh
-# logon event, so AtLogOn would miss exactly the case this exists to
-# catch.
+# caught it up on wake. The wake trigger is bound to the Kernel-Power
+# event (ID 1) rather than relying on AtLogOn alone -- this machine's
+# console session stays "Active" through sleep/resume without
+# necessarily generating a fresh logon event, so AtLogOn on its own
+# would miss exactly that case. AtLogOn is kept as a second trigger
+# specifically for the cold-boot case a wake event can't cover.
 #
 # Not end-to-end verified from this session -- an automated session can't
-# put the machine to sleep and wake it. The next real sleep/wake cycle is
-# the actual test; check logs\catchup_missed_tasks.log afterward.
+# put the machine to sleep and wake it, or log it out and back in. The
+# next real sleep/wake cycle and the next real logon are the actual
+# tests; check logs\catchup_missed_tasks.log afterward. The daily-time
+# trigger IS directly verifiable (Start-ScheduledTask), same as any other
+# fixed-schedule task.
 
 $TaskName   = "Leviathan-WakeCatchup"
 $PythonExe  = (Get-Command python).Source
@@ -32,18 +41,34 @@ $Action = New-ScheduledTaskAction `
     -Argument "/c `"`"$PythonExe`" `"$ScriptPath`" >> `"$LogPath`" 2>&1`"" `
     -WorkingDirectory $WorkDir
 
-# Event trigger bound to Kernel-Power Event ID 1 (system resumed from
-# sleep) -- New-ScheduledTaskTrigger has no friendly "on wake" parameter,
-# so this is built directly via the CIM event-trigger class. A 3-minute
-# delay lets network/DB/etc. actually come back up before anything tries
-# to run against them.
+# Trigger 1: Kernel-Power Event ID 1 (system resumed from sleep) --
+# New-ScheduledTaskTrigger has no friendly "on wake" parameter, so this
+# is built directly via the CIM event-trigger class. A 3-minute delay
+# lets network/DB/etc. actually come back up before anything tries to
+# run against them.
 $CIMTriggerClass = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler
-$Trigger = New-CimInstance -CimClass $CIMTriggerClass -ClientOnly
-$Trigger.Subscription = @'
+$WakeTrigger = New-CimInstance -CimClass $CIMTriggerClass -ClientOnly
+$WakeTrigger.Subscription = @'
 <QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=1)]]</Select></Query></QueryList>
 '@
-$Trigger.Delay = "PT3M"
-$Trigger.Enabled = $true
+$WakeTrigger.Delay = "PT3M"
+$WakeTrigger.Enabled = $true
+
+# Trigger 2: at logon -- covers a full shutdown -> cold boot, which the
+# wake-event trigger above doesn't fire for at all. Same 3-minute delay
+# rationale.
+$LogonTrigger = New-ScheduledTaskTrigger -AtLogOn
+$LogonTrigger.Delay = "PT3M"
+
+# Trigger 3: fixed daily time -- covers the case where the machine is
+# just left on and awake all day, so neither trigger above ever fires.
+# Scheduled after the morning task cluster (last one, PositionReconciliation,
+# runs ~9:15am) and before AutomationHealthCheck's 3pm alert pass, so a
+# genuinely-missed task has a real chance to get fixed before it's
+# flagged rather than the two running as pure duplicates of each other.
+$DailyTrigger = New-ScheduledTaskTrigger -Daily -At "12:00PM"
+
+$Triggers = @($WakeTrigger, $LogonTrigger, $DailyTrigger)
 
 $Settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
@@ -64,13 +89,13 @@ $Principal = New-ScheduledTaskPrincipal `
 Register-ScheduledTask `
     -TaskName  $TaskName `
     -Action    $Action `
-    -Trigger   $Trigger `
+    -Trigger   $Triggers `
     -Settings  $Settings `
     -Principal $Principal `
     -Force
 
 Write-Host ""
-Write-Host "Task '$TaskName' registered. Fires ~3 min after the machine wakes from sleep."
+Write-Host "Task '$TaskName' registered. Fires ~3 min after wake-from-sleep, ~3 min after logon, and daily at 12:00pm."
 Write-Host "Output logs to $LogPath"
-Write-Host "To test now (simulates a wake-triggered run directly, bypassing the event): Start-ScheduledTask -TaskName '$TaskName'"
+Write-Host "To test now (runs the check directly, bypassing all three triggers): Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host "To remove: Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
