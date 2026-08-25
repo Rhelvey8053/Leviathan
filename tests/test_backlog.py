@@ -42,8 +42,19 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_91_items(backlog_data):
+def test_parses_and_92_items(backlog_data):
     """
+    92, not 91: cftc-rule-40-11-event-contract-rulemaking added 2026-08-25,
+    found via direct research (CFTC.gov, Federal Register, legal-firm
+    summary of the actual NPRM -- not secondary news) prompted by
+    expanding Liam's regulatory-research scope the same day. CFTC issued
+    an NPRM 2026-06-10 substantially revising Rule 40.11's "contrary to
+    public interest" test for event contracts; the 45-day comment period
+    already closed 2026-07-27 with no final rule yet. Distinct from
+    cross-venue-expansion's WA-geofencing finding -- this is federal and
+    category-wide (affects which markets can exist at all), not a single
+    state's jurisdiction-specific action against one operator.
+
     91, not 90: subscriber-report-removed-2026-08 added 2026-08-25 (done),
     recording the day's removal of the entire subscriber-report feature --
     triggered by the user asking why send picks to subscribers instead of
@@ -221,7 +232,7 @@ def test_parses_and_91_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 91
+    assert len(backlog_data["items"]) == 92
 
 
 def test_all_ids_unique(backlog_data):
