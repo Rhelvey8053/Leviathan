@@ -3,18 +3,21 @@
 import sys
 from pathlib import Path
 
+import plotly.express as px
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data import DataLoadError, load_signals
-from theme import inject_css, page_header
+from theme import ACCENT_COLOR, PLOTLY_TEMPLATE, inject_css, page_header
 
 st.set_page_config(page_title="Leviathan -- Signal Log", layout="wide")
 inject_css()
 page_header("Signal Log", "")
 st.caption(
-    "Each row is one real bet (direction YES/NO), carrying its own source/flag_path -- "
-    "provenance is per-market, not batch-level. PASS decisions live in scan_log.csv, not here."
+    "Every real bet Leviathan has made, one row each, with exactly how and why it was made "
+    "(where it came from, how it was detected) attached to that specific bet -- not a "
+    "batch-level summary. Markets that were scanned but not bet on live in a separate file, "
+    "not shown here."
 )
 
 try:
@@ -56,7 +59,20 @@ s1, s2, s3, s4 = st.columns(4)
 s1.metric("Bets in view", n_total)
 s2.metric("Resolved", n_resolved)
 s3.metric("Win rate", win_rate_str, help=f"n={n_resolved}" if n_resolved else "no resolved bets in view")
-s4.metric("Whale-flagged", int(filtered["whale_detected"].sum()))
+s4.metric("Whale-flagged", int(filtered["whale_detected"].sum()),
+          help="A 'whale' is an unusually large trade on Kalshi's order book -- a big bettor "
+               "moving real money on this market, which can be a useful clue that someone "
+               "with information is confident.")
+
+with st.expander("Bets per day in this view", expanded=False):
+    per_day = filtered.dropna(subset=["date"]).groupby(filtered["date"].dt.date).size().reset_index(name="count")
+    if per_day.empty:
+        st.info("No dated bets in the current filter.")
+    else:
+        fig = px.bar(per_day, x="date", y="count", labels={"date": "Date", "count": "Bets logged"})
+        fig.update_layout(PLOTLY_TEMPLATE["layout"], height=260, showlegend=False)
+        fig.update_traces(marker_color=ACCENT_COLOR)
+        st.plotly_chart(fig, use_container_width=True)
 
 DEFAULT_COLS = [
     "date", "ticker", "title", "source", "direction", "confidence",

@@ -20,7 +20,8 @@ streamlit run dashboard\app.py
 ```
 
 Streamlit opens the app in your browser (default `http://localhost:8501`).
-The sidebar lists all three pages: Overview, Signal Breakdown, Signal Log.
+The sidebar lists all four pages: Overview, Signal Breakdown, Signal Log,
+Smart Money.
 
 ## Where the CSV path comes from
 
@@ -70,7 +71,7 @@ data-quality bug.
 ## Interactivity & visual style
 
 `dashboard/theme.py` holds a shared color palette, Plotly template, and CSS
-so all three pages read as one product: styled KPI cards, a consistent
+so all four pages read as one product: styled KPI cards, a consistent
 win/loss color pairing everywhere, and a `small-n-badge` shown any time a
 chart is built on a thin sample rather than letting a nicer-looking chart
 imply more confidence than the data supports.
@@ -89,6 +90,15 @@ strip plots rather than a binned reliability curve -- 13-16 resolved bets
 is too few for binning to mean anything without manufacturing false
 precision.
 
+Overview and Smart Money previously had no interactive controls at all
+(Signal Breakdown and Signal Log already had sidebar filters/sliders).
+Added 2026-08-25: Overview gets an "All time / Last 30 days / Last 7
+days" lookback toggle affecting its KPIs and cumulative chart; Smart
+Money's discovery funnel gets a "Force refresh" button to bypass its
+5-min cache on demand, and its whale-streak leaderboard gets a min-streak
+slider, a direction filter, and a row-count control instead of a fixed
+top-20.
+
 ## Structure
 
 ```
@@ -99,5 +109,6 @@ dashboard/
   pages/
     2_Signal_Breakdown.py
     3_Signal_Log.py
+    4_Smart_Money.py
   requirements.txt
 ```

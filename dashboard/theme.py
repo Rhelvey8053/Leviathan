@@ -1,7 +1,7 @@
 """
 Shared visual theme for the Leviathan dashboard -- color palette, Plotly
 template, and CSS injection. Imported by app.py and every page so all
-three look and feel like one product instead of three separate scripts.
+four look and feel like one product instead of four separate scripts.
 
 Small-n honesty is a design constraint, not just a data-contract note:
 this dashboard's real dataset is 46 bets, 16 resolved. Any chart built on

@@ -41,15 +41,16 @@ from core import whales as _whales
 from core import logger as _logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from theme import PLOTLY_TEMPLATE, inject_css, page_header
+from theme import LOSS_COLOR, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header
 
 st.set_page_config(page_title="Leviathan -- Smart Money Discovery", layout="wide")
 inject_css()
 page_header("Smart Money Discovery", "wallet discovery diagnostics + whale activity")
 st.caption(
-    "Neither panel below is gated by Leviathan's own resolved-bet count -- "
-    "the discovery funnel reads live Polymarket wallet data (5 min cache), "
-    "the whale leaderboard reads persisted Kalshi order-book history."
+    "'Smart money' means tracking what other, often-right bettors are doing, as a clue "
+    "worth paying attention to -- separate from Leviathan's own picks and their track "
+    "record. The panel below reads live Polymarket wallet data (refreshed every 5 "
+    "minutes); the leaderboard below that reads recent Kalshi order-book activity."
 )
 
 
@@ -86,7 +87,16 @@ def _cached_diagnose_discovery(config: dict) -> dict:
 
 # ── Panel 1: Wallet discovery funnel ────────────────────────────────────────
 
-st.subheader("Wallet Discovery Funnel")
+hdr_col, btn_col = st.columns([5, 1])
+hdr_col.subheader("Wallet Discovery Funnel")
+hdr_col.caption(
+    "Out of a sample of recent Polymarket traders, how many actually look like skilled, "
+    "consistent winners rather than people who just got lucky once? Each bar below is a "
+    "test a wallet has to pass to stay in consideration -- it narrows at every step on purpose."
+)
+if btn_col.button("Force refresh", help="Bypass the 5-min cache and re-run the live discovery diagnostic now."):
+    _cached_diagnose_discovery.clear()
+
 try:
     with st.spinner("Running live discovery diagnostic against Polymarket (paced to stay under their rate limit -- can take up to a minute on first load; cached for 5 min after)..."):
         result = _cached_diagnose_discovery(_load_config())
@@ -123,7 +133,12 @@ st.divider()
 # ── Panel 2: Whale streak leaderboard ───────────────────────────────────────
 
 st.subheader("Whale Streak Leaderboard")
-st.caption("Tickers with the longest current run of same-direction whale-size trades across scans. Real-time Kalshi order-book activity -- independent of any resolved outcome.")
+st.caption(
+    "A 'whale' trade is an unusually large order on Kalshi's order book -- someone betting "
+    "real, serious money on one side of a question. A 'streak' here means the same big-money "
+    "direction has kept showing up scan after scan on that market -- not a guarantee it's "
+    "right, but a market where someone is repeatedly willing to bet big on one outcome."
+)
 
 streak_data = _whales.load_whale_streak()
 if not streak_data:
@@ -139,7 +154,42 @@ else:
             "streak": v.get("streak", 0), "last updated": last_updated,
             "days ago": days_ago,
         })
-    streak_df = pd.DataFrame(rows).sort_values("streak", ascending=False).head(20)
+    all_streak_df = pd.DataFrame(rows).sort_values("streak", ascending=False)
+
+    max_streak = int(all_streak_df["streak"].max()) if not all_streak_df.empty else 1
+    f1, f2, f3 = st.columns([2, 2, 1])
+    min_streak = f1.slider("Min streak length", 1, max(max_streak, 1), 1)
+    directions = sorted(all_streak_df["direction"].dropna().unique())
+    picked_directions = f2.multiselect("Direction", directions, default=directions)
+    top_n = f3.number_input("Rows to show", min_value=5, max_value=100, value=20, step=5)
+
+    streak_df = all_streak_df[
+        (all_streak_df["streak"] >= min_streak)
+        & (all_streak_df["direction"].isin(picked_directions))
+    ].head(int(top_n)).copy()
+
+    if streak_df.empty:
+        st.info("No streaks match the current filters.")
+        st.stop()
+
+    chart_col, split_col = st.columns([3, 2])
+    with chart_col:
+        fig = px.bar(
+            streak_df.sort_values("streak"), x="streak", y="ticker", orientation="h",
+            color="direction", color_discrete_map={"YES": WIN_COLOR, "NO": LOSS_COLOR},
+            labels={"streak": "current streak", "ticker": ""},
+        )
+        fig.update_layout(PLOTLY_TEMPLATE["layout"], height=max(220, 26 * len(streak_df)),
+                           legend=dict(orientation="h", y=-0.08))
+        st.plotly_chart(fig, use_container_width=True)
+    with split_col:
+        dir_split = streak_df["direction"].value_counts()
+        fig2 = px.pie(names=dir_split.index, values=dir_split.values, hole=0.5,
+                       color=dir_split.index, color_discrete_map={"YES": WIN_COLOR, "NO": LOSS_COLOR})
+        fig2.update_layout(PLOTLY_TEMPLATE["layout"], height=220,
+                            legend=dict(orientation="h", y=-0.1),
+                            title=dict(text="Direction split (this view)", font=dict(size=13)))
+        st.plotly_chart(fig2, use_container_width=True)
 
     # A bare ticker (e.g. "KXFDAAPPROVE-MDMA-27JAN01") doesn't tell a reader
     # what the bet actually is -- look up each shown ticker's real question

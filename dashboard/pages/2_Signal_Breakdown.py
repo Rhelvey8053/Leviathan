@@ -26,12 +26,17 @@ if signals.empty:
     st.stop()
 
 st.sidebar.header("Filters")
-sources = st.sidebar.multiselect("Source", sorted(signals["source"].dropna().unique()), default=list(signals["source"].dropna().unique()))
+sources = st.sidebar.multiselect("Source", sorted(signals["source"].dropna().unique()), default=list(signals["source"].dropna().unique()),
+                                  help="Where this bet came from in Leviathan's own bookkeeping -- 'paper' (simulated), "
+                                       "'real_fill' (an actual Kalshi order), or 'research_probe' (a test bet, not a live pick).")
 min_date = signals["date"].min()
 max_date = signals["date"].max()
 date_range = st.sidebar.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-min_edge = st.sidebar.slider("Min |edge|", 0.0, float(signals["edge"].abs().max() or 0.1), 0.0, step=0.005)
-min_conf = st.sidebar.select_slider("Min confidence", options=CONFIDENCE_ORDER, value="LOW")
+min_edge = st.sidebar.slider("Min |edge|", 0.0, float(signals["edge"].abs().max() or 0.1), 0.0, step=0.005,
+                              help="Edge = how much Leviathan's own probability estimate disagrees with the market's price. "
+                                   "Raising this hides bets where we barely disagreed with the market at all.")
+min_conf = st.sidebar.select_slider("Min confidence", options=CONFIDENCE_ORDER, value="LOW",
+                                     help="How sure Leviathan's own scoring was when it made the pick, from LOW to HIGH.")
 
 filtered = signals[signals["source"].isin(sources)]
 if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -48,9 +53,9 @@ if filtered.empty:
 legacy_n = int(filtered["pre_scoring_era"].sum())
 if legacy_n > 0:
     st.caption(
-        f"{legacy_n} of {len(filtered)} bets in this filter are pre-scoring-era "
-        "(logged before leviathan_score existed, 2026-04-13 to 2026-07-27) -- "
-        "leviathan_score/lv_band/flag_path are unavoidably blank for these, not a data-quality bug."
+        f"{legacy_n} of {len(filtered)} bets in this filter are from before Leviathan had its "
+        "current scoring system (2026-04-13 to 2026-07-27) -- some fields below (score, band, "
+        "detection path) are unavoidably blank for these older bets, not a data-quality bug."
     )
 
 # ── Click-to-filter: detection path bar chart drives every chart below it ──
@@ -58,7 +63,13 @@ if legacy_n > 0:
 # column exists (see dashboard/data.py contract). flag_path is the nearest
 # real proxy -- CROSS_MARKET is the Polymarket-corroborated path.
 st.subheader("By Detection Path (flag_path)")
-st.caption("Click a bar to filter every chart below by that detection path. Click it again, or the button, to clear.")
+st.caption(
+    "Detection path is *how* Leviathan first noticed this market was worth a bet -- "
+    "DRIFT (the price moved but the news didn't catch up), HEURISTIC (a known "
+    "historical pattern), RESOLVE_FIRST (a mechanical pick near its close date), or "
+    "CROSS_MARKET (another platform's price disagreed with Kalshi's). "
+    "Click a bar to filter every chart below by that detection path. Click it again, or the button, to clear."
+)
 fp_counts = filtered["flag_path"].fillna("(none)").value_counts()
 if fp_counts.empty:
     st.info("No flag_path data for the current filter.")
@@ -89,6 +100,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Edge Distribution")
+    st.caption("Edge = how far Leviathan's estimate was from the market's price. Bars far from 0 are bigger disagreements with the market, not necessarily better bets.")
     edge_vals = view["edge"].dropna()
     if edge_vals.empty:
         st.info("No edge data for the current filter.")
@@ -100,6 +112,7 @@ with col1:
 
 with col2:
     st.subheader("Confidence Distribution")
+    st.caption("How sure Leviathan's own scoring was for each pick, from LOW to HIGH.")
     conf_counts = view["confidence"].value_counts().reindex(CONFIDENCE_ORDER).fillna(0)
     if conf_counts.sum() == 0:
         st.info("No confidence data for the current filter.")
@@ -109,6 +122,12 @@ with col2:
         st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("By Category")
+st.caption(
+    "What kind of question the market asks -- Kalshi assigns this, Leviathan just reads "
+    "it. 'Uncategorized' is unusually large right now: a known, tracked gap in how "
+    "Leviathan captures Kalshi's category data on some runs (backlog: "
+    "signal-category-mostly-blank-despite-real-data), not missing or hidden bets."
+)
 cat_counts = view["category"].fillna("Uncategorized").value_counts()
 fig = px.bar(x=cat_counts.index, y=cat_counts.values, labels={"x": "category", "y": "count"})
 fig.update_layout(PLOTLY_TEMPLATE["layout"], height=300)
@@ -116,6 +135,12 @@ st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
 st.subheader("CLV Drift (credibility signal)")
+st.caption(
+    "CLV = 'Closing Line Value.' After a bet, does the market's own price later move "
+    "toward our prediction, before we even know the outcome? That's a stronger sign of "
+    "real skill than just winning, since a market moving your way means other traders "
+    "started agreeing with you -- winning a bet can still just be luck."
+)
 drift = view["market_drift_pp"].dropna()
 if drift.empty:
     st.info("No CLV drift data for the current filter yet -- market_drift_pp is only populated for resolved signals (13/46 real bets across the full dataset right now).")
@@ -153,11 +178,16 @@ else:
             )
             fig = px.strip(est, x="predicted_p_win", y="outcome_label", color="outcome_label",
                             color_discrete_map=outcome_colors,
-                            labels={"predicted_p_win": "Predicted P(win)", "outcome_label": ""})
+                            labels={"predicted_p_win": "How likely we thought a WIN was", "outcome_label": ""})
             fig.add_vline(x=0.5, line_dash="dot", line_color="#9E9E9E")
             fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=260)
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("Well-calibrated picks cluster right of 0.5 for WIN, left of 0.5 for LOSS.")
+            st.caption(
+                "Each dot is one resolved bet, placed by how likely Leviathan thought a WIN was "
+                "before the outcome was known. A well-tuned model's WIN dots cluster to the right "
+                "of the 50% line and its LOSS dots cluster to the left -- meaning when it said "
+                "'likely,' it usually was."
+            )
 
     with colB:
         ed = resolved.dropna(subset=["edge"])
@@ -176,6 +206,13 @@ else:
 
 st.divider()
 st.subheader("Win Rate by Market-Price Band")
+st.caption(
+    "A 'Brier score' just measures how accurate a probability guess turned out to be "
+    "(lower is better) -- it's the standard way to grade a forecaster honestly, since "
+    "just counting wins doesn't tell you whether the confidence level was justified. "
+    "'market_baseline_brier' is the score you'd get by simply trusting Kalshi's own "
+    "price as the probability, with no model at all."
+)
 st.caption(
     "backlog: market-price-divergence-tracking. 2026-08-22 analysis of the "
     "then-14 resolved signals found every YES call on a sub-11%-priced "
