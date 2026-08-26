@@ -42,8 +42,21 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_93_items(backlog_data):
+def test_parses_and_94_items(backlog_data):
     """
+    94, not 93: signal-category-mostly-blank-despite-real-data added
+    2026-08-25, found while adding a win-rate-by-category chart to the
+    dashboard. Only 4/51 real bets have a populated category despite
+    Kalshi actually having the data -- confirmed live by re-fetching a
+    blank row's event (KXAPRPOTUS-26AUG21-39.2) directly via
+    fetch_event_detail() and getting category='Politics' back with no
+    error. Two concrete gaps found (main.py's /markets fallback path
+    attaches no category at all; fetch_near_dated_markets's per-event
+    backfill silently swallows failures with no logging), not fully
+    root-caused to one cause. Historical blanks can't be backfilled --
+    Kalshi 404s expired events -- so this is about stopping new bets
+    from landing blank going forward, not fixing the past.
+
     93, not 92: metaculus-community-prediction-inaccessible added
     2026-08-25 (done). Set up the previously-dormant Metaculus
     integration (missing token) at the owner's request -- got a real
@@ -245,7 +258,7 @@ def test_parses_and_93_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 93
+    assert len(backlog_data["items"]) == 94
 
 
 def test_all_ids_unique(backlog_data):
