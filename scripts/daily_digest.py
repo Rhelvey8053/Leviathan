@@ -109,7 +109,7 @@ def section_task_health(now: datetime | None = None) -> tuple[str, list[str]]:
     task_results = _ahc.check_scheduled_tasks(now=now)
     litestream = _ahc.check_litestream_replica()
     last_run = _hb.get_last_run()
-    hb_hours = _hb.hours_since(last_run["timestamp"]) if last_run else None
+    hb_hours = _hb.hours_since(last_run["timestamp"], now=now) if last_run else None
 
     problems: list[str] = []
     lines = ["TASK CHECKLIST"]

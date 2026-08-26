@@ -79,7 +79,7 @@ def find_stale_tasks(now: datetime | None = None) -> list[str]:
     stale = []
 
     last_run = _hb.get_last_run()
-    hours = _hb.hours_since(last_run["timestamp"]) if last_run else None
+    hours = _hb.hours_since(last_run["timestamp"], now=now) if last_run else None
     if last_run is None or hours > _hb.DEFAULT_MAX_SILENCE_HOURS:
         stale.append(DAILY_RUN_TASK)
 
