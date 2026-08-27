@@ -171,7 +171,14 @@ def test_row_from_scored_pass_direction_has_no_hit():
 
 # ─── run_replay integration ─────────────────────────────────────────────────
 
-def test_run_replay_forces_api_backend(tmp_db, monkeypatch):
+def test_run_replay_forces_cli_backend(tmp_db, monkeypatch):
+    """
+    2026-08-26: was test_run_replay_forces_api_backend, asserting "api".
+    Switched to "cli" (Claude Pro subscription, no metered spend) at the
+    user's explicit request -- the API requirement was only ever a side
+    effect of core.llm's $-based cost ceiling, which the validation task
+    itself never needed; see replay_runner.py's module docstring.
+    """
     _insert_settled(tmp_db, "T1")
     monkeypatch.setattr(rr, "_find_reconstructable_as_of",
                         lambda *a, **k: _enriched("T1"))
@@ -184,7 +191,7 @@ def test_run_replay_forces_api_backend(tmp_db, monkeypatch):
 
     monkeypatch.setattr(rr.scorer, "score_markets", _fake_score_markets)
     rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
-    assert seen_config["backend"] == "api"
+    assert seen_config["backend"] == "cli"
 
 
 def test_run_replay_persists_scored_rows(tmp_db, monkeypatch):

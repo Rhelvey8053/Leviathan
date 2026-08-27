@@ -1,9 +1,10 @@
 """
 backtesting/replay_runner.py — replay-runner.
 
-Drives real (metered) Claude API scoring over the settled-market corpus
-built by replay-settled-fetcher, using replay-asof-reconstruction to build
-each market's historical input, then grades each replayed score against the
+Drives Claude scoring (Pro/CLI backend, same as the live daily pipeline --
+see 2026-08-26 note below) over the settled-market corpus built by
+replay-settled-fetcher, using replay-asof-reconstruction to build each
+market's historical input, then grades each replayed score against the
 now-known settled outcome.
 
 LOOK-AHEAD CONTAMINATION — permanent, structural, not something this module
@@ -30,16 +31,30 @@ show genuine multi-week uncertainty before close, others are already
 near-certain days out, and very short-lived markets may have no
 reconstructable state at typical lookback windows at all.
 
-COST-BOUNDED AND RESUMABLE: forces config.llm.backend="api" for real
-metered billing + core.llm's daily cost ceiling (the reason this item
-depends on llm-cost-ceiling) — the CLI/Pro-subscription path has no cost
-concept and would defeat the ceiling entirely. Processes at most
+BOUNDED AND RESUMABLE: originally forced config.llm.backend="api" so
+core.llm's daily cost ceiling could bound a run in real dollars — the
+CLI/Pro-subscription path has no cost concept, so that specific ceiling
+can't apply to it. 2026-08-26: switched to backend="cli" at the user's
+explicit request, after confirming the API requirement was purely a
+side effect of that $-based safety mechanism, not something the
+validation task itself needs — the grading instrument (Brier scoring,
+edge-case handling) tests the SCORES Claude returns, not which billing
+path produced them, and market-baseline-brier/replay-runner's own
+correctness were already validated independent of backend (see this
+item's own backlog notes). The LLMCostCeilingExceeded catch below is now
+inert in practice (CLI never raises it) but left in place rather than
+removed, in case backend is ever reverted to "api" for a specific reason.
+Boundedness now comes from `max_markets` per invocation alone, same as
+this module already relied on primarily -- still processes at most
 `max_markets` newly-scored tickers per call and persists idempotently
-(INSERT OR IGNORE keyed on ticker), so a ceiling-triggered stop is a pause,
-not lost work or a corrupted partial state. Skipped candidates (no
-reconstructable data, or already-telegraphed at every lookback) are not
-persisted, so a re-run may re-attempt them — wasted local computation, but
-never wasted API spend, since skips are decided before any scoring call.
+(INSERT OR IGNORE keyed on ticker). Skipped candidates (no reconstructable
+data, or already-telegraphed at every lookback) are not persisted, so a
+re-run may re-attempt them — wasted local computation, but never wasted
+spend, since skips are decided before any scoring call. Trade-off worth
+knowing: this now draws on the same shared Claude Pro usage the live
+daily pipeline uses, not a separate, unlimited resource -- large
+`max_markets` values compete with the live pipeline's own usage, unlike
+the old $-metered path which was a fully separate budget.
 
 KNOWN SIMPLIFICATION: main.py applies additional post-hoc confidence
 downgrade rules (HIGH -> MED below min_high_confidence_edge, short-horizon
@@ -184,12 +199,13 @@ def _row_from_scored(enriched: dict, cs: dict, result: str, as_of_dt: datetime) 
 
 def run_replay(config: dict, max_markets: int = DEFAULT_MAX_MARKETS, db_path: str = DB_PATH) -> dict:
     """
-    Scores up to `max_markets` new settled tickers via the real API backend
-    and persists results to replay_signals. Returns a summary dict:
-    candidates_considered / skipped_no_data / scored / ceiling_stopped.
+    Scores up to `max_markets` new settled tickers via the Claude Pro/CLI
+    backend (2026-08-26, was the metered API backend -- see module
+    docstring) and persists results to replay_signals. Returns a summary
+    dict: candidates_considered / skipped_no_data / scored / ceiling_stopped.
     """
     _init_table(db_path)
-    replay_config = {**config, "llm": {**config.get("llm", {}), "backend": "api"}}
+    replay_config = {**config, "llm": {**config.get("llm", {}), "backend": "cli"}}
 
     summary = {
         "candidates_considered": 0,

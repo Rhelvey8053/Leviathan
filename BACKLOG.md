@@ -1,15 +1,16 @@
 # Leviathan Backlog
-Last updated: 2026-08-25 | Metrics: resolved=17, fills=7
+Last updated: 2026-08-26 | Metrics: resolved=17, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (6)
+## Ready (7)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | smart-money-fills-table-missing | Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a… | infra |
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
+| 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
 | 3 | signal-category-mostly-blank-despite-real-data | Found 2026-08-25 while adding a win-rate-by-category chart to the dashboard at the owner's request -- only 4 of 51 rows in signals.csv have a populated `category` (Sports, Economics, Entertainment,… | data-quality |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 
@@ -22,10 +23,9 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (7)
+## Blocked (6)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
-| 3 | replay-instrument-validation | replay-runner, market-baseline-brier | validation |
 | 4 | cross-venue-expansion | net-edge-fee-depth-model, replay-instrument-validation | data-quality |
 | 5 | methodology-writeup | replay-instrument-validation, preregistration | reporting |
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
