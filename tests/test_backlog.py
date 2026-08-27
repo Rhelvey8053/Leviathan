@@ -42,8 +42,20 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_94_items(backlog_data):
+def test_parses_and_95_items(backlog_data):
     """
+    95, not 94: smart-money-fills-persistence-build added 2026-08-26,
+    split out of smart-money-fills-table-missing (flipped to done the
+    same day). That item only fixed the SILENT-FAILURE visibility problem
+    (backlog.checker.compute_metrics() now flags a missing table via a
+    new _data_gaps list instead of a bare misleading 0) -- it never built
+    the actual smart_money_fills persistence table or a fills-writing
+    pipeline, which is a genuinely separate, larger feature. Split out
+    rather than left open indefinitely on the original item. Priority 4,
+    deliberately not urgent -- the three items it would unblock are all
+    still separately far from their own resolved_count_per_wallet_max>=10
+    threshold regardless of whether this table exists.
+
     Still 94 (no new item) as of 2026-08-26: empirical-base-rates-poly
     reopened done -> ready. Marked done with no verification trail, and
     Liam's 2026-08-20 report independently raised the same doubt ("confirm
@@ -269,7 +281,7 @@ def test_parses_and_94_items(backlog_data):
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
     """
-    assert len(backlog_data["items"]) == 94
+    assert len(backlog_data["items"]) == 95
 
 
 def test_all_ids_unique(backlog_data):
