@@ -126,7 +126,7 @@ def get_raw_task_info() -> list[dict]:
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command",
          "Get-ScheduledTask -TaskName 'Leviathan-*' | Get-ScheduledTaskInfo | "
-         "Select-Object TaskName, LastRunTime, LastTaskResult | ConvertTo-Json"],
+         "Select-Object TaskName, LastRunTime, LastTaskResult, NextRunTime | ConvertTo-Json"],
         capture_output=True, text=True, timeout=30,
     )
     if result.returncode != 0:
@@ -162,6 +162,7 @@ def check_scheduled_tasks(now: datetime | None = None) -> list[dict]:
             continue
 
         last_run = _parse_dotnet_date(info.get("LastRunTime"))
+        next_run = _parse_dotnet_date(info.get("NextRunTime"))
         last_result = info.get("LastTaskResult")
         hours_since = (now - last_run).total_seconds() / 3600.0 if last_run else None
 
@@ -171,7 +172,21 @@ def check_scheduled_tasks(now: datetime | None = None) -> list[dict]:
         # dropped because the staleness check happened to match first.
         problem_parts = []
         if last_run is None:
-            problem_parts.append("has never run")
+            # A brand-new (or just re-registered) weekly-cadence task
+            # genuinely has never run yet and won't until its first
+            # scheduled occurrence arrives -- that's expected, not a
+            # fault. Found 2026-08-27: Leviathan-CodeAudit's real Sunday
+            # 11am trigger was correctly registered (StartBoundary
+            # 2026-08-26) but flagged "[!] has never run" every single day
+            # until its first Sunday, purely because this function never
+            # looked at NextRunTime at all. Only flag when the task has
+            # ALREADY missed its next scheduled occurrence (next_run in
+            # the past) or NextRunTime itself is unavailable/unparseable
+            # (fail toward flagging, not silence, in that ambiguous case).
+            if next_run is not None and next_run > now:
+                pass
+            else:
+                problem_parts.append("has never run")
         else:
             if hours_since > max_hours:
                 problem_parts.append(f"no run in {hours_since:.1f}h (threshold {max_hours:.0f}h)")

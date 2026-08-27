@@ -124,6 +124,59 @@ def test_check_scheduled_tasks_query_failure_flags_every_task():
     assert all("could not query Task Scheduler" in r["problem"] for r in results)
 
 
+def test_check_scheduled_tasks_never_run_but_next_run_pending_is_not_a_problem():
+    """
+    Real bug found 2026-08-27: Leviathan-CodeAudit's weekly Sunday 11am
+    trigger was correctly registered but flagged "[!] has never run" every
+    day between registration and its first Sunday, because this function
+    never consulted NextRunTime at all -- a brand-new weekly task hasn't
+    missed anything just because it hasn't reached its first scheduled
+    occurrence yet.
+    """
+    now = datetime.now(timezone.utc)
+    tasks = _all_healthy_tasks(now=now)
+    for t in tasks:
+        if t["TaskName"] == "Leviathan-CodeAudit":
+            t["LastRunTime"] = None
+            t["NextRunTime"] = _dotnet_date(now + timedelta(days=2))  # first occurrence still ahead
+    with patch.object(ahc, "get_raw_task_info", return_value=tasks):
+        results = ahc.check_scheduled_tasks(now=now)
+    problem = next(r for r in results if r["task"] == "Leviathan-CodeAudit")
+    assert problem["problem"] is None
+
+
+def test_check_scheduled_tasks_never_run_and_next_run_overdue_is_flagged():
+    """The other half: if a task has never run AND its own next-scheduled
+    occurrence has already passed, that's a real missed fire, not a
+    pending-first-run task -- must still flag."""
+    now = datetime.now(timezone.utc)
+    tasks = _all_healthy_tasks(now=now)
+    for t in tasks:
+        if t["TaskName"] == "Leviathan-CodeAudit":
+            t["LastRunTime"] = None
+            t["NextRunTime"] = _dotnet_date(now - timedelta(hours=1))  # already overdue
+    with patch.object(ahc, "get_raw_task_info", return_value=tasks):
+        results = ahc.check_scheduled_tasks(now=now)
+    problem = next(r for r in results if r["task"] == "Leviathan-CodeAudit")
+    assert problem["problem"] == "has never run"
+
+
+def test_check_scheduled_tasks_never_run_and_no_next_run_is_flagged():
+    """Ambiguous case (NextRunTime itself missing/unparseable) fails
+    toward flagging, not silence -- same conservative default as before
+    this fix existed."""
+    now = datetime.now(timezone.utc)
+    tasks = _all_healthy_tasks(now=now)
+    for t in tasks:
+        if t["TaskName"] == "Leviathan-CodeAudit":
+            t["LastRunTime"] = None
+            t["NextRunTime"] = None
+    with patch.object(ahc, "get_raw_task_info", return_value=tasks):
+        results = ahc.check_scheduled_tasks(now=now)
+    problem = next(r for r in results if r["task"] == "Leviathan-CodeAudit")
+    assert problem["problem"] == "has never run"
+
+
 # ─── check_litestream_replica ───────────────────────────────────────────────
 
 def _touch(path: Path, mtime: datetime):
