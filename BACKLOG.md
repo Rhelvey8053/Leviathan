@@ -4,18 +4,17 @@ Newly Unlocked: 0
 
 Live Metrics:
 resolved_count: 17
-resolved_count_per_category_max: 86
+resolved_count_per_category_max: 2
 resolved_count_per_wallet_max: 0 (not tracked yet -- smart_money_fills table missing, not a real 0)
 fills_count: 7
 
-Full backlog: 7 ready / 6 locked / 6 blocked
+Full backlog: 6 ready / 6 locked / 6 blocked
 ===
----|
+----|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
-| 3 | resolved-count-per-category-max-wrong-column | Found 2026-08-27 while fixing empirical-base-rates-poly's gating (see that item's notes). | calibration |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 
@@ -39,7 +38,7 @@ Full backlog: 7 ready / 6 locked / 6 blocked
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (77)
+## Done (78)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -96,6 +95,7 @@ Full backlog: 7 ready / 6 locked / 6 blocked
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
+| 3 | resolved-count-per-category-max-wrong-column | Found 2026-08-27 while fixing empirical-base-rates-poly's gating (see that item's notes). | calibration |
 | 3 | signal-category-mostly-blank-despite-real-data | Found 2026-08-25 while adding a win-rate-by-category chart to the dashboard at the owner's request -- only 4 of 51 rows in signals.csv have a populated `category` (Sports, Economics, Entertainment,… | data-quality |
 | 3 | smart-money-discovery-dashboard | Built and verified 2026-08-23/24. | reporting |
 | 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |

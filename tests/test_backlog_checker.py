@@ -49,29 +49,35 @@ def tmp_db(tmp_path):
     conn.execute("""
         CREATE TABLE signals (
             call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT,
-            direction TEXT
+            direction TEXT, heuristic_label TEXT
         )
     """)
-    # 4 resolved (non-PASS, source=paper) signals across two flag_paths,
-    # plus rows resolved-count-metric-desync must exclude: a resolved PASS
-    # row (PASS resolves LOSS by construction, not a real call), a resolved
+    # 4 resolved (non-PASS, source=paper) signals across two flag_paths but
+    # THREE distinct heuristic_labels (scotus x2, conflict x1, NULL x1) --
+    # deliberately different from the flag_path grouping so the two could
+    # never be confused for one another (resolved-count-per-category-max-
+    # wrong-column: flag_path and heuristic_label are different columns
+    # with different granularity; a fixture where they happened to produce
+    # the same max would have hidden that bug rather than caught it), plus
+    # rows resolved-count-metric-desync must exclude: a resolved PASS row
+    # (PASS resolves LOSS by construction, not a real call), a resolved
     # real_fill row (real trade fills are tracked separately from paper
     # signals by design), and a resolved research_probe row (a different
     # experiment population, not paper signals either).
     conn.executemany(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
-            ("a1", "TICKER1",  "WIN",  "EDGE",      "paper",          "YES"),
-            ("a2", "TICKER2",  "LOSS", "EDGE",      "paper",          "NO"),
-            ("a3", "TICKER3",  "WIN",  "HEURISTIC", "paper",          "YES"),
-            ("a4", "TICKER4",  "WIN",  "HEURISTIC", "paper",          "NO"),
-            ("a5", "TICKER5",  "",     "EDGE",      "paper",          "YES"),  # pending
-            ("a6", "TICKER6",  None,   "EDGE",      "paper",          "NO"),   # pending
-            ("a7", "TICKER9",  "LOSS", "DRIFT",     "paper",          "PASS"), # resolved PASS -- excluded
-            ("f1", "TICKER7",  "",     None,        "real_fill",      ""),     # fill, no result
-            ("f2", "TICKER8",  "",     None,        "real_fill",      ""),     # fill, no result
-            ("f3", "TICKER10", "WIN",  None,        "real_fill",      "YES"),  # resolved real_fill -- excluded
-            ("p1", "TICKER11", "WIN",  None,        "research_probe", "YES"),  # resolved research_probe -- excluded
+            ("a1", "TICKER1",  "WIN",  "EDGE",      "paper",          "YES", "scotus"),
+            ("a2", "TICKER2",  "LOSS", "EDGE",      "paper",          "NO",  "scotus"),
+            ("a3", "TICKER3",  "WIN",  "HEURISTIC", "paper",          "YES", "conflict"),
+            ("a4", "TICKER4",  "WIN",  "HEURISTIC", "paper",          "NO",  None),
+            ("a5", "TICKER5",  "",     "EDGE",      "paper",          "YES", "scotus"),  # pending
+            ("a6", "TICKER6",  None,   "EDGE",      "paper",          "NO",  "scotus"),  # pending
+            ("a7", "TICKER9",  "LOSS", "DRIFT",     "paper",          "PASS", "scotus"), # resolved PASS -- excluded
+            ("f1", "TICKER7",  "",     None,        "real_fill",      "",    None),      # fill, no result
+            ("f2", "TICKER8",  "",     None,        "real_fill",      "",    None),      # fill, no result
+            ("f3", "TICKER10", "WIN",  None,        "real_fill",      "YES", "scotus"),  # resolved real_fill -- excluded
+            ("p1", "TICKER11", "WIN",  None,        "research_probe", "YES", "scotus"),  # resolved research_probe -- excluded
         ]
     )
     conn.commit()
@@ -93,15 +99,15 @@ def tmp_db_with_smf(tmp_path):
     conn.execute("""
         CREATE TABLE signals (
             call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT,
-            direction TEXT
+            direction TEXT, heuristic_label TEXT
         )
     """)
     conn.execute("""
         CREATE TABLE smart_money_fills (wallet TEXT, resolved INTEGER)
     """)
     conn.executemany(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?)",
-        [("s1", "T1", "WIN", "EDGE", "paper", "YES")] * 30
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [("s1", "T1", "WIN", "EDGE", "paper", "YES", "scotus")] * 30
     )
     conn.executemany(
         "INSERT INTO smart_money_fills VALUES (?, ?)",
@@ -131,7 +137,7 @@ def tmp_backlog(tmp_path):
 def test_compute_metrics_correct_counts(tmp_db):
     m = compute_metrics(tmp_db)
     assert m["resolved_count"] == 4              # paper, WIN/LOSS, non-PASS only
-    assert m["resolved_count_per_category_max"] == 2  # NULL/EDGE/HEURISTIC tied at 2
+    assert m["resolved_count_per_category_max"] == 2  # heuristic_label: scotus=2 (a1,a2), conflict=1 (a3); a4 excluded (NULL label)
     assert m["fills_count"] == 3
 
 
@@ -149,6 +155,36 @@ def test_compute_metrics_resolved_count_excludes_pass_and_non_paper_sources(tmp_
     """
     m = compute_metrics(tmp_db)
     assert m["resolved_count"] == 4
+
+
+def test_compute_metrics_missing_heuristic_label_column_does_not_zero_later_metrics(tmp_path):
+    """
+    Regression for a real bug hit 2026-08-27: the heuristic_label query for
+    resolved_count_per_category_max originally had no try/except of its
+    own, so an OperationalError there (e.g. a schema missing the column)
+    fell through to compute_metrics()'s bare outer `except Exception: pass`
+    -- silently zeroing out resolved_count_per_wallet_max and fills_count
+    too, not just the one metric that actually failed. Isolated the same
+    way as the smart_money_fills query so one query's failure can't mask
+    the metrics computed after it.
+    """
+    db = tmp_path / "no_heuristic_label.db"
+    conn = sqlite3.connect(db)
+    conn.execute("""
+        CREATE TABLE signals (
+            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT, direction TEXT
+        )
+    """)
+    conn.executemany(
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?)",
+        [("a1", "T1", "WIN", "EDGE", "paper", "YES"), ("a2", "T2", "WIN", "EDGE", "paper", "YES")]
+    )
+    conn.commit()
+    conn.close()
+    m = compute_metrics(db)
+    assert m["resolved_count"] == 2  # computed BEFORE the failing query -- must survive
+    assert m["resolved_count_per_category_max"] == 0
+    assert "resolved_count_per_category_max" in m["_data_gaps"]
 
 
 def test_compute_metrics_missing_smf_returns_zero(tmp_db_no_smf):

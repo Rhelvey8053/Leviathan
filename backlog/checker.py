@@ -91,15 +91,38 @@ def compute_metrics(db_path=DEFAULT_DB) -> dict:
             )
             metrics["resolved_count"] = cur.fetchone()[0] or 0
 
-            cur.execute(
-                "SELECT max(cnt) FROM ("
-                "  SELECT flag_path, count(*) as cnt FROM signals"
-                "  WHERE result != '' AND result IS NOT NULL"
-                "  GROUP BY flag_path"
-                ")"
-            )
-            row = cur.fetchone()
-            metrics["resolved_count_per_category_max"] = row[0] or 0
+            # resolved-count-per-category-max-wrong-column (2026-08-27): this
+            # used to GROUP BY flag_path -- only ~5 coarse buckets (EDGE,
+            # DRIFT, HEURISTIC, BR_NONE, RESOLVE_FIRST) -- despite the
+            # metric's own name/glossary entry ("max resolved across any
+            # single heuristic category") and its consumers (core/sizing.py,
+            # the per-heuristic-scorecard/heuristic-sunsetting backlog
+            # triggers) all meaning the much finer heuristic_label column
+            # (SCOTUS, CONFLICT, IMPEACHMENT, etc -- ~17-90 distinct values).
+            # The coarse grouping read 86 live; the real per-label max was 2.
+            # Filters match resolved_count's own (direction != 'PASS',
+            # paper-source-only) for consistency within this same function.
+            # Isolated in its own try/except (like the smart_money_fills
+            # query below) so a schema surprise on this one query can't
+            # silently zero out resolved_count_per_wallet_max/fills_count
+            # too -- exactly the failure mode a bare outer except caused
+            # when this query was first added against a test fixture
+            # missing the heuristic_label column entirely.
+            try:
+                cur.execute(
+                    "SELECT max(cnt) FROM ("
+                    "  SELECT heuristic_label, count(*) as cnt FROM signals"
+                    "  WHERE result != '' AND result IS NOT NULL AND heuristic_label IS NOT NULL "
+                    "  AND direction != 'PASS' AND (source = 'paper' OR source IS NULL)"
+                    "  GROUP BY heuristic_label"
+                    ")"
+                )
+                row = cur.fetchone()
+                metrics["resolved_count_per_category_max"] = row[0] or 0
+            except sqlite3.OperationalError as e:
+                metrics["resolved_count_per_category_max"] = 0
+                if "no such column" in str(e):
+                    metrics["_data_gaps"].append("resolved_count_per_category_max")
 
             try:
                 cur.execute(
