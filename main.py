@@ -337,6 +337,7 @@ def main():
         print(f"      Events fetch failed ({e}), falling back to /markets...")
         try:
             all_markets = kalshi.fetch_markets(config)
+            all_markets = kalshi.attach_event_category_metadata(config, all_markets)
             print(f"      Fetched {len(all_markets)} markets (fallback)")
         except Exception as e2:
             print(f"      FAILED: {e2}")

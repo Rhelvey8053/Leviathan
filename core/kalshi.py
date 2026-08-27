@@ -257,6 +257,31 @@ def fetch_event_detail(config: dict, event_ticker: str) -> dict:
     return data.get("event", {})
 
 
+def attach_event_category_metadata(config: dict, markets: list[dict]) -> list[dict]:
+    """
+    Backfills series_ticker/category onto each market via one
+    fetch_event_detail() call per UNIQUE event_ticker (many markets share
+    one event_ticker, so this is far cheaper than one call per market).
+    For any /markets-shaped result set that didn't come from fetch_events()
+    (whose event objects already carry these fields) -- currently
+    fetch_near_dated_markets() and main.py's fetch_markets() fallback path.
+    """
+    event_tickers = {m.get("event_ticker") for m in markets if m.get("event_ticker")}
+    event_meta: dict[str, tuple[str, str]] = {}
+    for et in event_tickers:
+        try:
+            ev = fetch_event_detail(config, et)
+            event_meta[et] = (ev.get("series_ticker", ""), ev.get("category", ""))
+        except Exception as _e:
+            print(f"      [warn] fetch_event_detail({et}): {_e}")
+            event_meta[et] = ("", "")
+    for m in markets:
+        series_ticker, category = event_meta.get(m.get("event_ticker"), ("", ""))
+        m["series_ticker"] = series_ticker
+        m["category"]      = category
+    return markets
+
+
 def fetch_near_dated_markets(
     config: dict, max_days: int = 14, target_count: int = 200, max_pages: int = 30,
 ) -> list[dict]:
@@ -360,21 +385,7 @@ def fetch_near_dated_markets(
                 break
 
     collected = collected[:target_count]
-
-    event_tickers = {m.get("event_ticker") for m in collected if m.get("event_ticker")}
-    event_meta: dict[str, tuple[str, str]] = {}
-    for et in event_tickers:
-        try:
-            ev = fetch_event_detail(config, et)
-            event_meta[et] = (ev.get("series_ticker", ""), ev.get("category", ""))
-        except Exception:
-            event_meta[et] = ("", "")
-    for m in collected:
-        series_ticker, category = event_meta.get(m.get("event_ticker"), ("", ""))
-        m["series_ticker"] = series_ticker
-        m["category"]      = category
-
-    return collected
+    return attach_event_category_metadata(config, collected)
 
 
 def fetch_settled_events(config: dict, max_fetch: int = 2000) -> list[dict]:

@@ -219,3 +219,33 @@ def test_event_detail_failure_defaults_to_empty_not_raise():
         markets = kalshi.fetch_near_dated_markets({"environment": "demo"})
     assert markets[0]["series_ticker"] == ""
     assert markets[0]["category"] == ""
+
+
+# ─── attach_event_category_metadata ────────────────────────────────────────
+# signal-category-mostly-blank-despite-real-data: fetch_event_detail failures
+# used to be swallowed with a bare `except Exception: event_meta[et] = ("", "")`
+# and no trace in the logs. Now printed as a [warn] line, and the same helper
+# backs both fetch_near_dated_markets and main.py's fetch_markets() fallback.
+
+def test_attach_event_category_metadata_prints_warning_on_failure(capsys):
+    markets = [_market("A", "EVT-BROKEN")]
+    with patch("core.kalshi.fetch_event_detail", side_effect=Exception("network error")):
+        result = kalshi.attach_event_category_metadata({"environment": "demo"}, markets)
+    assert result[0]["series_ticker"] == ""
+    assert result[0]["category"] == ""
+    captured = capsys.readouterr()
+    assert "EVT-BROKEN" in captured.out
+    assert "network error" in captured.out
+
+
+def test_attach_event_category_metadata_one_call_per_unique_event():
+    markets = [_market("A", "EVT-SHARED"), _market("B", "EVT-SHARED"), _market("C", "EVT-OTHER")]
+    def fake_detail(config, event_ticker):
+        return {"EVT-SHARED": {"series_ticker": "SER1", "category": "Sports"},
+                "EVT-OTHER":  {"series_ticker": "SER2", "category": "Politics"}}[event_ticker]
+    with patch("core.kalshi.fetch_event_detail", side_effect=fake_detail) as mock_detail:
+        result = kalshi.attach_event_category_metadata({"environment": "demo"}, markets)
+    assert mock_detail.call_count == 2
+    by_ticker = {m["ticker"]: m for m in result}
+    assert by_ticker["A"]["category"] == "Sports"
+    assert by_ticker["C"]["category"] == "Politics"
