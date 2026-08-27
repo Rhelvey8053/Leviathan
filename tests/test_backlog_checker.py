@@ -32,6 +32,7 @@ from backlog.checker import (
     evaluate_triggers,
     execute_action,
     format_email_block,
+    gate_progress_str,
     generate_markdown,
 )
 
@@ -155,9 +156,47 @@ def test_compute_metrics_missing_smf_returns_zero(tmp_db_no_smf):
     assert m["resolved_count_per_wallet_max"] == 0   # no table, no error
 
 
+def test_compute_metrics_missing_smf_flags_data_gap(tmp_db_no_smf):
+    """
+    2026-08-26: a missing smart_money_fills table used to be indistinguishable
+    from a genuine "0 resolved fills across every wallet" -- backlog:
+    smart-money-fills-table-missing. _data_gaps makes the difference visible.
+    """
+    m = compute_metrics(tmp_db_no_smf)
+    assert "resolved_count_per_wallet_max" in m["_data_gaps"]
+
+
 def test_compute_metrics_with_smf(tmp_db_with_smf):
     m = compute_metrics(tmp_db_with_smf)
     assert m["resolved_count_per_wallet_max"] == 12  # walletA
+
+
+def test_compute_metrics_with_smf_no_data_gap(tmp_db_with_smf):
+    """A real, present smart_money_fills table must never be flagged as a data gap."""
+    m = compute_metrics(tmp_db_with_smf)
+    assert "resolved_count_per_wallet_max" not in m["_data_gaps"]
+
+
+def test_gate_progress_str_annotates_data_gap():
+    """
+    gate_progress_str() must distinguish a metric that's genuinely 0 from
+    one whose backing table doesn't exist yet -- a bare "not met" would
+    wrongly read as "this data was checked and there just isn't any yet."
+    """
+    item = {"trigger": {"all": [{"metric": "resolved_count_per_wallet_max", "op": ">=", "value": 10}]}}
+    metrics = {"resolved_count_per_wallet_max": 0, "_data_gaps": ["resolved_count_per_wallet_max"]}
+    result = gate_progress_str(item, metrics)
+    assert "not met" in result
+    assert "smart-money-fills-table-missing" in result
+
+
+def test_gate_progress_str_no_annotation_without_gap():
+    """A metric with real backing data (even if 0) gets no data-gap annotation."""
+    item = {"trigger": {"all": [{"metric": "resolved_count_per_wallet_max", "op": ">=", "value": 10}]}}
+    metrics = {"resolved_count_per_wallet_max": 0, "_data_gaps": []}
+    result = gate_progress_str(item, metrics)
+    assert "not met" in result
+    assert "data not tracked" not in result
 
 
 # ---------------------------------------------------------------------------

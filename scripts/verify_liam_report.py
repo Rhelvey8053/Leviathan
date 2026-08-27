@@ -72,6 +72,7 @@ def ground_truth_table(backlog: dict, metrics: dict) -> list[dict]:
         conds = item.get("trigger", {}).get("all", [])
         cond_results = []
         sentinel = False
+        data_gaps = metrics.get("_data_gaps", [])
         for c in conds:
             val = metrics.get(c["metric"])
             if c["metric"] not in checker.METRICS_KEYS:
@@ -79,7 +80,9 @@ def ground_truth_table(backlog: dict, metrics: dict) -> list[dict]:
                 cond_results.append(f"{c['metric']} {c['op']} {c['value']} [NEVER COMPUTED -- policy/human gate]")
                 continue
             met = _OP_FNS[c["op"]](val, c["value"])
-            cond_results.append(f"{c['metric']}={val} {c['op']} {c['value']} -> {'MET' if met else 'not met'}")
+            gap_note = " [DATA NOT TRACKED YET, not a real 0 -- see backlog: smart-money-fills-table-missing]" \
+                if c["metric"] in data_gaps else ""
+            cond_results.append(f"{c['metric']}={val} {c['op']} {c['value']} -> {'MET' if met else 'not met'}{gap_note}")
         deps = item.get("depends_on", [])
         dep_results = [(d, items_by_id.get(d, {}).get("status", "MISSING")) for d in deps]
         deps_done = all(s == "done" for _, s in dep_results)

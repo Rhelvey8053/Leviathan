@@ -47,8 +47,27 @@ METRICS_KEYS = [
 # ---------------------------------------------------------------------------
 
 def compute_metrics(db_path=DEFAULT_DB) -> dict:
-    """Read live metrics from leviathan.db (read-only). Returns dict of counts."""
+    """
+    Read live metrics from leviathan.db (read-only). Returns dict of counts,
+    plus a "_data_gaps" key (list of metric names whose backing table/column
+    doesn't exist yet -- distinct from a metric that's genuinely 0).
+
+    2026-08-26: resolved_count_per_wallet_max used to silently report 0 on
+    a missing smart_money_fills table with no way to tell that apart from
+    "genuinely zero resolved fills across all wallets" -- found via a
+    weekly_code_audit.py run, backlog: smart-money-fills-table-missing.
+    The gate-evaluation VALUE is unchanged (0 either way is correct for
+    "not unlockable yet" purposes, and building the actual fills-tracking
+    pipeline is a separate, much larger feature -- the three items gated
+    on this metric are all still locked behind resolved_count_per_wallet_max
+    >= 10 regardless, i.e. nowhere near unlocking even if this table did
+    exist). This just makes the gap visible instead of silent, the same
+    way a sentinel trigger metric (e.g. api_spend_authorized) is already
+    flagged as "requires human decision" rather than reported as a bare
+    "not met" that implies it could clear on its own.
+    """
     metrics = {k: 0 for k in METRICS_KEYS}
+    metrics["_data_gaps"] = []
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
@@ -92,8 +111,10 @@ def compute_metrics(db_path=DEFAULT_DB) -> dict:
                 )
                 row = cur.fetchone()
                 metrics["resolved_count_per_wallet_max"] = row[0] or 0
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as e:
                 metrics["resolved_count_per_wallet_max"] = 0
+                if "no such table" in str(e):
+                    metrics["_data_gaps"].append("resolved_count_per_wallet_max")
 
             cur.execute(
                 "SELECT count(*) FROM signals WHERE source = 'real_fill'"
@@ -222,6 +243,7 @@ def gate_progress_str(item: dict, metrics: dict) -> str:
     conds = item.get("trigger", {}).get("all", [])
     if not conds:
         return ""
+    data_gaps = metrics.get("_data_gaps", [])
     parts = []
     for c in conds:
         if c["metric"] not in METRICS_KEYS:
@@ -229,7 +251,8 @@ def gate_progress_str(item: dict, metrics: dict) -> str:
             continue
         live = metrics.get(c["metric"], 0)
         met = _OP_FNS[c["op"]](live, c["value"])
-        parts.append(f"{c['metric']}={live} {c['op']} {c['value']} ({'MET' if met else 'not met'})")
+        gap_note = " [data not tracked yet, not a real 0 -- see backlog: smart-money-fills-table-missing]" if c["metric"] in data_gaps else ""
+        parts.append(f"{c['metric']}={live} {c['op']} {c['value']} ({'MET' if met else 'not met'}){gap_note}")
     return "; ".join(parts)
 
 
@@ -237,10 +260,12 @@ def _gate_str(item: dict, metrics: dict) -> str:
     conds = item.get("trigger", {}).get("all", [])
     if not conds:
         return "manual"
+    data_gaps = metrics.get("_data_gaps", [])
     parts = []
     for c in conds:
         live = metrics.get(c["metric"], 0)
-        parts.append(f"{c['metric']} {c['op']} {c['value']} ({live} {c['op']} {c['value']})")
+        gap_note = " [data not tracked yet]" if c["metric"] in data_gaps else ""
+        parts.append(f"{c['metric']} {c['op']} {c['value']} ({live} {c['op']} {c['value']}){gap_note}")
     return "; ".join(parts)
 
 
@@ -364,11 +389,13 @@ def format_email_block(backlog: dict, metrics: dict, newly_unlocked: list) -> st
         lines.append("----")
         lines.append("")
 
+    wallet_gap = " (not tracked yet -- smart_money_fills table missing, not a real 0)" \
+        if "resolved_count_per_wallet_max" in metrics.get("_data_gaps", []) else ""
     lines += [
         "Live Metrics:",
         f"resolved_count: {metrics.get('resolved_count', 0)}",
         f"resolved_count_per_category_max: {metrics.get('resolved_count_per_category_max', 0)}",
-        f"resolved_count_per_wallet_max: {metrics.get('resolved_count_per_wallet_max', 0)}",
+        f"resolved_count_per_wallet_max: {metrics.get('resolved_count_per_wallet_max', 0)}{wallet_gap}",
         f"fills_count: {metrics.get('fills_count', 0)}",
         "",
         f"Full backlog: {groups['ready']} ready / {groups['locked']} locked / {groups['blocked']} blocked",
