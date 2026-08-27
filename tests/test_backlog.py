@@ -44,6 +44,17 @@ def tmp_backlog(tmp_path):
 
 def test_parses_and_94_items(backlog_data):
     """
+    Still 94 (no new item) as of 2026-08-26: empirical-base-rates-poly
+    reopened done -> ready. Marked done with no verification trail, and
+    Liam's 2026-08-20 report independently raised the same doubt ("confirm
+    this is wired into live scoring, not just a research artifact").
+    Checked directly: backtesting/base_rates.py is an explicitly-labeled
+    scaffold ("No live data fetch -- receives data from the backtest
+    harness"), imported ONLY by its own test file -- core/scanner.py's
+    live estimate_base_rate() still runs the original static heuristic
+    table this item's action text says it replaces. A real status-tracking
+    mistake, not just a stale finding.
+
     94, not 93: signal-category-mostly-blank-despite-real-data added
     2026-08-25, found while adding a win-rate-by-category chart to the
     dashboard. Only 4/51 real bets have a populated category despite

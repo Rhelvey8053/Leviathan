@@ -328,13 +328,13 @@
       "title": "Empirical Base Rates from Polymarket",
       "area": "calibration",
       "priority": 4,
-      "status": "done",
+      "status": "ready",
       "trigger": {
         "all": []
       },
       "depends_on": [],
       "action": "Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes.",
-      "notes": "Empirical rates reduce dependence on subjective prior calibration and should improve edge estimates."
+      "notes": "Empirical rates reduce dependence on subjective prior calibration and should improve edge estimates. REOPENED 2026-08-26: marked done with no verification trail (unlike this session's other status changes), and Liam's 2026-08-20 report independently raised the same doubt (\"confirm this is wired into live scoring, not just a research artifact\"). Checked directly: backtesting/base_rates.py exists but its own docstring calls it a \"Scaffold... No live data fetch -- receives data from the backtest harness once it produces results,\" and it is imported ONLY by tests/test_base_rates.py -- confirmed via repo-wide grep, nothing in main.py/core/scanner.py/core/scorer.py ever calls it. Live scoring's actual estimate_base_rate() (core/scanner.py) still runs the original static heuristic keyword table this item was supposed to replace. The action text (\"Replace heuristic base rates with empirical rates\") never actually happened in the live path -- only a standalone scaffold tool was built. Needs: either wire backtesting/base_rates.py's empirical-rate computation into core/scanner.py's estimate_base_rate() for real, or if that was deliberately deferred pending enough replay/resolved data to compute trustworthy empirical rates, say so explicitly here instead of marking done."
     },
     {
       "id": "auto-calibration-loop",
