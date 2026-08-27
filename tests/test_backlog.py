@@ -42,7 +42,7 @@ def tmp_backlog(tmp_path):
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
-def test_parses_and_95_items(backlog_data):
+def test_parses_and_96_items(backlog_data):
     """
     95, not 94: smart-money-fills-persistence-build added 2026-08-26,
     split out of smart-money-fills-table-missing (flipped to done the
@@ -280,8 +280,19 @@ def test_parses_and_95_items(backlog_data):
     dropped as already-implemented (scorer-websearch-grounding: web search
     is already live on both scoring backends), matching this file's own
     "verify before adding" precedent.
+
+    96, not 95: resolved-count-per-category-max-wrong-column (2026-08-27)
+    added after discovering resolved_count_per_category_max is computed by
+    `GROUP BY flag_path` (~5 coarse buckets) despite its own glossary entry
+    and its two done-item consumers (per-heuristic-scorecard,
+    heuristic-sunsetting -- see the note two paragraphs up: both unlocked
+    specifically because this metric cleared 15) meaning the much finer
+    per-heuristic_label grouping. Real per-label max checked live the same
+    day via core.logger.get_stats_by_heuristic_label(): 2, not 86. Filed
+    rather than fixed immediately since it touches two already-done items'
+    validity, not just a live gate.
     """
-    assert len(backlog_data["items"]) == 95
+    assert len(backlog_data["items"]) == 96
 
 
 def test_all_ids_unique(backlog_data):

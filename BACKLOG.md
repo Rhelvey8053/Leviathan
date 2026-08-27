@@ -1,5 +1,5 @@
 === LEVIATHAN BACKLOG UPDATE ===
-Date: 2026-08-26
+Date: 2026-08-27
 Newly Unlocked: 0
 
 Live Metrics:
@@ -8,20 +8,21 @@ resolved_count_per_category_max: 86
 resolved_count_per_wallet_max: 0 (not tracked yet -- smart_money_fills table missing, not a real 0)
 fills_count: 7
 
-Full backlog: 7 ready / 5 locked / 6 blocked
+Full backlog: 7 ready / 6 locked / 6 blocked
 ===
 ---|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
-| 4 | empirical-base-rates-poly | Replace heuristic base rates with empirical rates derived from Polymarket historical outcomes. | calibration |
+| 3 | resolved-count-per-category-max-wrong-column | Found 2026-08-27 while fixing empirical-base-rates-poly's gating (see that item's notes). | calibration |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 
-## Locked (5)
+## Locked (6)
 | Priority | ID | Gate | Area |
 |----------|-----|------|------|
+| 4 | empirical-base-rates-poly | sufficient_per_heuristic_label_resolved_data == 1 | calibration |
 | 4 | per-wallet-track-record | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | calibration-curve | resolved_count >= 50 | calibration |
 | 5 | edge-decay-analysis | resolved_count >= 30 | validation |

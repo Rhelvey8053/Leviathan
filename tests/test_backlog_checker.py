@@ -286,6 +286,51 @@ def test_compare_statuses_returns_newly_unlocked():
     assert backlog["items"][2]["status"] == "ready"    # was already ready, unchanged
 
 
+def test_manually_set_blocked_with_empty_trigger_does_not_hold():
+    """
+    Documents a real footgun hit 2026-08-27 (empirical-base-rates-poly):
+    manually setting status="blocked" with an empty trigger and empty
+    depends_on is NOT a stable state. evaluate_triggers() treats an empty
+    trigger.all as vacuously satisfied (no conditions to fail), so the
+    very next `python -m backlog.checker` run flips it straight back to
+    "ready" via compare_statuses() and reports it as newly unlocked --
+    silently, since nothing about this looks wrong from the trigger
+    evaluator's point of view. A real "wait for more data" gate MUST use
+    a sentinel trigger metric that compute_metrics() deliberately never
+    populates (see api_spend_authorized, graphify_corpus_shape_changed,
+    sufficient_per_heuristic_label_resolved_data in metrics_glossary) --
+    see test_sentinel_trigger_metric_never_auto_unlocks below for the
+    stable alternative.
+    """
+    backlog = {"items": [
+        {"id": "fake-blocked", "status": "blocked", "trigger": {"all": []}, "depends_on": []},
+    ]}
+    trigger_results = evaluate_triggers(backlog, metrics={})
+    assert trigger_results["fake-blocked"] is True
+    newly = compare_statuses(backlog, trigger_results)
+    assert newly == ["fake-blocked"]
+    assert backlog["items"][0]["status"] == "ready"
+
+
+def test_sentinel_trigger_metric_never_auto_unlocks():
+    """A trigger metric absent from METRICS_KEYS (and thus never in the
+    real metrics dict) reads as 0 via metrics.get(metric, 0) and can never
+    satisfy a `== 1` condition on its own -- the stable way to gate an
+    item on a condition compute_metrics() doesn't (or shouldn't yet)
+    compute, as opposed to a bare empty trigger (see the test above)."""
+    backlog = {"items": [
+        {"id": "sentinel-gated", "status": "locked",
+         "trigger": {"all": [{"metric": "sufficient_per_heuristic_label_resolved_data", "op": "==", "value": 1}]},
+         "depends_on": []},
+    ]}
+    # Even a metrics dict with lots of real signal never contains the sentinel key.
+    trigger_results = evaluate_triggers(backlog, metrics={"resolved_count": 999999})
+    assert trigger_results["sentinel-gated"] is False
+    newly = compare_statuses(backlog, trigger_results)
+    assert newly == []
+    assert backlog["items"][0]["status"] == "locked"
+
+
 # ---------------------------------------------------------------------------
 # generate_markdown
 # ---------------------------------------------------------------------------
