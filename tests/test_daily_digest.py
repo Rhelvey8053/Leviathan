@@ -54,6 +54,17 @@ def _healthy_task_results():
             for n in dd._ahc.TASK_CADENCE_HOURS]
 
 
+def _write_backlog(tmp_path, items):
+    path = tmp_path / "backlog.json"
+    path.write_text(json.dumps({"items": items}), encoding="utf-8")
+    return path
+
+
+def _item(id_, status="ready", priority=3, action="Do the thing.", notes=""):
+    return {"id": id_, "status": status, "priority": priority,
+            "trigger": {"all": []}, "depends_on": [], "action": action, "notes": notes}
+
+
 # ─── section_task_health ─────────────────────────────────────────────────
 
 def test_section_task_health_all_healthy():
@@ -235,12 +246,14 @@ def test_section_weekly_logs_excludes_old(tmp_path):
 # ─── compose_digest ─────────────────────────────────────────────────────
 
 def test_compose_digest_clean_subject_has_no_attention_flag(tmp_path):
+    backlog_path = _write_backlog(tmp_path, [])
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}), \
          patch.object(dd, "RECONCILIATION_DIR", tmp_path), \
          patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"), \
-         patch.object(dd, "WEEKLY_LOGS", {}):
+         patch.object(dd, "WEEKLY_LOGS", {}), \
+         patch.object(dd, "BACKLOG_PATH", backlog_path):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" not in subject
     assert "NEEDS YOUR ATTENTION" in body
@@ -251,12 +264,14 @@ def test_compose_digest_clean_subject_has_no_attention_flag(tmp_path):
 def test_compose_digest_flags_attention_in_subject(tmp_path):
     results = _healthy_task_results()
     results[0]["problem"] = "no run in 40.0h (threshold 30h)"
+    backlog_path = _write_backlog(tmp_path, [])
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=results), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}), \
          patch.object(dd, "RECONCILIATION_DIR", tmp_path), \
          patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"), \
-         patch.object(dd, "WEEKLY_LOGS", {}):
+         patch.object(dd, "WEEKLY_LOGS", {}), \
+         patch.object(dd, "BACKLOG_PATH", backlog_path):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" in subject
     attention_section = body.split("\n\n")[0]
@@ -270,21 +285,97 @@ def test_compose_digest_attention_aggregates_reconciliation_too(tmp_path):
             "aligned": [], "misaligned": [{"ticker": "ABC", "signal": "YES", "position": "NO"}],
             "unplaced": [], "unexpected": []}
     (tmp_path / "2026-08-24.json").write_text(json.dumps(data), encoding="utf-8")
+    backlog_path = _write_backlog(tmp_path, [])
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}), \
          patch.object(dd, "RECONCILIATION_DIR", tmp_path), \
          patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"), \
-         patch.object(dd, "WEEKLY_LOGS", {}):
+         patch.object(dd, "WEEKLY_LOGS", {}), \
+         patch.object(dd, "BACKLOG_PATH", backlog_path):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" in subject
     attention_section = body.split("\n\n")[0]
     assert "Reconciliation" in attention_section
 
 
+# ─── section_backlog ────────────────────────────────────────────────────
+
+def test_section_backlog_lists_ready_items_priority_ordered(tmp_path):
+    items = [_item("low-pri", status="ready", priority=5, action="Low priority thing."),
+             _item("high-pri", status="ready", priority=1, action="High priority thing."),
+             _item("done-item", status="done", priority=1, action="Already shipped.")]
+    backlog_path = _write_backlog(tmp_path, items)
+    with patch.object(dd, "BACKLOG_PATH", backlog_path):
+        text, snapshot = dd.section_backlog(prev_snapshot={"seed": {"status": "ready", "notes_len": 0}})
+    ready_block = text.split("Changes since last digest")[0]
+    assert "Ready (2)" in ready_block
+    assert "high-pri" in ready_block and "low-pri" in ready_block
+    assert "done-item" not in ready_block
+    assert ready_block.index("high-pri") < ready_block.index("low-pri")  # priority order
+
+
+def test_section_backlog_first_run_reports_no_baseline_not_every_item_new(tmp_path):
+    items = [_item("existing-1"), _item("existing-2")]
+    backlog_path = _write_backlog(tmp_path, items)
+    with patch.object(dd, "BACKLOG_PATH", backlog_path):
+        text, snapshot = dd.section_backlog(prev_snapshot=None)
+    assert "no prior snapshot yet" in text
+    assert "new," not in text  # nothing should be reported as "new" on the very first run
+    assert snapshot["existing-1"]["status"] == "ready"
+
+
+def test_section_backlog_detects_new_item(tmp_path):
+    items = [_item("old-item"), _item("brand-new")]
+    backlog_path = _write_backlog(tmp_path, items)
+    prev_snapshot = {"old-item": {"status": "ready", "notes_len": 0}}
+    with patch.object(dd, "BACKLOG_PATH", backlog_path):
+        text, snapshot = dd.section_backlog(prev_snapshot=prev_snapshot)
+    assert "brand-new (new, ready)" in text
+    assert "old-item" not in text.split("Changes since last digest")[1]
+
+
+def test_section_backlog_detects_status_transition(tmp_path):
+    items = [_item("flipped", status="done")]
+    backlog_path = _write_backlog(tmp_path, items)
+    prev_snapshot = {"flipped": {"status": "ready", "notes_len": 0}}
+    with patch.object(dd, "BACKLOG_PATH", backlog_path):
+        text, snapshot = dd.section_backlog(prev_snapshot=prev_snapshot)
+    assert "flipped (ready -> done)" in text
+
+
+def test_section_backlog_detects_notes_only_update(tmp_path):
+    items = [_item("investigated", status="ready",
+                    notes="Checked again to rule out flakiness, still no repro.")]
+    backlog_path = _write_backlog(tmp_path, items)
+    prev_snapshot = {"investigated": {"status": "ready", "notes_len": 5}}
+    with patch.object(dd, "BACKLOG_PATH", backlog_path):
+        text, snapshot = dd.section_backlog(prev_snapshot=prev_snapshot)
+    assert "investigated (ready, notes updated)" in text
+    assert "rule out flakiness" in text
+
+
+def test_section_backlog_purpose_uses_last_notes_paragraph():
+    item = _item("multi-note", notes="First finding here.\n\nSECOND UPDATE: the real reason this changed.")
+    purpose = dd._change_purpose(item)
+    assert "real reason this changed" in purpose
+    assert "First finding" not in purpose
+
+
+def test_section_backlog_no_changes_when_snapshot_matches(tmp_path):
+    items = [_item("stable")]
+    backlog_path = _write_backlog(tmp_path, items)
+    prev_snapshot = {"stable": {"status": "ready", "notes_len": 0}}
+    with patch.object(dd, "BACKLOG_PATH", backlog_path):
+        text, snapshot = dd.section_backlog(prev_snapshot=prev_snapshot)
+    assert "Changes since last digest (0)" in text
+    assert "(none)" in text
+
+
 # ─── check(): end-to-end ────────────────────────────────────────────────
 
-def _patch_clean_sources(tmp_path):
+def _patch_clean_sources(tmp_path, backlog_items=None):
+    backlog_path = _write_backlog(tmp_path, backlog_items or [])
     return [
         patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()),
         patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}),
@@ -292,6 +383,7 @@ def _patch_clean_sources(tmp_path):
         patch.object(dd, "RECONCILIATION_DIR", tmp_path),
         patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"),
         patch.object(dd, "WEEKLY_LOGS", {}),
+        patch.object(dd, "BACKLOG_PATH", backlog_path),
     ]
 
 
@@ -359,3 +451,40 @@ def test_check_send_failure_does_not_persist_state(tmp_path):
             p.stop()
     assert result["error"] == "SMTP down"
     assert not state_path.exists()
+
+
+def test_check_persists_backlog_snapshot_and_diffs_next_run(tmp_path):
+    """
+    End-to-end: day 1 has no prior snapshot (reports "no prior snapshot
+    yet"), persists one to state.json; day 2 reads that snapshot back and
+    correctly reports the item added between the two runs as new, not as
+    a repeat of everything from day 1.
+    """
+    state_path = tmp_path / "state.json"
+    day1_patches = _patch_clean_sources(tmp_path, backlog_items=[_item("item-a")])
+    for p in day1_patches:
+        p.start()
+    try:
+        with patch.object(dd, "send_report") as mock_send:
+            dd.check(CONFIG, state_path=state_path, now=NOW)
+            day1_body = mock_send.call_args[0][0]
+    finally:
+        for p in day1_patches:
+            p.stop()
+    assert "no prior snapshot yet" in day1_body
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "item-a" in state["backlog_snapshot"]
+
+    day2_patches = _patch_clean_sources(tmp_path, backlog_items=[_item("item-a"), _item("item-b")])
+    for p in day2_patches:
+        p.start()
+    try:
+        with patch.object(dd, "send_report") as mock_send:
+            dd.check(CONFIG, state_path=state_path, now=NOW + timedelta(days=1))
+            day2_body = mock_send.call_args[0][0]
+    finally:
+        for p in day2_patches:
+            p.stop()
+    assert "item-b (new, ready)" in day2_body
+    assert "item-a (new" not in day2_body  # already in the day-1 snapshot, not re-reported as new

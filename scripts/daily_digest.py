@@ -31,6 +31,16 @@ nothing here re-runs a scan or hits a live API:
     analysis/resolve_first.py carries its own HARD FREEZE note against
     new logging/scoring changes, so this reads its existing shape as-is
     rather than adding a dedicated marker column.
+  - Backlog (added 2026-08-27): every `ready` item, priority-ordered, plus
+    what changed in backlog.json since the last digest (new items, status
+    transitions, and notes-only updates -- most days' real backlog work is
+    an investigation note, not a status flip) with the purpose pulled from
+    the item's own most-recently-appended notes paragraph (this backlog's
+    convention: dated paragraphs appended per update, newest last) rather
+    than re-derived. Diffed against a per-item {status, notes_len}
+    snapshot persisted in state["backlog_snapshot"] -- cheap enough that a
+    length change is a good-enough proxy for "notes were edited" without
+    hashing the full text.
   - Weekly audits: logs/weekly_audit.log / logs/weekly_code_audit.log,
     included only when modified in roughly the last 20h (i.e. an actual
     Monday run happened), as a raw tail excerpt -- both are free-form
@@ -71,11 +81,14 @@ sys.path.insert(0, str(ROOT))
 
 from core import logger
 from core.report import send_report
+from backlog.engine import load_backlog as _load_backlog
+from backlog import checker as _checker
 import scripts.automation_health_check as _ahc
 import scripts.heartbeat_check as _hb
 import scripts.position_reconciliation as _recon
 
 DEFAULT_STATE = ROOT / "data" / "daily_digest_state.json"
+BACKLOG_PATH = ROOT / "backlog" / "backlog.json"
 RECONCILIATION_DIR = ROOT / "data" / "reconciliation"
 SMART_MONEY_LATEST = ROOT / "data" / "smart_money" / "latest_signals.json"
 WEEKLY_LOGS = {
@@ -215,6 +228,88 @@ def section_weekly_logs(now: datetime | None = None) -> str | None:
     return "WEEKLY AUDITS\n" + "\n\n".join(blocks) if blocks else None
 
 
+def _backlog_snapshot(items: list[dict]) -> dict:
+    """
+    Minimal per-item fingerprint for diffing against the previous digest's
+    snapshot: status (catches transitions like ready->done) and notes
+    length (catches investigation updates that don't change status --
+    this backlog has far more of those than pure status flips, e.g. a
+    "checked again, still doesn't reproduce" note with nothing to unlock).
+    """
+    return {i["id"]: {"status": i.get("status", ""), "notes_len": len(i.get("notes") or "")}
+            for i in items}
+
+
+def _change_purpose(item: dict, max_len: int = 280) -> str:
+    """
+    Best one-line account of *why* an item changed. This backlog's own
+    convention (see backlog/backlog.json) is to append a new dated
+    paragraph to `notes` per update, newest last -- so the last paragraph
+    is normally the actual finding/purpose behind the most recent change.
+    Falls back to the action text for brand-new items with no notes yet.
+    """
+    notes = (item.get("notes") or "").strip()
+    text = notes.split("\n\n")[-1].strip() if notes else item.get("action", "")
+    return _checker._summarize_action(text, max_len=max_len)
+
+
+def section_backlog(prev_snapshot: dict | None = None) -> tuple[str, dict]:
+    """
+    Returns (section text, current snapshot). Two parts: every `ready`
+    item (priority-ordered -- what's actionable right now, without
+    opening the board or monday.com), and what changed since the
+    previous digest (new items, status transitions, and notes-only
+    updates) with the purpose pulled from the item's own notes/action
+    text rather than re-derived. prev_snapshot is None/empty both on the
+    very first run this feature ever executes AND on any later run where
+    state was reset -- either way there's no real baseline to diff
+    against, so the changes list is reported as "no prior snapshot" that
+    one time rather than dumping the entire backlog as "new" (which would
+    bury the one genuinely new item in dozens of pre-existing ones).
+    """
+    first_run = not prev_snapshot
+    backlog = _load_backlog(BACKLOG_PATH)
+    items = backlog.get("items", [])
+    items_by_id = {i["id"]: i for i in items}
+    snapshot = _backlog_snapshot(items)
+
+    ready = sorted((i for i in items if i.get("status") == "ready"),
+                   key=lambda i: (i.get("priority", 9), i["id"]))
+    lines = ["BACKLOG", f"  Ready ({len(ready)}):"]
+    if not ready:
+        lines.append("    (none)")
+    for item in ready:
+        summary = _checker._summarize_action(item.get("action", ""), max_len=140)
+        lines.append(f"    [{item.get('priority', '?')}] {item['id']} -- {summary}")
+
+    lines.append("")
+    if first_run:
+        lines.append("  Changes since last digest: no prior snapshot yet (first run of this section) -- "
+                      "baseline established, real diffs start next digest.")
+        return "\n".join(lines), snapshot
+
+    changes = []
+    for item_id, snap in snapshot.items():
+        prev = prev_snapshot.get(item_id)
+        item = items_by_id[item_id]
+        if prev is None:
+            changes.append((item, f"new, {snap['status']}"))
+        elif prev.get("status") != snap["status"]:
+            changes.append((item, f"{prev.get('status')} -> {snap['status']}"))
+        elif prev.get("notes_len") != snap["notes_len"]:
+            changes.append((item, f"{snap['status']}, notes updated"))
+
+    changes.sort(key=lambda c: (c[0].get("priority", 9), c[0]["id"]))
+    lines.append(f"  Changes since last digest ({len(changes)}):")
+    if not changes:
+        lines.append("    (none)")
+    for item, transition in changes:
+        lines.append(f"    [{item.get('priority', '?')}] {item['id']} ({transition})")
+        lines.append(f"        {_change_purpose(item)}")
+
+    return "\n".join(lines), snapshot
+
+
 def _attention_section(problems: list[str]) -> str:
     lines = ["NEEDS YOUR ATTENTION"]
     if not problems:
@@ -225,11 +320,13 @@ def _attention_section(problems: list[str]) -> str:
     return "\n".join(lines)
 
 
-def compose_digest(now: datetime | None = None) -> tuple[str, str]:
+def compose_digest(now: datetime | None = None,
+                    prev_backlog_snapshot: dict | None = None) -> tuple[str, str]:
     now = now or datetime.now(timezone.utc)
 
     task_text, task_problems = section_task_health(now)
     recon_text, recon_problem = section_reconciliation(now)
+    backlog_text, _ = section_backlog(prev_backlog_snapshot)
 
     problems = list(task_problems)
     if recon_problem:
@@ -241,6 +338,7 @@ def compose_digest(now: datetime | None = None) -> tuple[str, str]:
     weekly = section_weekly_logs(now)
     if weekly:
         sections.append(weekly)
+    sections.append(backlog_text)
 
     body = "\n\n".join(sections)
     flag = "[ATTENTION] " if problems else ""
@@ -268,11 +366,13 @@ def check(config: dict, state_path: Path = DEFAULT_STATE, dry_run: bool = False,
     """
     now = now or datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
+    state = load_state(state_path)
 
-    if not dry_run and load_state(state_path).get("last_sent") == today:
+    if not dry_run and state.get("last_sent") == today:
         return {"sent": False, "dry_run": dry_run, "error": None, "skipped_duplicate": True}
 
-    body, subject = compose_digest(now)
+    prev_backlog_snapshot = state.get("backlog_snapshot", {})
+    body, subject = compose_digest(now, prev_backlog_snapshot)
 
     if dry_run:
         print(subject)
@@ -286,7 +386,8 @@ def check(config: dict, state_path: Path = DEFAULT_STATE, dry_run: bool = False,
         print(f"[daily_digest] send FAILED — state NOT persisted, will retry next run: {e}")
         return {"sent": False, "dry_run": False, "error": str(e), "skipped_duplicate": False}
 
-    save_state(state_path, {"last_sent": today})
+    backlog_snapshot = _backlog_snapshot(_load_backlog(BACKLOG_PATH).get("items", []))
+    save_state(state_path, {"last_sent": today, "backlog_snapshot": backlog_snapshot})
     print(f"[daily_digest] sent for {today}")
     return {"sent": True, "dry_run": False, "error": None, "skipped_duplicate": False}
 
