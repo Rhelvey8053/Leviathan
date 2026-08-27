@@ -34,12 +34,27 @@ $Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "11:00AM"
 # process a full 30 min before the Python-level timeout could ever fire.
 # 5 min of buffer past 60 min so the script's own graceful handling gets
 # to run first.
+#
+# -DontStopIfGoingOnBatteries / -AllowStartIfOnBatteries -- 2026-08-26:
+# this task's own default-true battery settings killed a real
+# WakeCatchup-triggered run 16 minutes in (Task Scheduler event log:
+# "stopped instance ... because the computer is switching to battery
+# power"), on a laptop that got unplugged mid-run. This task is a
+# read-only investigation with no live-trading time-sensitivity -- being
+# interruptible by a power-state change costs more (a wasted run,
+# possibly mid-report-write) than letting it run a few extra minutes on
+# battery ever would. NOTE: these are switches, not -Param:$false pairs
+# (confirmed via (Get-Command New-ScheduledTaskSettingsSet).Parameters --
+# -StopIfGoingOnBatteries/-DisallowStartIfOnBatteries as used in an
+# earlier version of this edit don't exist on this cmdlet and errored).
 $Settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 65) `
     -RestartCount 1 `
     -RestartInterval (New-TimeSpan -Minutes 5) `
     -StartWhenAvailable `
-    -RunOnlyIfNetworkAvailable
+    -RunOnlyIfNetworkAvailable `
+    -DontStopIfGoingOnBatteries `
+    -AllowStartIfOnBatteries
 
 # S4U (run whether the user is logged on or not), not the Register-
 # ScheduledTask default of Interactive -- explicit here so this task
