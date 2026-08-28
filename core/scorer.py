@@ -1108,6 +1108,22 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
         scores = json.loads(raw_json)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
+    if not isinstance(scores, list):
+        # 2026-08-28: when the CLI's response has no top-level [...] array at
+        # all (e.g. a plain-text non-JSON reply for one market), the find("[")/
+        # rfind("]") fallback above returns -1/-1 and silently falls through to
+        # `raw_json = all_text` -- the ENTIRE raw response. If that text happens
+        # to itself be valid JSON (e.g. a bare quoted string), json.loads()
+        # succeeds with the wrong type instead of raising, and _validate_scores'
+        # `for s in scores: s.keys()` then iterates the string character-by-
+        # character, crashing with a confusing "'str' object has no attribute
+        # 'keys'" instead of a clear, catchable parsing error. Caught live via
+        # backtesting/replay_runner.py's corpus-build batch crashing entirely
+        # on one malformed market response.
+        raise RuntimeError(
+            f"scorer.py: expected a JSON list of score objects, got {type(scores).__name__}. "
+            f"Raw output: {raw_json[:500]}"
+        )
     _validate_scores(scores)
     # db-audit-2026-08: the CLI's own JSON schema asks for "sources_checked"
     # (a self-reported list of headline/URL strings), but every downstream

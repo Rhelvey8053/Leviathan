@@ -1379,6 +1379,27 @@ def test_score_via_cli_raises_on_bad_direction_enum(monkeypatch):
             scorer._score_via_cli("sys", "user")
 
 
+def test_score_via_cli_raises_clear_error_on_non_list_response(monkeypatch):
+    """
+    Regression guard, found live 2026-08-28 (crashed backtesting.replay_runner's
+    entire corpus-build batch on one market): when the CLI's raw response has
+    no top-level [...] array at all, the find("[")/rfind("]") fallback returns
+    -1/-1 and silently uses the ENTIRE raw text as raw_json. If that text
+    happens to itself be valid JSON -- e.g. a bare quoted string, as if Claude
+    replied in plain prose for one market instead of the expected JSON array --
+    json.loads() succeeds with the wrong type, and _validate_scores' `for s in
+    scores: s.keys()` then iterates the string character-by-character,
+    crashing with a confusing "'str' object has no attribute 'keys'" instead
+    of a clear, catchable parsing error.
+    """
+    from unittest.mock import patch
+    plain_text_reply = '"No suitable market data available for scoring."'
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(plain_text_reply)):
+        with pytest.raises(RuntimeError, match="expected a JSON list"):
+            scorer._score_via_cli("sys", "user")
+
+
 def test_score_via_cli_accepts_valid_response(monkeypatch):
     import json as _json
     from unittest.mock import patch

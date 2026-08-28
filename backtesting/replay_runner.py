@@ -211,6 +211,7 @@ def run_replay(config: dict, max_markets: int = DEFAULT_MAX_MARKETS, db_path: st
         "candidates_considered": 0,
         "skipped_no_data":       0,
         "scored":                0,
+        "scoring_errors":        0,
         "ceiling_stopped":       False,
     }
 
@@ -232,6 +233,18 @@ def run_replay(config: dict, max_markets: int = DEFAULT_MAX_MARKETS, db_path: st
         except LLMCostCeilingExceeded:
             summary["ceiling_stopped"] = True
             break
+        except Exception as e:
+            # 2026-08-28: a single market's malformed CLI response (see
+            # core.scorer._score_via_cli's type-check fix, same date) used
+            # to crash this entire batch via an uncaught exception -- every
+            # other candidate this run would have scored, and every dollar
+            # of Pro/CLI usage already spent scoring them, was lost. One bad
+            # response shouldn't cost the whole batch: count it and move on,
+            # same resilience `skipped_no_data` already gives a
+            # can't-reconstruct candidate.
+            print(f"[replay_runner] scoring error on {ticker}, skipping: {e}")
+            summary["scoring_errors"] += 1
+            continue
 
         if not scored:
             summary["skipped_no_data"] += 1

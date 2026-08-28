@@ -266,6 +266,59 @@ def test_run_replay_preserves_already_scored_rows_when_ceiling_hits_later(tmp_db
     assert t2_row is None
 
 
+def test_run_replay_survives_one_markets_scoring_error(tmp_db, monkeypatch):
+    """
+    Regression guard, found live 2026-08-28: a malformed CLI response for
+    one market (see core.scorer._score_via_cli's non-list-response fix,
+    same date) used to raise an uncaught exception that crashed this
+    entire batch -- every other candidate this run would have scored was
+    lost. A single market's scoring failure must be counted and skipped,
+    not take down every remaining candidate in the batch.
+    """
+    _insert_settled(tmp_db, "T1")
+    _insert_settled(tmp_db, "T2")
+    monkeypatch.setattr(rr, "_candidate_tickers",
+                        lambda db_path, limit: [
+                            {"ticker": "T1", "series_ticker": "SER", "close_time": "2026-06-01T00:00:00Z", "result": "YES"},
+                            {"ticker": "T2", "series_ticker": "SER", "close_time": "2026-06-01T00:00:00Z", "result": "YES"},
+                        ])
+    monkeypatch.setattr(rr, "_find_reconstructable_as_of",
+                        lambda config, ticker, close_time, db_path: _enriched(ticker))
+
+    def _raise_then_score(markets, config, now=None):
+        ticker = markets[0]["ticker"]
+        if ticker == "T1":
+            raise RuntimeError("scorer.py: expected a JSON list of score objects, got str")
+        return [{"ticker": "T2", "direction": "YES", "confidence": "HIGH", "edge": 0.2, "reasoning": "r"}], {}
+
+    monkeypatch.setattr(rr.scorer, "score_markets", _raise_then_score)
+    summary = rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
+    assert summary["scoring_errors"] == 1
+    assert summary["scored"] == 1
+
+    conn = sqlite3.connect(tmp_db)
+    conn.row_factory = sqlite3.Row
+    assert conn.execute("SELECT * FROM replay_signals WHERE ticker='T1'").fetchone() is None
+    assert conn.execute("SELECT * FROM replay_signals WHERE ticker='T2'").fetchone() is not None
+
+
+def test_run_replay_still_stops_on_cost_ceiling_not_swallowed_as_scoring_error(tmp_db, monkeypatch):
+    """The new broad `except Exception` for scoring errors must not shadow
+    the more specific LLMCostCeilingExceeded handling above it -- a ceiling
+    hit still stops the run, it isn't miscounted as a per-market error."""
+    _insert_settled(tmp_db, "T1")
+    monkeypatch.setattr(rr, "_find_reconstructable_as_of",
+                        lambda config, ticker, close_time, db_path: _enriched(ticker))
+
+    def _raise_ceiling(markets, config, now=None):
+        raise LLMCostCeilingExceeded("ceiling hit")
+
+    monkeypatch.setattr(rr.scorer, "score_markets", _raise_ceiling)
+    summary = rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
+    assert summary["ceiling_stopped"] is True
+    assert summary["scoring_errors"] == 0
+
+
 def test_run_replay_skips_when_no_reconstructable_state(tmp_db, monkeypatch):
     _insert_settled(tmp_db, "T1")
     monkeypatch.setattr(rr, "_find_reconstructable_as_of", lambda *a, **k: None)
