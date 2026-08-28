@@ -48,16 +48,33 @@ $Trigger = New-ScheduledTaskTrigger -Daily -At $RunTime
 # account's actual usage-reset window, so this may retry too early or
 # later than strictly needed. 3 attempts, 1 hour apart, covers roughly a
 # 3-hour window past the original 7:00 AM run.
+# Battery tolerance added 2026-08-27: this task defaulted to
+# DisallowStartIfOnBatteries/StopIfGoingOnBatteries = True (refuses to
+# start, or gets killed mid-run, on battery power) -- same footgun class
+# already fixed for Leviathan-CodeAudit (setup_weekly_code_audit_scheduler.ps1)
+# but never applied to DailyRun's own setup script until now. Correct
+# parameter names confirmed live: -DontStopIfGoingOnBatteries and
+# -AllowStartIfOnBatteries (switches, not the differently-named/inverted
+# -StopIfGoingOnBatteries:$false / -DisallowStartIfOnBatteries:$false a
+# first attempt on CodeAudit's fix incorrectly used).
 $Settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Hours 1) `
     -StartWhenAvailable `
-    -RunOnlyIfNetworkAvailable
+    -RunOnlyIfNetworkAvailable `
+    -DontStopIfGoingOnBatteries `
+    -AllowStartIfOnBatteries
 
+# S4U (2026-08-27): DailyRun was the last Leviathan-* task still on
+# Interactive logon (can't fire if the account is logged off, only if
+# merely asleep/locked) -- every other setup_*.ps1 in this directory
+# already uses S4U, which runs regardless of logon state. Matches
+# setup_weekly_code_audit_scheduler.ps1's exact pattern (domain-qualified
+# UserId, not bare $env:USERNAME).
 $Principal = New-ScheduledTaskPrincipal `
-    -UserId $env:USERNAME `
-    -LogonType Interactive `
+    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -LogonType S4U `
     -RunLevel Highest
 
 Register-ScheduledTask `

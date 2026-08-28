@@ -8,12 +8,11 @@ resolved_count_per_category_max: 2
 resolved_count_per_wallet_max: 0 (not tracked yet -- smart_money_fills table missing, not a real 0)
 fills_count: 7
 
-Full backlog: 6 ready / 6 locked / 6 blocked
+Full backlog: 5 ready / 6 locked / 6 blocked
 ===
 ----|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
-| 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
@@ -38,7 +37,7 @@ Full backlog: 6 ready / 6 locked / 6 blocked
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (78)
+## Done (79)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -91,6 +90,7 @@ Full backlog: 6 ready / 6 locked / 6 blocked
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
 | 3 | daily-operations-digest | Built and verified 2026-08-24. | infra |
+| 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 3 | dependabot-setup | .github/dependabot.yml added 2026-08-24, covering pip (root requirements.txt, used by CI; dashboard/requirements.txt, not CI-checked but a real dependency manifest) and github-actions… | infra |
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
