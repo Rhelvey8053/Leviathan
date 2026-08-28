@@ -353,6 +353,19 @@
       "status": "done"
     },
     {
+      "id": "replay-runner-crash-on-malformed-cli-response",
+      "title": "One malformed CLI response crashed the entire replay corpus-build batch",
+      "area": "validation",
+      "priority": 3,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Found 2026-08-28 running a replay-instrument-validation corpus-build batch: it crashed with 'str' object has no attribute 'keys'. Root cause in core.scorer._score_via_cli: when the CLI's raw response has no top-level [...] array at all, the find(\"[\")/rfind(\"]\") fallback returns -1/-1 and silently uses the ENTIRE raw text as raw_json. That text happened to itself be valid JSON (a bare quoted string, as if Claude replied in plain prose for one market instead of the expected JSON array), so json.loads() succeeded with the wrong type instead of raising, and _validate_scores' per-item .keys() call then iterated the string character-by-character. Separately, backtesting.replay_runner.run_replay()'s per-candidate loop only caught LLMCostCeilingExceeded -- any other scoring exception crashed the whole batch, losing every remaining candidate and the Pro/CLI usage already spent scoring them.",
+      "notes": "RESOLVED 2026-08-28: (1) _score_via_cli now raises a clear RuntimeError if the parsed JSON isn't a list, with the raw text included for debugging. (2) run_replay()'s loop now catches scoring exceptions broadly (excluding the still-specifically-handled LLMCostCeilingExceeded), counts them in a new scoring_errors summary field, and continues to the next candidate instead of crashing. 4 new tests (core.scorer + backtesting.replay_runner), full suite green (2287 passed). Confirmed the fix in practice: relaunched the corpus build immediately after and it kept running past markets that would previously have killed it.",
+      "status": "done"
+    },
+    {
       "id": "auto-calibration-loop",
       "title": "Auto-Calibration Loop",
       "area": "calibration",

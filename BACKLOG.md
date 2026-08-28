@@ -1,9 +1,9 @@
 === LEVIATHAN BACKLOG UPDATE ===
-Date: 2026-08-27
+Date: 2026-08-28
 Newly Unlocked: 0
 
 Live Metrics:
-resolved_count: 17
+resolved_count: 19
 resolved_count_per_category_max: 2
 resolved_count_per_wallet_max: 0 (not tracked yet -- smart_money_fills table missing, not a real 0)
 fills_count: 7
@@ -37,7 +37,7 @@ Full backlog: 5 ready / 6 locked / 6 blocked
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (79)
+## Done (80)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -95,6 +95,7 @@ Full backlog: 5 ready / 6 locked / 6 blocked
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
+| 3 | replay-runner-crash-on-malformed-cli-response | Found 2026-08-28 running a replay-instrument-validation corpus-build batch: it crashed with 'str' object has no attribute 'keys'. | validation |
 | 3 | resolved-count-per-category-max-wrong-column | Found 2026-08-27 while fixing empirical-base-rates-poly's gating (see that item's notes). | calibration |
 | 3 | signal-category-mostly-blank-despite-real-data | Found 2026-08-25 while adding a win-rate-by-category chart to the dashboard at the owner's request -- only 4 of 51 rows in signals.csv have a populated `category` (Sports, Economics, Entertainment,… | data-quality |
 | 3 | smart-money-discovery-dashboard | Built and verified 2026-08-23/24. | reporting |

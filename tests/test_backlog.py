@@ -291,8 +291,14 @@ def test_parses_and_96_items(backlog_data):
     day via core.logger.get_stats_by_heuristic_label(): 2, not 86. Filed
     rather than fixed immediately since it touches two already-done items'
     validity, not just a live gate.
+
+    97, not 96: replay-runner-crash-on-malformed-cli-response (2026-08-28)
+    added and immediately closed done -- a real corpus-build batch crash
+    (core.scorer._score_via_cli returning the wrong type on a malformed
+    CLI response, and backtesting.replay_runner.run_replay()'s loop having
+    no isolation against it) found, fixed, and tested the same day.
     """
-    assert len(backlog_data["items"]) == 96
+    assert len(backlog_data["items"]) == 97
 
 
 def test_all_ids_unique(backlog_data):
