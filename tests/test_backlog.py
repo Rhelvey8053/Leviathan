@@ -297,8 +297,20 @@ def test_parses_and_96_items(backlog_data):
     (core.scorer._score_via_cli returning the wrong type on a malformed
     CLI response, and backtesting.replay_runner.run_replay()'s loop having
     no isolation against it) found, fixed, and tested the same day.
+
+    100, not 97: three items added 2026-08-30 investigating that day's
+    silently-missed DailyRun. dailyrun-missed-run-2026-08-30-silent-
+    failure-gaps and weekly-code-audit-exit-code-not-proof-of-report were
+    both found and fixed the same day (main.py's silent auth-failure path,
+    schedule_setup.ps1's missing output capture/buffering, and
+    weekly_code_audit.py's untrusted exit-0 assumption). windows-defender-
+    cpu-contention-2026-08-30 was filed but NOT fixed -- a real system-
+    resource finding (Defender + Docker consuming heavy CPU, likely
+    explaining the same day's garbled CodeAudit output and WeeklyAudit's
+    own reported slowness) that's outside what should be changed
+    autonomously; left ready for the user's own decision.
     """
-    assert len(backlog_data["items"]) == 97
+    assert len(backlog_data["items"]) == 100
 
 
 def test_all_ids_unique(backlog_data):
