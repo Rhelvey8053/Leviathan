@@ -265,6 +265,27 @@ def main():
     except Exception as e:
         print(f"      FAILED: {e}")
         print("      Cannot proceed without valid auth. Exiting.")
+        # 2026-08-30: this early return used to be completely silent -- no
+        # alert, unlike the shape-anomaly abort below. A real incident (a
+        # transient Kalshi API failure during Task Scheduler's 7am run,
+        # likely the SDK's own exponential-backoff retry exhausting itself
+        # over ~22 minutes before finally raising) went unnoticed for 19
+        # hours until heartbeat_check.py's own staleness alert caught it --
+        # this run's actual error message was never seen by anyone, since
+        # Task Scheduler's action has no output capture and this path sent
+        # no email of its own. Matches the shape-anomaly alert's pattern.
+        try:
+            report.send_report(
+                f"Kalshi authentication failed at the start of this run: {e}\n\n"
+                "This run aborted before fetching any markets -- no scan happened. "
+                "If this was a transient API/network issue it may already be resolved; "
+                "if it recurs, check config.json's kalshi credentials and "
+                "core.kalshi.authenticate()'s error for the real cause.",
+                [], 0, config,
+                subject_override="Leviathan ALERT — Kalshi auth failed, run aborted",
+            )
+        except Exception as _e:
+            print(f"      [warn] Auth-failure alert email failed: {_e}")
         return
 
     # Resolve any prior calls that have since settled
