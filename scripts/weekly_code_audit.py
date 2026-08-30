@@ -41,17 +41,30 @@ actually checks reports/code_audits/ for a new file. Fixed by expressing
 the same scope as Edit(reports/code_audits/*.md) instead (and dropping
 the blanket "Edit" that used to sit in DISALLOWED_TOOLS, since it would
 have shadowed the new scoped allow).
+
+2026-08-30: exit 0 STILL isn't proof of a real report, a third time --
+this run's captured stdout was garbled, leaked-looking agent-reasoning
+text instead of the structured report the prompt asks for, and (like the
+2026-08-24 incident above) no file appeared in reports/code_audits/ at
+all. Most likely cause: several concurrent claude CLI invocations
+competing on the same machine that day (a live pipeline catch-up run and
+a separate long-running batch job were both in progress at the same
+time) -- not a code bug in this script itself, but run_audit() now
+verifies the one concrete, checkable side effect a real run must have
+(a report file newer than when the run started) instead of trusting the
+subprocess's own exit code alone.
 """
 
 import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 PROMPT_FILE = ROOT / "scripts" / "weekly_code_audit_prompt.md"
+REPORT_DIR = ROOT / "reports" / "code_audits"
 
 # Report-only: no source-file edits, only the one report file this run
 # writes. 2026-08-24: the first successful (non-timeout) live run still
@@ -94,6 +107,14 @@ TIMEOUT_SECONDS = 3600
 
 def run_audit(claude_path: str, prompt: str, clean_env: dict) -> int:
     """Runs the claude --print audit. Returns the process exit code."""
+    # A small tolerance before start_time (rather than an exact >= check)
+    # absorbs clock-vs-filesystem timestamp granularity differences --
+    # this real subprocess call takes minutes, so a genuine stale report
+    # is hours/days old, not within a second of start_time. Without this,
+    # a report written a few milliseconds before this exact line executes
+    # (possible on some filesystems' mtime rounding) would be misread as
+    # stale.
+    start_time = datetime.now(timezone.utc) - timedelta(seconds=1)
     try:
         result = subprocess.run(
             [
@@ -121,6 +142,29 @@ def run_audit(claude_path: str, prompt: str, clean_env: dict) -> int:
     if result.returncode != 0:
         print(f"[weekly_code_audit] claude exited {result.returncode}", file=sys.stderr)
         return result.returncode
+
+    # 2026-08-30: exit 0 used to be trusted as "the audit worked" on its
+    # own. A real run that day exited 0 but never wrote a report at all --
+    # captured stdout was garbled, leaked-looking agent-reasoning text
+    # instead of the structured report the prompt asks for, most likely a
+    # resource-contention symptom from several concurrent claude CLI
+    # invocations on the same machine that day (a live pipeline catch-up
+    # run and a separate long batch job were both running at the same
+    # time). Exit code alone can't catch that -- same lesson this
+    # project's Task Scheduler LastTaskResult=0 caveat already teaches
+    # (see backlog: task-scheduler-manual-trigger-stuck-queued) applied to
+    # a CLI subprocess's own return code instead. Verify the one concrete,
+    # checkable side effect this run was supposed to have: a report file
+    # newer than when this run started.
+    report_glob = sorted(REPORT_DIR.glob("*.md"))
+    newest = report_glob[-1] if report_glob else None
+    if newest is None or datetime.fromtimestamp(newest.stat().st_mtime, tz=timezone.utc) < start_time:
+        print("[weekly_code_audit] claude exited 0 but no new report file appeared in "
+              f"{REPORT_DIR} -- the run likely produced garbled/incomplete output instead "
+              "of writing the expected reports/code_audits/<date>.md. Treating as a "
+              "failure despite the clean exit code.", file=sys.stderr)
+        return 2
+
     print("[weekly_code_audit] done")
     return 0
 
