@@ -20,8 +20,8 @@ streamlit run dashboard\app.py
 ```
 
 Streamlit opens the app in your browser (default `http://localhost:8501`).
-The sidebar lists all four pages: Overview, Signal Breakdown, Signal Log,
-Smart Money.
+The sidebar lists all five pages: Overview, Signal Breakdown, Signal Log,
+Smart Money, Backlog.
 
 ## Where the CSV path comes from
 
@@ -71,7 +71,7 @@ data-quality bug.
 ## Interactivity & visual style
 
 `dashboard/theme.py` holds a shared color palette, Plotly template, and CSS
-so all four pages read as one product: styled KPI cards, a consistent
+so all five pages read as one product: styled KPI cards, a consistent
 win/loss color pairing everywhere, and a `small-n-badge` shown any time a
 chart is built on a thin sample rather than letting a nicer-looking chart
 imply more confidence than the data supports.
@@ -99,6 +99,18 @@ Money's discovery funnel gets a "Force refresh" button to bypass its
 slider, a direction filter, and a row-count control instead of a fixed
 top-20.
 
+Added 2026-08-30: **Backlog** page, replacing the monday.com board (trial
+expired) as the internal place to browse `backlog/backlog.json` -- reads
+it directly, live, with no separate sync step. Shows ready/locked/blocked/
+done counts, live gate-metric progress for locked items (via the same
+`backlog.checker.compute_metrics()` every real gate-unlock decision
+already runs through), a filterable full-backlog table (status/area/text
+search), and an item-detail panel with the full action/notes text. Since
+this page has no browser-interaction dependency (no click-to-filter, no
+external API call), it was verified with Streamlit's own `AppTest`
+harness rather than a live browser -- confirmed clean run, correct KPI
+counts, and both the search filter and detail selector working.
+
 ## Structure
 
 ```
@@ -110,5 +122,6 @@ dashboard/
     2_Signal_Breakdown.py
     3_Signal_Log.py
     4_Smart_Money.py
+    5_Backlog.py
   requirements.txt
 ```
