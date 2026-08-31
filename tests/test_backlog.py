@@ -309,8 +309,14 @@ def test_parses_and_96_items(backlog_data):
     explaining the same day's garbled CodeAudit output and WeeklyAudit's
     own reported slowness) that's outside what should be changed
     autonomously; left ready for the user's own decision.
+
+    101, not 100: monday-com-retired-backlog-dashboard-page (2026-08-30)
+    added and closed done the same day -- the user's monday.com trial
+    expired, so backlog browsing moved to a new dashboard/pages/5_Backlog.py
+    page (reads backlog.json live, no sync step) and scripts/monday_sync.py
+    was marked retired in its own docstring.
     """
-    assert len(backlog_data["items"]) == 100
+    assert len(backlog_data["items"]) == 101
 
 
 def test_all_ids_unique(backlog_data):

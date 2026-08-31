@@ -38,7 +38,7 @@ Full backlog: 6 ready / 6 locked / 6 blocked
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (82)
+## Done (83)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -96,6 +96,7 @@ Full backlog: 6 ready / 6 locked / 6 blocked
 | 3 | dependabot-setup | .github/dependabot.yml added 2026-08-24, covering pip (root requirements.txt, used by CI; dashboard/requirements.txt, not CI-checked but a real dependency manifest) and github-actions… | infra |
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
+| 3 | monday-com-retired-backlog-dashboard-page | User's monday.com trial expired 2026-08-30. | infra |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
 | 3 | replay-runner-crash-on-malformed-cli-response | Found 2026-08-28 running a replay-instrument-validation corpus-build batch: it crashed with 'str' object has no attribute 'keys'. | validation |
 | 3 | resolved-count-per-category-max-wrong-column | Found 2026-08-27 while fixing empirical-base-rates-poly's gating (see that item's notes). | calibration |

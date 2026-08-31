@@ -1432,6 +1432,19 @@
       "action": "Found 2026-08-30 while investigating a garbled weekly_code_audit.py run and a main.py catch-up run that appeared stuck on one step for a long stretch (both eventually completed -- confirmed slow, not truly deadlocked). Live process check: MsMpEng.exe (Windows Defender's real-time scanning engine) at ~206,949 CPU-seconds (~57.5 cumulative hours), com.docker.backend also consuming real CPU/memory in the background. Even lightweight, normally-instant tool calls (a repo-wide grep, ripgrep) took 20-120+ seconds or had to be backgrounded during this window. This looks like a genuine system-level resource contention problem -- likely Defender's real-time/on-access scanning reacting to the heavy file I/O this project's automation generates (git operations, log writes, multiple concurrent claude CLI subprocess invocations from a live session plus scheduled weekly audits plus background batch jobs) -- not a bug in any Leviathan script. This is the most plausible explanation for the same day's weekly_code_audit.py garbled-output incident (see weekly-code-audit-exit-code-not-proof-of-report) and WeeklyAudit's own reported ~10x-slower-than-baseline pytest run and denied/retried tool calls.",
       "notes": "NOT fixed -- modifying antivirus/security settings or Docker configuration is a system-settings change outside what should be done autonomously; flagging for the user's own decision. A common, standard mitigation worth considering: add a Windows Defender exclusion for the Leviathan project directory (and/or the python.exe / claude CLI executables) to stop real-time scanning from re-scanning this project's own heavy, repeated file I/O. Also worth considering: whether Docker Desktop needs to run continuously on this machine, or only when actually needed. No code action possible on this item from within the repo.",
       "status": "ready"
+    },
+    {
+      "id": "monday-com-retired-backlog-dashboard-page",
+      "title": "monday.com trial expired -- moved backlog browsing to a new dashboard page",
+      "area": "infra",
+      "priority": 3,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "User's monday.com trial expired 2026-08-30. backlog/backlog.json and BACKLOG.md were always the real source of truth (monday.com was a secondary, human-facing mirror synced one-way via scripts/monday_sync.py's Phase 2) -- but the visual board itself, and Liam (monday's built-in PM agent, already independently found unreliable on internal state, and its own automation appeared to have stopped posting entirely well before this -- see verify-liam-post-context-doc-alignment), are gone. Needed an internal replacement for browsing/searching the backlog day-to-day.",
+      "notes": "RESOLVED 2026-08-30. Added dashboard/pages/5_Backlog.py to the existing local Streamlit dashboard -- reads backlog.json directly, live, no sync step (the exact gap monday.com filled is now just \"run the dashboard locally\"). Shows ready/locked/blocked/done KPI counts, live gate-metric progress for locked items via the same backlog.checker.compute_metrics() every real gate-unlock decision already runs through, a filterable full-backlog table (status/area/free-text search across id/title/action), and an item-detail panel with full action/notes text. Verified via Streamlit's own AppTest harness (no browser available in this environment) -- clean run, correct KPI counts (6 ready/6 locked/6 blocked/82 done = 100 total), search filter and detail selector both exercised without error. scripts/monday_sync.py marked retired in its own docstring (left in place, not deleted, in case monday.com access is restored or historical board data needs pulling) -- no longer called as part of any routine backlog-update workflow. dashboard/README.md updated (page count, Structure tree, new page's own description).",
+      "status": "done"
     }
   ]
 }
