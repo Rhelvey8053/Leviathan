@@ -1,6 +1,21 @@
 """
 scripts/monday_sync.py - Leviathan backlog <-> monday.com board sync.
 
+RETIRED 2026-08-30: the user's monday.com trial expired. backlog/backlog.json
+and BACKLOG.md remain the real source of truth they always were -- monday.com
+was only ever a secondary, human-facing mirror of it (see this docstring's
+own "Source of truth" line below, unchanged from when it was written). The
+board itself, and Liam (monday's built-in PM agent, already independently
+found unreliable on internal state -- see scripts/verify_liam_report.py),
+are no longer part of this project's workflow. Browsing/searching the
+backlog now happens in dashboard/pages/5_Backlog.py instead -- reads
+backlog.json directly, live, no sync step. Left in place (not deleted) in
+case monday.com access is restored later or historical board data needs
+pulling before it becomes inaccessible -- but no longer called as part of
+any routine backlog-update workflow. A dry-run against the live API may
+still appear to succeed (read-only calls can outlive a lapsed trial) --
+don't take that as proof write access still works.
+
 Source of truth stays backlog/backlog.json (see docs/monday_sync_discovery.md
 for the full Phase 0 investigation). monday is a view + progress log, not an
 editing surface, in v1. GraphQL over REST -- deliberately not the interactive
