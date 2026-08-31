@@ -40,7 +40,18 @@ nothing here re-runs a scan or hits a live API:
     than re-derived. Diffed against a per-item {status, notes_len}
     snapshot persisted in state["backlog_snapshot"] -- cheap enough that a
     length change is a good-enough proxy for "notes were edited" without
-    hashing the full text.
+    hashing the full text. Also runs backlog.checker's own compute-metrics
+    -> evaluate-triggers -> compare-statuses -> persist sequence daily
+    (added 2026-08-31, see _check_gates()) -- a locked/blocked item whose
+    gate clears now surfaces the same day instead of waiting for
+    Leviathan-BacklogChecker's Monday-only schedule, with the exact same
+    persistence behavior (writes backlog.json + regenerates BACKLOG.md
+    only if something genuinely unlocked).
+  - Replay corpus (added 2026-08-31): one-line progress readout toward
+    replay-instrument-validation's n>=300 threshold (reads
+    COUNT(*) FROM replay_signals) -- pure reporting, never launches a
+    build batch itself; see section_replay_corpus()'s own docstring for
+    why auto-launching stays a human decision.
   - Weekly audits: logs/weekly_audit.log / logs/weekly_code_audit.log,
     included only when modified in roughly the last 20h (i.e. an actual
     Monday run happened), as a raw tail excerpt -- both are free-form
@@ -89,6 +100,13 @@ import scripts.position_reconciliation as _recon
 
 DEFAULT_STATE = ROOT / "data" / "daily_digest_state.json"
 BACKLOG_PATH = ROOT / "backlog" / "backlog.json"
+# Explicit, patchable constant -- backlog.checker.write_markdown()'s own
+# `dest` parameter defaults to the real project BACKLOG.md, and that
+# module's own comments document a real prior incident where a test
+# using the default clobbered the actual repo file. _check_gates() always
+# passes this explicitly so a test patching BACKLOG_MD_PATH can never hit
+# the real file by accident.
+BACKLOG_MD_PATH = ROOT / "BACKLOG.md"
 RECONCILIATION_DIR = ROOT / "data" / "reconciliation"
 SMART_MONEY_LATEST = ROOT / "data" / "smart_money" / "latest_signals.json"
 WEEKLY_LOGS = {
@@ -211,6 +229,35 @@ def section_resolve_first(now: datetime | None = None,
     return f"{header}\n  {total} signal(s) logged: {parts}"
 
 
+# backlog: replay-instrument-validation. 300 isn't a schema-enforced
+# constant anywhere else -- it's a threshold documented in that item's own
+# action text (grading-instrument verification needs the corpus at
+# n>=300). Mirrored here as a plain number, same as core/sizing.py already
+# mirrors auto-calibration-loop's threshold rather than importing a
+# backlog-specific constant module that doesn't exist.
+REPLAY_CORPUS_TARGET = 300
+
+
+def section_replay_corpus() -> str:
+    """
+    One-line progress readout toward replay-instrument-validation's
+    n>=300 corpus target -- added 2026-08-31 after several sessions of
+    manually re-checking `SELECT COUNT(*) FROM replay_signals` by hand
+    each time a build batch was resumed. Pure reporting, no side effect:
+    never launches a batch itself (see that item's own notes for why this
+    is a real Claude Pro/CLI cost, not something to auto-trigger daily).
+    """
+    with logger._db() as conn:
+        try:
+            n = conn.execute("SELECT COUNT(*) FROM replay_signals").fetchone()[0]
+        except Exception:
+            return "REPLAY CORPUS\n  replay_signals table not found -- backtesting/replay_runner.py has never been run."
+    pct = min(100, round(100 * n / REPLAY_CORPUS_TARGET))
+    return (f"REPLAY CORPUS (backlog: replay-instrument-validation)\n"
+            f"  {n}/{REPLAY_CORPUS_TARGET} ({pct}%) -- "
+            f"{'target reached' if n >= REPLAY_CORPUS_TARGET else 'resume with `python -m backtesting.replay_runner --max-markets N`'}")
+
+
 def section_weekly_logs(now: datetime | None = None) -> str | None:
     now = now or datetime.now(timezone.utc)
     blocks = []
@@ -253,21 +300,53 @@ def _change_purpose(item: dict, max_len: int = 280) -> str:
     return _checker._summarize_action(text, max_len=max_len)
 
 
+def _check_gates() -> list[str]:
+    """
+    Runs the same compute-metrics -> evaluate-triggers -> compare-statuses
+    -> persist sequence backlog.checker.run() already does (see that
+    function's own comment on why the save must happen in BOTH interactive
+    and non-interactive modes) -- added here 2026-08-31 so a gate clearing
+    gets caught and reported the same day, instead of waiting up to a week
+    for Leviathan-BacklogChecker's own Monday-only schedule. Mutates
+    backlog.json on disk (and regenerates BACKLOG.md) if, and only if, at
+    least one item's trigger/dependency condition is now genuinely met --
+    identical persistence behavior to a manual `python -m backlog.checker
+    --email` run, just invoked daily instead of weekly. Returns the list
+    of newly-unlocked item ids (empty if nothing cleared this run).
+    """
+    backlog = _load_backlog(BACKLOG_PATH)
+    metrics = _checker.compute_metrics()
+    trigger_results = _checker.evaluate_triggers(backlog, metrics)
+    newly_unlocked = _checker.compare_statuses(backlog, trigger_results)
+    if newly_unlocked:
+        _checker.save_backlog(BACKLOG_PATH, backlog)
+        _checker.write_markdown(backlog, metrics, dest=BACKLOG_MD_PATH)
+    return newly_unlocked
+
+
 def section_backlog(prev_snapshot: dict | None = None) -> tuple[str, dict]:
     """
-    Returns (section text, current snapshot). Two parts: every `ready`
-    item (priority-ordered -- what's actionable right now, without
-    opening the board or monday.com), and what changed since the
-    previous digest (new items, status transitions, and notes-only
-    updates) with the purpose pulled from the item's own notes/action
-    text rather than re-derived. prev_snapshot is None/empty both on the
-    very first run this feature ever executes AND on any later run where
-    state was reset -- either way there's no real baseline to diff
-    against, so the changes list is reported as "no prior snapshot" that
-    one time rather than dumping the entire backlog as "new" (which would
-    bury the one genuinely new item in dozens of pre-existing ones).
+    Returns (section text, current snapshot). Runs _check_gates() first
+    (see its own docstring) so any locked/blocked item whose gate cleared
+    today is already reflected in what follows -- it'll show up both in
+    the Ready list below and in the Changes-since-last-digest diff as a
+    real "locked -> ready" transition, not something reported separately
+    and possibly out of sync with the persisted backlog.json state.
+
+    Two parts after that: every `ready` item (priority-ordered -- what's
+    actionable right now, without opening the board or monday.com), and
+    what changed since the previous digest (new items, status
+    transitions, and notes-only updates) with the purpose pulled from the
+    item's own notes/action text rather than re-derived. prev_snapshot is
+    None/empty both on the very first run this feature ever executes AND
+    on any later run where state was reset -- either way there's no real
+    baseline to diff against, so the changes list is reported as "no
+    prior snapshot" that one time rather than dumping the entire backlog
+    as "new" (which would bury the one genuinely new item in dozens of
+    pre-existing ones).
     """
     first_run = not prev_snapshot
+    newly_unlocked = _check_gates()
     backlog = _load_backlog(BACKLOG_PATH)
     items = backlog.get("items", [])
     items_by_id = {i["id"]: i for i in items}
@@ -275,7 +354,10 @@ def section_backlog(prev_snapshot: dict | None = None) -> tuple[str, dict]:
 
     ready = sorted((i for i in items if i.get("status") == "ready"),
                    key=lambda i: (i.get("priority", 9), i["id"]))
-    lines = ["BACKLOG", f"  Ready ({len(ready)}):"]
+    lines = ["BACKLOG"]
+    if newly_unlocked:
+        lines.append(f"  Gate check: {len(newly_unlocked)} item(s) newly unlocked today -- {', '.join(sorted(newly_unlocked))}")
+    lines.append(f"  Ready ({len(ready)}):")
     if not ready:
         lines.append("    (none)")
     for item in ready:
@@ -333,7 +415,8 @@ def compose_digest(now: datetime | None = None,
         problems.append("Reconciliation: misaligned signal(s) found -- see RECONCILIATION section below")
 
     sections = [_attention_section(problems), task_text, recon_text,
-                section_smart_money(now), section_resolve_first(now)]
+                section_smart_money(now), section_resolve_first(now),
+                section_replay_corpus()]
 
     weekly = section_weekly_logs(now)
     if weekly:

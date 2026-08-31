@@ -65,6 +65,28 @@ def _item(id_, status="ready", priority=3, action="Do the thing.", notes=""):
             "trigger": {"all": []}, "depends_on": [], "action": action, "notes": notes}
 
 
+_EMPTY_METRICS = {
+    "resolved_count": 0,
+    "resolved_count_per_category_max": 0,
+    "resolved_count_per_wallet_max": 0,
+    "fills_count": 0,
+    "_data_gaps": [],
+}
+
+
+@pytest.fixture(autouse=True)
+def _stub_compute_metrics(monkeypatch):
+    """
+    section_backlog() now runs _check_gates() -> backlog.checker.compute_metrics()
+    against the real DB by default (added 2026-08-31). Stub it to an
+    all-zero, no-op metrics dict so every test in this file stays isolated
+    from live data -- this file's own stated "no live DB" contract.
+    Individual gate-unlock tests override this via monkeypatch.setattr
+    within the test body.
+    """
+    monkeypatch.setattr(dd._checker, "compute_metrics", lambda *a, **k: dict(_EMPTY_METRICS))
+
+
 # ─── section_task_health ─────────────────────────────────────────────────
 
 def test_section_task_health_all_healthy():
@@ -370,6 +392,111 @@ def test_section_backlog_no_changes_when_snapshot_matches(tmp_path):
         text, snapshot = dd.section_backlog(prev_snapshot=prev_snapshot)
     assert "Changes since last digest (0)" in text
     assert "(none)" in text
+
+
+# ─── _check_gates (daily gate-clearing check, added 2026-08-31) ─────────
+
+def _locked_item(id_, metric="resolved_count", op=">=", value=10):
+    return {"id": id_, "status": "locked", "priority": 3, "area": "infra",
+            "trigger": {"all": [{"metric": metric, "op": op, "value": value}]},
+            "depends_on": [], "action": "Do the gated thing.", "notes": ""}
+
+
+def test_check_gates_unlocks_and_persists_when_trigger_clears(tmp_path, monkeypatch):
+    """
+    Real end-to-end check: a locked item whose trigger metric now clears
+    must (1) be reported in the returned newly_unlocked list, (2) actually
+    flip to ready IN THE FILE ON DISK (not just in-memory), and (3) trigger
+    a BACKLOG.md regen -- mirroring backlog.checker.run()'s own persistence
+    contract exactly, just invoked daily instead of weekly.
+    """
+    items = [_locked_item("gated-thing", metric="resolved_count", op=">=", value=10)]
+    backlog_path = _write_backlog(tmp_path, items)
+    md_path = tmp_path / "BACKLOG.md"
+    monkeypatch.setattr(dd._checker, "compute_metrics",
+                        lambda *a, **k: {**_EMPTY_METRICS, "resolved_count": 15})
+    with patch.object(dd, "BACKLOG_PATH", backlog_path), \
+         patch.object(dd, "BACKLOG_MD_PATH", md_path):
+        newly_unlocked = dd._check_gates()
+    assert newly_unlocked == ["gated-thing"]
+
+    on_disk = json.loads(backlog_path.read_text(encoding="utf-8"))
+    assert on_disk["items"][0]["status"] == "ready"
+    assert md_path.exists()
+
+
+def test_check_gates_no_mutation_when_trigger_not_met(tmp_path, monkeypatch):
+    """The inverse -- metric still below threshold must leave the file
+    completely untouched (no write at all, not even a no-op rewrite) and
+    never touch BACKLOG_MD_PATH."""
+    items = [_locked_item("still-gated", metric="resolved_count", op=">=", value=100)]
+    backlog_path = _write_backlog(tmp_path, items)
+    original_mtime = backlog_path.stat().st_mtime
+    md_path = tmp_path / "BACKLOG.md"
+    monkeypatch.setattr(dd._checker, "compute_metrics",
+                        lambda *a, **k: {**_EMPTY_METRICS, "resolved_count": 15})
+    with patch.object(dd, "BACKLOG_PATH", backlog_path), \
+         patch.object(dd, "BACKLOG_MD_PATH", md_path):
+        newly_unlocked = dd._check_gates()
+    assert newly_unlocked == []
+    assert backlog_path.stat().st_mtime == original_mtime
+    assert not md_path.exists()
+
+
+def test_section_backlog_reports_gate_check_callout(tmp_path, monkeypatch):
+    """The digest text itself must surface a newly-unlocked gate, not just
+    _check_gates()'s return value -- this is what a human actually reads."""
+    items = [_locked_item("surfaced-unlock", metric="resolved_count", op=">=", value=10)]
+    backlog_path = _write_backlog(tmp_path, items)
+    md_path = tmp_path / "BACKLOG.md"
+    monkeypatch.setattr(dd._checker, "compute_metrics",
+                        lambda *a, **k: {**_EMPTY_METRICS, "resolved_count": 15})
+    with patch.object(dd, "BACKLOG_PATH", backlog_path), \
+         patch.object(dd, "BACKLOG_MD_PATH", md_path):
+        text, _ = dd.section_backlog(prev_snapshot={"seed": {"status": "ready", "notes_len": 0}})
+    assert "Gate check: 1 item(s) newly unlocked today" in text
+    assert "surfaced-unlock" in text
+    # And it must ALSO show up in the Ready list now, since it really did flip.
+    assert "Ready (1)" in text
+
+
+def test_section_backlog_no_gate_check_line_when_nothing_unlocks(tmp_path):
+    items = [_item("plain-ready")]
+    backlog_path = _write_backlog(tmp_path, items)
+    with patch.object(dd, "BACKLOG_PATH", backlog_path):
+        text, _ = dd.section_backlog(prev_snapshot={"seed": {"status": "ready", "notes_len": 0}})
+    assert "Gate check" not in text
+
+
+# ─── section_replay_corpus ──────────────────────────────────────────────
+
+def _create_replay_signals_table(db_path, n):
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE replay_signals (ticker TEXT)")
+    conn.executemany("INSERT INTO replay_signals VALUES (?)", [(f"T{i}",) for i in range(n)])
+    conn.commit()
+    conn.close()
+
+
+def test_section_replay_corpus_reports_progress(_isolate_db):
+    _create_replay_signals_table(_isolate_db, 93)
+    text = dd.section_replay_corpus()
+    assert "93/300" in text
+    assert "31%" in text
+
+
+def test_section_replay_corpus_reports_target_reached(_isolate_db):
+    _create_replay_signals_table(_isolate_db, 300)
+    text = dd.section_replay_corpus()
+    assert "300/300" in text
+    assert "target reached" in text
+
+
+def test_section_replay_corpus_handles_missing_table(_isolate_db):
+    """_isolate_db's fixture DB never creates replay_signals -- must
+    report the gap cleanly, not raise."""
+    text = dd.section_replay_corpus()
+    assert "not found" in text
 
 
 # ─── check(): end-to-end ────────────────────────────────────────────────
