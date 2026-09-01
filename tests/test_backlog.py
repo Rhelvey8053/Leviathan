@@ -315,8 +315,19 @@ def test_parses_and_96_items(backlog_data):
     expired, so backlog browsing moved to a new dashboard/pages/5_Backlog.py
     page (reads backlog.json live, no sync step) and scripts/monday_sync.py
     was marked retired in its own docstring.
+
+    103, not 101: resolve-first-top-n-per-bucket and
+    near-dated-fetch-headroom-increase (2026-08-31) added and closed done
+    the same day -- user asked to expand scope on active bets to collect
+    resolved_count data faster without breaking core practices.
+    select_near_dated() gained a picks_per_bucket parameter (default 1,
+    unchanged prior behavior) live-verified to raise daily picks 5->13
+    against real data; the shared near-dated fetch's target_count/max_pages
+    were raised 200/30->300/40, live-verified at 1.6s for a full 300-market
+    fetch. Both evidence-gated per this project's own discipline, not
+    vibes-based config bumps.
     """
-    assert len(backlog_data["items"]) == 101
+    assert len(backlog_data["items"]) == 103
 
 
 def test_all_ids_unique(backlog_data):

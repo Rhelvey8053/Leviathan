@@ -1,5 +1,5 @@
 === LEVIATHAN BACKLOG UPDATE ===
-Date: 2026-08-30
+Date: 2026-08-31
 Newly Unlocked: 0
 
 Live Metrics:
@@ -38,7 +38,7 @@ Full backlog: 6 ready / 6 locked / 6 blocked
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (83)
+## Done (85)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -81,10 +81,12 @@ Full backlog: 6 ready / 6 locked / 6 blocked
 | 2 | kalshi-event-ticker-capture | Persist event_ticker (already fetched at scan time) onto every logged signal; investigate the real kalshi.com market-page URL pattern. | data-quality |
 | 2 | kalshi-wa-geofencing-exposure-check | Investigated 2026-08-24, confirmed with the user directly: the Kalshi account/operator is NOT based in Washington State, so the WA geofencing order does not restrict this project's own market access. | infra |
 | 2 | llm-cost-ceiling | Add a configurable daily spend cap in core/llm.py that accumulates cost_usd across calls and raises once breached. | infra |
+| 2 | near-dated-fetch-headroom-increase | Companion to resolve-first-top-n-per-bucket, same investigation. | data-quality |
 | 2 | polymarket-data-api-rate-limit-pacing | Root-caused and fixed 2026-08-23. | smart-money |
 | 2 | powerbi-schema-hardening | Add run_id to data/powerbi_export/signals.csv as a foreign key to runs.csv. | reporting |
 | 2 | replay-asof-reconstruction | Given a ticker and a historical date, reconstruct the market state as it stood then, sourcing from data/snapshots where available and Kalshi history beyond that. | backtesting |
 | 2 | replay-settled-fetcher | Pull Kalshi settled markets with their final outcomes, reaching further back than the local snapshot archive begins. | backtesting |
+| 2 | resolve-first-top-n-per-bucket | User asked to expand scope on active bets to collect resolved_count data faster, without breaking core practices (many backlog gates -- calibration-curve n>=50, edge-decay-analysis n>=30,… | data-quality |
 | 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
 | 2 | smart-money-fills-table-missing | Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a… | infra |
 | 2 | wake-triggered-task-catchup | Built 2026-08-24, registered and confirmed State=Ready (not stuck Queued, unlike the two tasks registered earlier the same day). | infra |
