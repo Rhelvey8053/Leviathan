@@ -1471,6 +1471,32 @@
       "action": "Companion to resolve-first-top-n-per-bucket, same investigation. The near-dated fetch feeding both main.py's snapshot and resolve_first.py's candidate pool (core.kalshi.fetch_near_dated_markets(), config.json's markets.near_dated_target_count/near_dated_max_pages) was capped at 200/30. The existing near-dated-window-chunking backlog item's own notes already confirmed this was 'target hit' (i.e. real headroom exists beyond 200, not market scarcity) -- production logs across 3 separate runs all showed a clean, non-slow 200/200 fetch.",
       "notes": "RESOLVED 2026-08-31 (Step A only, evidence-gated per this project's own discipline -- no Step B number pre-committed). Raised near_dated_target_count 200->300, near_dated_max_pages 30->40 in both config.json and config.example.json (with a _near_dated_notes update). Live-verified before touching the live config: a direct fetch_near_dated_markets(target_count=300, max_pages=40) call against the real Kalshi API returned the full 300 in 1.6 seconds -- far under Leviathan-ResolveFirst's 10-minute ExecutionTimeLimit, confirming real headroom rather than assuming it. Separately verified the wider fetch's real effect on resolve_first's candidate pool: a fresh near-dated-only fetch at the new target_count populated the previously-empty 60-95% price band (7 real candidates, was 0 under the old 200-target snapshot) and yielded 16 picks with picks_per_bucket=3, vs. 13 from the same day's combined-pipeline snapshot built under the old 200 target. Explicitly flagged: this fetch is shared with main.py's own snapshot pipeline, so the wider pool also feeds the main Claude-scored scanner before its own dedup_by_event/ranking runs -- a beneficial but distinct side effect from the resolve_first-specific lever above, not silently bundled. Step B (a further bump, e.g. 300->400) deliberately deferred pending a few real scheduled 8:30am runs' worth of observed timing, not set in advance. near_dated_max_days (14) and resolve_first_dedup_days (7) both left untouched.",
       "status": "done"
+    },
+    {
+      "id": "wire-llm-model-cli-flag",
+      "title": "Fix Dead --model Wiring in _score_via_cli",
+      "area": "infra",
+      "priority": 3,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Second, independent lever from the same user request ('expand scope... collect data faster, use higher models'). core/scorer.py's _score_via_cli() -- the function the live pipeline actually uses (config.llm.backend defaults to 'cli') -- never passed a --model flag to the claude CLI subprocess. config.llm.model was completely dead for the live pipeline; it only ever fed the disabled metered-API backend (llm.api_spend_authorized=false by policy). 'Use higher models' wasn't wired up at all before this fix. Note: analysis/resolve_first.py never calls Claude (it uses scanner.score_markets(), the heuristic-only function) -- this lever only affects main.py's Claude-scored pass, entirely separate from the resolve-first-top-n-per-bucket/near-dated-fetch-headroom-increase levers above.",
+      "notes": "RESOLVED 2026-08-31. Added config.llm.cli_model_override (new, distinct key, default null) rather than reusing the existing llm.model key -- that key holds \"claude-sonnet-4-6\", live-verified the same day to be STALER than the bare CLI's own current default (a bare `claude --print` with no --model flag resolves to claude-sonnet-5) -- wiring the old value through as-is would have been a silent downgrade, the opposite of the ask. When unset (the live default), --model is omitted entirely -- live-verified via a real CLI call with a captured-args spy that this produces the byte-identical argument list as before the change. When set, --model is appended with the exact configured value (confirmed both a short alias like 'opus' and the CLI's documented support for full model-id strings via `claude --help`). Threaded config through all 3 call sites in core/scorer.py (score_markets's single-pass and multi-sample paths, rescore_single_market) plus analysis/eval_rescore.py. 2 new tests (omits flag when unset across three unset-shapes, passes flag+value when set), full suite green. Live config.json left at cli_model_override=null -- this fix changes no default behavior; see trial-stronger-model-main-scoring for the separate, later decision to actually use it.",
+      "status": "done"
+    },
+    {
+      "id": "trial-stronger-model-main-scoring",
+      "title": "Bounded Trial: Stronger Model for Main Scoring Pass",
+      "area": "calibration",
+      "priority": 4,
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Using the now-live config.llm.cli_model_override (see wire-llm-model-cli-flag, done -- no depends_on here since that item is already done as of this item's own creation, not a real gate), run a bounded 5-7 scheduled-run trial with a stronger model (e.g. 'opus') for main.py's Claude-scored pipeline only. Compare signal counts/pass-rates/edge distributions against the preceding baseline window, then revert the single config key back to null.",
+      "notes": "Deliberately NOT executed as part of the wiring fix -- this is a separate, later go/no-go decision, not a default change. Real trade-off, live-verified 2026-08-31: a heavier model is slower per call and consumes more of the flat-rate Pro-plan usage/session budget, which could REDUCE how many markets are scorable per day -- directly cutting against the 'collect data faster' half of the original request even if per-call scoring quality improves. Direction of the quality effect (more genuine signals clearing thresholds vs. becoming more conservative and passing fewer) is unproven without this controlled test. If run: main.py's model_used report field currently sources from the separate, cosmetic scoring.scorer_model config key -- keep it manually in sync with whatever cli_model_override actually was for that run's window, or results will be misattributed to the wrong model in reporting.",
+      "status": "ready"
     }
   ]
 }

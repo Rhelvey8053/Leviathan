@@ -326,8 +326,18 @@ def test_parses_and_96_items(backlog_data):
     were raised 200/30->300/40, live-verified at 1.6s for a full 300-market
     fetch. Both evidence-gated per this project's own discipline, not
     vibes-based config bumps.
+
+    105, not 103: wire-llm-model-cli-flag and trial-stronger-model-main-scoring
+    (2026-08-31) -- the "use higher models" half of the same user request.
+    Fixed core.scorer._score_via_cli() never passing --model to the claude
+    CLI subprocess (config.llm.model was dead for the live pipeline); added
+    a new llm.cli_model_override key (default null, no behavior change) as
+    a bug fix. Actually trialing a stronger model is logged as a separate,
+    ready-not-executed item -- a heavier model consumes more Pro-plan
+    usage/session budget per call, a real trade-off against "faster" that
+    needed its own explicit decision point rather than a bundled default.
     """
-    assert len(backlog_data["items"]) == 103
+    assert len(backlog_data["items"]) == 105
 
 
 def test_all_ids_unique(backlog_data):
