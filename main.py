@@ -243,7 +243,9 @@ def main():
         "markets_scanned":   0,
         "signals_generated": 0,
         "whale_flags":       0,
-        "model_used":        config.get("scoring", {}).get("scorer_model", "claude-sonnet-4-6"),
+        "model_used":        (config.get("llm", {}).get("cli_model_override")
+                               if config.get("llm", {}).get("backend", "cli") == "cli"
+                               else None) or config.get("scoring", {}).get("scorer_model", "claude-sonnet-4-6"),
         "tokens_used":       0,
         "cost_usd":          0,
         "runtime_ms":        0,

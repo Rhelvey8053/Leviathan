@@ -354,8 +354,18 @@ def test_parses_and_96_items(backlog_data):
     not just reading) a real production bug: Signal Breakdown's
     click-to-filter chart crashed on every load because on_select requires
     Streamlit >=1.35 but the deployed environment pins 1.30.0.
+
+    108, not 107: model-used-field-disconnected-from-cli-override
+    (2026-09-01) -- found while checking the first run of an authorized
+    Opus-vs-Sonnet trial (trial-stronger-model-main-scoring): the runs
+    table's model_used field read a cosmetic config key never passed to
+    any real call, completely disconnected from the key that actually
+    controls which model scores markets. It kept saying "claude-sonnet-4-6"
+    even after Opus was live-verified (via code-path analysis) to be the
+    model actually used. Fixed so model_used reflects the real override
+    when one is set.
     """
-    assert len(backlog_data["items"]) == 107
+    assert len(backlog_data["items"]) == 108
 
 
 def test_all_ids_unique(backlog_data):
