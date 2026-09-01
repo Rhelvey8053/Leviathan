@@ -3,7 +3,7 @@ Last updated: 2026-09-01 | Metrics: resolved=19, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (7)
+## Ready (6)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -12,7 +12,6 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | windows-defender-cpu-contention-2026-08-30 | Found 2026-08-30 while investigating a garbled weekly_code_audit.py run and a main.py catch-up run that appeared stuck on one step for a long stretch (both eventually completed -- confirmed slow, not… | infra |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 4 | trial-stronger-model-main-scoring | Using the now-live config.llm.cli_model_override (see wire-llm-model-cli-flag, done -- no depends_on here since that item is already done as of this item's own creation, not a real gate), run a… | calibration |
-| 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 
 ## Locked (6)
 | Priority | ID | Gate | Area |
@@ -34,7 +33,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (88)
+## Done (89)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -116,6 +115,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | signal-scan-log-split-2026-08 | User opened signals.csv directly in Excel and found it looked mostly empty/broken. | data-quality |
 | 4 | streamlit-dashboard-2026-08 | Built a free local Streamlit dashboard (dashboard/) as a Power BI alternative -- three pages (Overview, Signal Breakdown, Signal Log) reading the existing data/powerbi_export CSV export, additive… | reporting |
 | 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. | infra |
+| 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 | 4 | whale-actionability-scorecard | User asked what we're actually doing with whale-flag data beyond identifying it -- the report's WHALE ACTIVITY table just lists sightings (a market a whale traded, no track record attached), so there… | reporting |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
