@@ -1267,6 +1267,40 @@ def get_titles_for_tickers(tickers: list[str]) -> dict[str, str]:
         return {}
 
 
+def get_market_meta_for_tickers(tickers: list[str]) -> dict[str, dict]:
+    """
+    Like get_titles_for_tickers(), but also returns series_ticker/
+    event_ticker so a caller can build a real clickable Kalshi link
+    (core.kalshi.kalshi_market_url) instead of showing a bare, often
+    unreadable ticker string (e.g. "KXFDAAPPROVE-MDMA-27JAN01"). Added for
+    the Smart Money dashboard's whale-activity table -- a separate
+    function rather than changing get_titles_for_tickers()'s existing
+    dict[str, str] contract, which other/future callers may still want.
+    Tickers with no signals row at all are simply absent from the
+    returned dict; callers should fall back to the raw ticker themselves.
+    """
+    if not tickers:
+        return {}
+    try:
+        with _db() as conn:
+            placeholders = ",".join("?" for _ in tickers)
+            rows = conn.execute(
+                f"""
+                SELECT ticker, title, series_ticker, event_ticker FROM signals s
+                WHERE ticker IN ({placeholders}) AND title != '' AND title IS NOT NULL
+                  AND timestamp = (
+                      SELECT MAX(timestamp) FROM signals
+                      WHERE ticker = s.ticker AND title != '' AND title IS NOT NULL
+                  )
+                """,
+                tickers,
+            ).fetchall()
+        return {r["ticker"]: {"title": r["title"], "series_ticker": r["series_ticker"],
+                               "event_ticker": r["event_ticker"]} for r in rows}
+    except Exception:
+        return {}
+
+
 def get_market_data(ticker: str | None = None, date: str | None = None) -> list[dict]:
     """
     Scored market data for a ticker (partial match) or a signal date

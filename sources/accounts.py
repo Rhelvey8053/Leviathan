@@ -488,6 +488,24 @@ def load_winners(config: dict) -> list[dict]:
     return winners
 
 
+def read_cached_winners() -> tuple[list[dict], float | None]:
+    """
+    Read-only peek at data/winning_accounts.json -- NEVER triggers a live
+    discover_winners() fetch, unlike load_winners() (which falls back to a
+    live multi-minute Polymarket crawl when the cache is stale). Built for
+    the Smart Money dashboard's Winning Whales panel, where opening a tab
+    must never block on a live crawl -- the live daily pipeline (main.py)
+    is what actually keeps this cache warm. Returns (winners, updated_at
+    unix timestamp or None if the cache file doesn't exist/is unreadable).
+    """
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("winners", []), data.get("updated_at")
+    except Exception:
+        return [], None
+
+
 # ── Smart money scan ──────────────────────────────────────────────────────────
 
 def scan_market(condition_id: str, winners: list[dict], config: dict) -> list[dict]:

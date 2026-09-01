@@ -111,6 +111,25 @@ external API call), it was verified with Streamlit's own `AppTest`
 harness rather than a live browser -- confirmed clean run, correct KPI
 counts, and both the search filter and detail selector working.
 
+Redesigned 2026-08-31, prompted directly by user feedback that the old
+Smart Money page's raw tickers were unreadable and there was no way to
+see or act on which wallets were actually winning. Real structural
+changes, not cosmetic: a brand-new **Winning Whales** panel (vetted
+Polymarket wallets with a genuine resolved track record, plus a "Live
+Picks" feed of their current open positions sorted by conviction, each
+with a real clickable link -- this view never existed before; the old
+page only ever showed aggregate funnel counts, never the actual wallets)
+sits first, ahead of the discovery-funnel diagnostic (now framed as
+supporting "why" context, not the primary view). The whale-activity
+table's raw ticker column is gone entirely -- `core.logger.get_market_meta_for_tickers()`
+(new) resolves each ticker's real market title and a clickable Kalshi
+link, and a "Most recent / Longest streak" sort toggle makes recency
+visible at a glance (previously only sortable by streak length). Verified
+via `AppTest` against both real live data (currently 0 winning wallets --
+a real, honest zero, not a bug, and the empty state says so) and
+synthetic populated data (to exercise the leaderboard/live-picks tables,
+which real data can't currently cover).
+
 ## Structure
 
 ```

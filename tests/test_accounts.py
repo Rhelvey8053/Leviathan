@@ -466,5 +466,44 @@ class TestGetPacingAndErrorVisibility(unittest.TestCase):
         self.assertIn("failed", mock_print.call_args[0][0])
 
 
+class TestReadCachedWinners(unittest.TestCase):
+    """
+    backlog: smart-money-winning-whales-panel. read_cached_winners() must
+    be a pure, read-only file peek -- never triggers a live
+    discover_winners() Polymarket crawl (unlike load_winners()) -- so the
+    Smart Money dashboard's Winning Whales panel never blocks a page load
+    on a multi-minute live fetch.
+    """
+
+    def test_reads_existing_cache(self):
+        import json as _json
+        import tempfile, os
+        from sources import accounts
+        with tempfile.TemporaryDirectory() as d:
+            cache_path = os.path.join(d, "winning_accounts.json")
+            with open(cache_path, "w", encoding="utf-8") as f:
+                _json.dump({"updated_at": 12345.0, "winners": [{"address": "0xabc", "win_rate": 60.0}]}, f)
+            with patch.object(accounts, "CACHE_FILE", cache_path):
+                winners, updated_at = accounts.read_cached_winners()
+        self.assertEqual(winners, [{"address": "0xabc", "win_rate": 60.0}])
+        self.assertEqual(updated_at, 12345.0)
+
+    def test_missing_cache_file_returns_empty_not_raise(self):
+        from sources import accounts
+        with patch.object(accounts, "CACHE_FILE", "/nonexistent/path/winning_accounts.json"):
+            winners, updated_at = accounts.read_cached_winners()
+        self.assertEqual(winners, [])
+        self.assertIsNone(updated_at)
+
+    def test_never_calls_discover_winners(self):
+        """The defining difference from load_winners() -- must not import/
+        invoke any live-fetch code path regardless of cache staleness."""
+        from sources import accounts
+        with patch.object(accounts, "discover_winners") as mock_discover, \
+             patch.object(accounts, "CACHE_FILE", "/nonexistent/path/winning_accounts.json"):
+            accounts.read_cached_winners()
+        mock_discover.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

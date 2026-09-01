@@ -3872,3 +3872,47 @@ def test_get_titles_for_tickers_exact_match_not_substring(tmp_db):
     _insert_repeat("t2", "KXFOO-26AUG01", 0.5, 0.5, title="Long ticker title")
     titles = logger.get_titles_for_tickers(["KXFOO"])
     assert titles == {"KXFOO": "Short ticker title"}
+
+
+# ─── get_market_meta_for_tickers (Smart Money dashboard clickable links) ──────
+
+def _insert_signal_with_meta(call_id, ticker, series_ticker, event_ticker,
+                              title="Test market", timestamp=None):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, series_ticker, event_ticker,
+             market_price, our_estimate, direction, confidence, outcome, source, run_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, timestamp or datetime.now(timezone.utc).isoformat(),
+            ticker, title, series_ticker, event_ticker,
+            0.5, 0.5, "YES", "MED", "", "paper", "run-test",
+        ))
+
+
+def test_get_market_meta_for_tickers_returns_title_and_series_event(tmp_db):
+    _insert_signal_with_meta("m1", "KXFOO-26AUG01", "KXFOO", "KXFOO-26AUG01",
+                              title="Will foo happen?")
+    meta = logger.get_market_meta_for_tickers(["KXFOO-26AUG01"])
+    assert meta == {"KXFOO-26AUG01": {"title": "Will foo happen?",
+                                       "series_ticker": "KXFOO", "event_ticker": "KXFOO-26AUG01"}}
+
+
+def test_get_market_meta_for_tickers_omits_unknown_tickers(tmp_db):
+    meta = logger.get_market_meta_for_tickers(["KXNOTREAL-99ZZZ99"])
+    assert "KXNOTREAL-99ZZZ99" not in meta
+
+
+def test_get_market_meta_for_tickers_empty_list_returns_empty_dict(tmp_db):
+    assert logger.get_market_meta_for_tickers([]) == {}
+
+
+def test_get_market_meta_for_tickers_uses_latest_row_per_ticker(tmp_db):
+    _insert_signal_with_meta("m1", "KXFOO-26AUG01", "KXFOO_OLD", "KXFOO_OLD-26AUG01",
+                              title="Old title", timestamp="2026-08-01T00:00:00Z")
+    _insert_signal_with_meta("m2", "KXFOO-26AUG01", "KXFOO", "KXFOO-26AUG01",
+                              title="Latest title", timestamp="2026-08-10T00:00:00Z")
+    meta = logger.get_market_meta_for_tickers(["KXFOO-26AUG01"])
+    assert meta["KXFOO-26AUG01"]["title"] == "Latest title"
+    assert meta["KXFOO-26AUG01"]["series_ticker"] == "KXFOO"
