@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-09-01 | Metrics: resolved=19, fills=7
+Last updated: 2026-09-01 | Metrics: resolved=20, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
