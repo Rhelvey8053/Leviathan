@@ -155,10 +155,12 @@
   "llm": {
     "backend": "cli",
     "model": "claude-sonnet-4-6",
+    "cli_model_override": null,
     "max_web_searches": 8,
     "daily_cost_ceiling_usd": 20.0,
     "api_spend_authorized": false,
-    "_llm_notes": "daily_cost_ceiling_usd (goal llm-cost-ceiling) only applies to real metered spend via score_via_api/probe_via_api (core/llm.py) -- the main scan runs backend=cli against the Pro subscription with no per-token bill, so this ceiling protects research probes, eval re-scoring, and the future replay-runner, which will call the API path at volume. $20/day is a starting guess, not a measured figure; revisit once replay-runner exists and real per-market API cost is observed. api_spend_authorized is a hard runtime gate on every core.llm metered function -- leave false; only flip true for a specific, time-boxed, explicitly-authorized session, then flip back."
+    "_llm_notes": "daily_cost_ceiling_usd (goal llm-cost-ceiling) only applies to real metered spend via score_via_api/probe_via_api (core/llm.py) -- the main scan runs backend=cli against the Pro subscription with no per-token bill, so this ceiling protects research probes, eval re-scoring, and the future replay-runner, which will call the API path at volume. $20/day is a starting guess, not a measured figure; revisit once replay-runner exists and real per-market API cost is observed. api_spend_authorized is a hard runtime gate on every core.llm metered function -- leave false; only flip true for a specific, time-boxed, explicitly-authorized session, then flip back.",
+    "_cli_model_override_notes": "backlog: wire-llm-model-cli-flag (2026-08-31). `model` above is DEAD for the live pipeline -- core.scorer._score_via_cli() (the function backend='cli' actually calls) never read it and never passed --model to the claude subprocess; `model` only ever fed the disabled backend='api' path. cli_model_override is a deliberately SEPARATE new key (default null = omit --model entirely, i.e. today's exact behavior, whatever the bare CLI's own current default resolves to). Do NOT set this to the value of `model` above -- that string ('claude-sonnet-4-6') was live-verified 2026-08-31 to be STALER than the bare CLI's own current default (claude-sonnet-5), so copying it through would be a silent downgrade. Set to an explicit alias ('opus', 'sonnet') or full model id only for a deliberate, bounded, monitored trial (backlog: trial-stronger-model-main-scoring) -- a heavier model is slower and consumes more of the flat-rate Pro-plan usage budget per call, which can reduce how many markets are scorable per day even if per-call quality improves."
   },
   "monday": {
     "enabled": true,

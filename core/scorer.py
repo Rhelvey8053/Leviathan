@@ -1036,7 +1036,7 @@ def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
     return "\n".join(lines)
 
 
-def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
+def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None) -> list[dict]:
     """
     Legacy CLI path -- subprocess to local claude binary with Pro OAuth.
 
@@ -1058,20 +1058,38 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
     a 10-market batch timed out and produced 0 signals for the run).
     TimeoutExpired is now caught per-attempt and retried the same as a
     nonzero exit code, sharing the same max_retries/backoff.
+
+    backlog: wire-llm-model-cli-flag (2026-08-31). This subprocess call
+    never passed --model, so config.llm.model (a real config key) was
+    completely dead for the live CLI backend -- it only ever fed the
+    disabled metered-API backend. config.llm.cli_model_override is a
+    DELIBERATELY SEPARATE, new key (default unset) rather than reusing
+    llm.model: that key holds "claude-sonnet-4-6", set for the API
+    backend and confirmed STALER than the bare CLI's own current default
+    (live-checked 2026-08-31: bare `claude --print` with no --model flag
+    resolves to claude-sonnet-5) -- wiring the old key through as-is would
+    have been a silent downgrade, not the "higher model" the fix was
+    meant to enable. Passing config=None (or a config with no override
+    set) omits --model entirely, so today's behavior -- whatever the bare
+    CLI's own default currently is -- is completely unchanged.
     """
     import os as _os, time as _time
     claude_cmd = _find_claude()
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
     _sp_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
     _sp_file.write(sys_prompt); _sp_file.close(); _sp_path = _sp_file.name
+    cli_args = [claude_cmd, "--print", "--system-prompt-file", _sp_path,
+                "--allowedTools", "WebSearch", "--output-format", "text"]
+    model_override = (config or {}).get("llm", {}).get("cli_model_override")
+    if model_override:
+        cli_args += ["--model", model_override]
     max_retries = 2; result = None; timed_out = False
     try:
         for attempt in range(max_retries + 1):
             timed_out = False
             try:
                 result = subprocess.run(
-                    [claude_cmd, "--print", "--system-prompt-file", _sp_path,
-                     "--allowedTools", "WebSearch", "--output-format", "text"],
+                    cli_args,
                     input=user_prompt, capture_output=True, text=True, timeout=600,
                     encoding="utf-8", errors="replace", env=clean_env,
                 )
@@ -1294,7 +1312,7 @@ def score_markets(
     if n_samples <= 1:
         if backend == "api":
             return _score_via_api(sys_prompt, user_prompt, config)
-        return _score_via_cli(sys_prompt, user_prompt), {}
+        return _score_via_cli(sys_prompt, user_prompt, config), {}
 
     passes: list[list[dict]] = []
     combined_token_info = {
@@ -1308,7 +1326,7 @@ def score_markets(
             for key in combined_token_info:
                 combined_token_info[key] += tok.get(key, 0)
         else:
-            pass_scores = _score_via_cli(sys_prompt, user_prompt)
+            pass_scores = _score_via_cli(sys_prompt, user_prompt, config)
         passes.append(pass_scores)
 
     token_info = combined_token_info if backend == "api" else {}
@@ -1352,7 +1370,7 @@ def rescore_single_market(
     if backend == "api":
         scores, token_info = _score_via_api(sys_prompt, user_prompt, config)
     else:
-        scores, token_info = _score_via_cli(sys_prompt, user_prompt), {}
+        scores, token_info = _score_via_cli(sys_prompt, user_prompt, config), {}
 
     if not scores:
         return None, token_info

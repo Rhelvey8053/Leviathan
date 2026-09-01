@@ -1414,6 +1414,48 @@ def test_score_via_cli_accepts_valid_response(monkeypatch):
     assert scores[0]["ticker"] == "KXTEST-01"
 
 
+def test_score_via_cli_omits_model_flag_when_no_override(monkeypatch):
+    """
+    backlog: wire-llm-model-cli-flag. No config, or a config with no
+    llm.cli_model_override set, must omit --model entirely -- this IS the
+    "no behavior change" claim the fix depends on (whatever the bare CLI's
+    own current default resolves to keeps being used, unchanged).
+    """
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)) as mock_run:
+        scorer._score_via_cli("sys", "user")  # no config arg at all
+        scorer._score_via_cli("sys", "user", {"llm": {}})  # config present, key absent
+        scorer._score_via_cli("sys", "user", {"llm": {"cli_model_override": None}})  # explicit None
+    for call in mock_run.call_args_list:
+        args = call[0][0]
+        assert "--model" not in args
+
+
+def test_score_via_cli_passes_model_flag_when_override_set(monkeypatch):
+    """When llm.cli_model_override is set, --model must be appended with
+    that exact value."""
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)) as mock_run:
+        scorer._score_via_cli("sys", "user", {"llm": {"cli_model_override": "opus"}})
+    args = mock_run.call_args[0][0]
+    assert "--model" in args
+    assert args[args.index("--model") + 1] == "opus"
+
+
 def test_score_via_cli_normalizes_sources_checked_to_sources(monkeypatch):
     """
     backlog: db-audit-2026-08. The CLI's JSON schema returns "sources_checked"
