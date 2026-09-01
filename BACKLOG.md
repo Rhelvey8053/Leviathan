@@ -33,7 +33,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (91)
+## Done (92)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -94,6 +94,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | dependabot-setup | .github/dependabot.yml added 2026-08-24, covering pip (root requirements.txt, used by CI; dashboard/requirements.txt, not CI-checked but a real dependency manifest) and github-actions… | infra |
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
+| 3 | mcp-server-v2-operational-tools | User (as PM, following Liam/monday.com's retirement) asked what new plugins or connectors could streamline the project. | infra |
 | 3 | model-used-field-disconnected-from-cli-override | Found 2026-09-01 while checking the first Opus-trial run's result row: run_meta['model_used'] (main.py:246) read config.scoring.scorer_model -- a static, cosmetic-only field never passed to any… | infra |
 | 3 | monday-com-retired-backlog-dashboard-page | User's monday.com trial expired 2026-08-30. | infra |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |

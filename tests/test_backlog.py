@@ -376,8 +376,19 @@ def test_parses_and_96_items(backlog_data):
     already true by construction; the 4 categories missing from
     signals.category are just thin market slices that haven't produced
     a signal yet, not a code gap.
+
+    110, not 109: mcp-server-v2-operational-tools (2026-09-01) -- user
+    asked what new plugins/connectors could streamline the project.
+    Third-party Kalshi/Polymarket MCP connectors were researched and
+    rejected (trade-execution-capable, conflicts with paper-only
+    discipline). Instead expanded the existing first-party
+    mcp_server/server.py (explicitly scoped "v1... a later, hardened
+    build" in its own docstring, with no backlog item ever tracking
+    that) with 4 new read-only tools: get_run_history,
+    get_category_breakdown, get_backlog_status, get_pipeline_health --
+    each a thin wrapper over logic that already existed elsewhere.
     """
-    assert len(backlog_data["items"]) == 109
+    assert len(backlog_data["items"]) == 110
 
 
 def test_all_ids_unique(backlog_data):

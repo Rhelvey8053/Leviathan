@@ -1329,6 +1329,44 @@ def get_market_data(ticker: str | None = None, date: str | None = None) -> list[
         return []
 
 
+def get_run_history(limit: int = 20) -> list[dict]:
+    """
+    Most recent pipeline runs, newest first -- one row per main.py
+    invocation (markets_scanned, signals_generated, whale_flags,
+    runtime_ms, model_used, brier_scorer/brier_market/brier_n). Used by
+    the MCP run-history query tool for comparing a config trial (e.g.
+    a cli_model_override change) against its preceding baseline window
+    without a one-off SQL query each time.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM runs ORDER BY timestamp DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_category_breakdown() -> list[dict]:
+    """
+    Signal counts grouped by (category, flag_path), most common first.
+    Never fabricates a category for a blank value -- '' is returned as
+    its own bucket, same as querying the raw column directly, so a gap
+    like resolve-first-never-carried-category shows up rather than
+    silently merging into some other bucket.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT category, flag_path, COUNT(*) as n FROM signals "
+                f"WHERE {_NO_PASS} GROUP BY category, flag_path ORDER BY n DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 def get_stats() -> dict:
     """Stats for paper (simulated) signals only — never blends with real fills."""
     _NO_PASS = f"({_PAPER}) AND direction != 'PASS'"

@@ -236,13 +236,19 @@ The heartbeat check is deliberately scheduled independently of the main run rath
 
 ## MCP Server
 
-`mcp_server/server.py` exposes the signal log as MCP tools so the resolved track record can be interrogated conversationally instead of by opening files or writing one-off queries. v1 is stdio transport, tools only — reads `data/leviathan.db` directly (the same database the pipeline writes), never a copy or snapshot.
+`mcp_server/server.py` exposes Leviathan's data and operational status as MCP tools so they can be interrogated conversationally instead of by opening files or writing one-off queries. v1 is stdio transport, tools only — reads `data/leviathan.db` and `backlog/backlog.json` directly (the same files the pipeline writes), never a copy or snapshot.
 
 | Tool | What it does |
 |---|---|
 | `get_signal_log` | Most recent scored paper signals (PASS excluded), newest first. Optional `limit`, `resolved_only`, `ticker` filters. |
 | `get_resolved_track_record` | The full resolved track record — every settled signal with its probability estimate and actual outcome. Same filter as the README's headline stats. |
 | `lookup_market` | Scored market data for a given `ticker` (partial match) or signal `date` (`YYYY-MM-DD`). |
+| `get_run_history` | Recent pipeline runs (markets_scanned, signals_generated, whale_flags, runtime_ms, model_used, Brier stats) — for comparing a config trial against its baseline. |
+| `get_category_breakdown` | Signal counts grouped by (category, flag_path) — surfaces capture-path bugs like a whole flag_path landing blank. |
+| `get_backlog_status` | Full backlog snapshot: counts by status, live gate-unlock metrics, and per-item detail (locked items show real-time gate progress, blocked items show what they're waiting on). |
+| `get_pipeline_health` | Live Task Scheduler health for every daily/weekly task — the same check `Leviathan-AutomationHealthCheck` runs. |
+
+Added 2026-09-01, prompted by the user (as PM, following Liam/monday.com's retirement) asking what plugins/connectors could streamline the project. Third-party Kalshi/Polymarket MCP connectors exist but were rejected — nearly all are trade-execution-capable, which conflicts directly with Leviathan's paper-only discipline, and would mean handing a real Kalshi API key to an unverified third party. Expanding this already-first-party, already-trusted, read-only server was the safer, more valuable move.
 
 ### Try it in the Inspector
 

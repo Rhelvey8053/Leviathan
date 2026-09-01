@@ -24,8 +24,13 @@ sys.path.insert(0, ROOT)
 from mcp.server.fastmcp import FastMCP
 
 from core import logger
+from backlog.engine import load_backlog
+from backlog import checker as _checker
+import scripts.automation_health_check as _ahc
 
 mcp = FastMCP("leviathan")
+
+BACKLOG_PATH = os.path.join(ROOT, "backlog", "backlog.json")
 
 
 @mcp.tool()
@@ -70,6 +75,98 @@ def lookup_market(ticker: str | None = None, date: str | None = None) -> list[di
         date: signal date in YYYY-MM-DD form, e.g. "2026-07-14".
     """
     return logger.get_market_data(ticker=ticker, date=date)
+
+
+@mcp.tool()
+def get_run_history(limit: int = 20) -> list[dict]:
+    """
+    Most recent pipeline runs, newest first -- one row per main.py
+    invocation with markets_scanned, signals_generated, whale_flags,
+    runtime_ms, model_used, and Brier stats. Use this to compare a
+    config trial (e.g. a stronger-model trial via cli_model_override)
+    against its preceding baseline window.
+
+    Args:
+        limit: max rows to return (default 20).
+    """
+    return logger.get_run_history(limit=limit)
+
+
+@mcp.tool()
+def get_category_breakdown() -> list[dict]:
+    """
+    Signal counts grouped by (category, flag_path), most common first.
+    Categories come directly from Kalshi's own event-level field -- no
+    synthetic taxonomy. A large blank-category bucket on one flag_path
+    but not others usually means a real capture-path bug, not a data
+    gap on Kalshi's side.
+    """
+    return logger.get_category_breakdown()
+
+
+@mcp.tool()
+def get_backlog_status() -> dict:
+    """
+    Full backlog snapshot: counts by status, live gate-unlock metrics
+    (the same ones every real gate-unlock decision in this project
+    reads), and per-item detail for every ready/locked/blocked item.
+    Locked items show real-time progress toward their trigger; blocked
+    items show what they're waiting on. Never a stale, separately
+    computed number -- reads backlog.json and leviathan.db live.
+    """
+    backlog = load_backlog(BACKLOG_PATH)
+    items = backlog.get("items", [])
+    metrics = _checker.compute_metrics()
+
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item.get("status", "")] = counts.get(item.get("status", ""), 0) + 1
+    counts["total"] = len(items)
+
+    def _gate_or_deps(item: dict) -> str:
+        if item["status"] == "blocked" and item.get("depends_on"):
+            return f"waiting on: {', '.join(item['depends_on'])}"
+        if item["status"] == "locked":
+            return _checker.gate_progress_str(item, metrics)
+        if item["status"] == "blocked":
+            return "manual/policy hold -- see notes"
+        return ""
+
+    def _brief(item: dict) -> dict:
+        return {
+            "id": item["id"],
+            "title": item.get("title", ""),
+            "priority": item.get("priority"),
+            "area": item.get("area", ""),
+            "summary": _checker._summarize_action(item.get("action", ""), max_len=160),
+            "gate_or_deps": _gate_or_deps(item),
+        }
+
+    by_status = {"ready": [], "locked": [], "blocked": []}
+    for item in items:
+        status = item.get("status")
+        if status in by_status:
+            by_status[status].append(_brief(item))
+
+    return {
+        "counts": counts,
+        "live_metrics": metrics,
+        "ready_items": by_status["ready"],
+        "locked_items": by_status["locked"],
+        "blocked_items": by_status["blocked"],
+    }
+
+
+@mcp.tool()
+def get_pipeline_health() -> list[dict]:
+    """
+    Live Task Scheduler health for every daily/weekly Leviathan task
+    (the same check Leviathan-AutomationHealthCheck runs). Each entry
+    has task/problem/hours_since_run/last_result -- problem is None
+    when a task is healthy, otherwise a plain-English description of
+    what's stale or missing.
+    """
+    return _ahc.check_scheduled_tasks()
 
 
 if __name__ == "__main__":
