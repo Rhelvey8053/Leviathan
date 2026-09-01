@@ -215,6 +215,7 @@ def log_selected(markets: list[dict], run_id: str) -> int:
             "title":               m.get("title", ""),
             "event_ticker":        m.get("event_ticker", ""),
             "series_ticker":       m.get("series_ticker", ""),
+            "category":            m.get("category", ""),
             "market_price":        mid,
             "our_estimate":        m.get("base_rate"),
             "edge":                m.get("raw_edge"),

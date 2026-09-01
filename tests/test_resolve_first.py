@@ -345,6 +345,31 @@ class TestLogSelected(unittest.TestCase):
         count = log_selected(markets, run_id="test04")
         self.assertEqual(count, 2)
 
+    def test_category_stored(self):
+        """log_selected carries the source market's category through to the
+        logged row -- found 2026-09-01 landing blank on 100% of real
+        RESOLVE_FIRST signals despite the source snapshot always having it."""
+        m = _market("CAT-TICK", days=5, mid=0.30)
+        m["category"] = "Politics"
+        m["_mid"] = 0.30
+        log_selected([m], run_id="test05")
+        with _logger_mod._db() as conn:
+            row = conn.execute(
+                "SELECT category FROM signals WHERE ticker = 'CAT-TICK'"
+            ).fetchone()
+        self.assertEqual(row[0], "Politics")
+
+    def test_category_blank_when_absent(self):
+        """Never fabricates a category the source market doesn't have."""
+        m = _market("CAT-NONE", days=5, mid=0.30)
+        m["_mid"] = 0.30
+        log_selected([m], run_id="test06")
+        with _logger_mod._db() as conn:
+            row = conn.execute(
+                "SELECT category FROM signals WHERE ticker = 'CAT-NONE'"
+            ).fetchone()
+        self.assertEqual(row[0], "")
+
 
 class TestPrintResolutionStatus(unittest.TestCase):
     """print_resolution_status refuses win-rate when resolved < 10."""

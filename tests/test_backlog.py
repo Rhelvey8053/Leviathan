@@ -364,8 +364,20 @@ def test_parses_and_96_items(backlog_data):
     even after Opus was live-verified (via code-path analysis) to be the
     model actually used. Fixed so model_used reflects the real override
     when one is set.
+
+    109, not 108: resolve-first-never-carried-category (2026-09-01) --
+    user feedback that category diversity felt low. Found that every
+    RESOLVE_FIRST signal (100%, 39/39) had a blank category despite the
+    source snapshot having it on all 3037 markets -- log_selected()
+    built its own signal dict field-by-field and simply never included
+    category. Separately confirmed Kalshi's real taxonomy has 15
+    categories and this codebase already sources category directly from
+    Kalshi with no synthetic taxonomy, so "match Kalshi's labels" was
+    already true by construction; the 4 categories missing from
+    signals.category are just thin market slices that haven't produced
+    a signal yet, not a code gap.
     """
-    assert len(backlog_data["items"]) == 108
+    assert len(backlog_data["items"]) == 109
 
 
 def test_all_ids_unique(backlog_data):
