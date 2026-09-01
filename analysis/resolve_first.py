@@ -133,15 +133,25 @@ def price_band_label(mid: float) -> str | None:
     return None
 
 
-def select_near_dated(scored: list[dict], max_days: int, now: datetime) -> tuple[list[dict], dict]:
+def select_near_dated(scored: list[dict], max_days: int, now: datetime,
+                       picks_per_bucket: int = 1) -> tuple[list[dict], dict]:
     """
     From scored markets, select those that:
       1. Close within max_days (inclusive)
       2. Have a real two-sided book (both yes_bid > 0 and yes_ask > 0)
       3. Have mid price in [0.05, 0.95]
 
-    Returns highest-volume market per (price_band, flag_path) pair.
-    Returns (selected, band_counts).
+    Returns up to `picks_per_bucket` highest-volume markets per (price_band,
+    flag_path) pair (default 1 -- pre-2026-08-31 behavior, unchanged unless a
+    caller explicitly asks for more). Returns (selected, band_counts).
+
+    backlog: resolve-first-top-n-per-bucket. Raising picks_per_bucket is a
+    pure selection-cardinality change over already-computed heuristic
+    outputs (flag_path/band come from scanner.score_markets(), called
+    before this function) -- no new scoring/judgment logic, so this file's
+    own HARD FREEZE holds. band_counts still reports raw two-sided/in-window
+    inventory regardless of picks_per_bucket -- it's the diagnostic signal
+    for how much real per-bucket headroom exists before raising this further.
     """
     candidates = []
     for m in scored:
@@ -164,14 +174,18 @@ def select_near_dated(scored: list[dict], max_days: int, now: datetime) -> tuple
         if m["_band"]:
             band_counts[m["_band"]] += 1
 
-    # Best (highest volume) per (band, flag_path) combination
+    # Top picks_per_bucket (highest volume) per (band, flag_path) combination.
+    # candidates is already sorted descending by volume below, so appending
+    # in that order and capping at picks_per_bucket per key gives "top-N by
+    # volume within the bucket" for free -- no per-bucket re-sort needed.
     seen: dict = {}
     for m in sorted(candidates, key=lambda x: -(float(x.get("volume_fp") or x.get("volume") or 0))):
         key = (m["_band"], m.get("flag_path") or "NONE")
-        if key not in seen:
-            seen[key] = m
+        bucket = seen.setdefault(key, [])
+        if len(bucket) < picks_per_bucket:
+            bucket.append(m)
 
-    selected = list(seen.values())
+    selected = [m for bucket in seen.values() for m in bucket]
     selected.sort(key=lambda x: (x["_band"] or "z", x["_dtc"]))
     return selected, band_counts
 
@@ -308,6 +322,7 @@ def main(config: dict | None = None) -> None:
 
     max_days  = config.get("scoring", {}).get("resolve_first_max_days", 14)
     lookback  = config.get("scoring", {}).get("resolve_first_dedup_days", 7)
+    per_bucket = config.get("scoring", {}).get("resolve_first_picks_per_bucket", 1)
 
     backup_db()
 
@@ -321,7 +336,7 @@ def main(config: dict | None = None) -> None:
     print(f"[resolve_first] After score_markets: {len(scored)} markets")
 
     now = datetime.now(timezone.utc)
-    selected, band_counts = select_near_dated(scored, max_days, now)
+    selected, band_counts = select_near_dated(scored, max_days, now, picks_per_bucket=per_bucket)
 
     print_selection_table(selected, band_counts, max_days)
 
