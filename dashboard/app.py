@@ -101,12 +101,15 @@ else:
 
 edge_vals = signals["edge"].dropna()
 if len(edge_vals) > 0:
-    col3.metric("Median Edge", f"{edge_vals.median():+.3f}",
-                help="'Edge' is the gap between what Leviathan thinks the real odds are and "
-                     "what the market is charging -- e.g. +0.10 means we think something is "
-                     "10 percentage points more likely than the market price implies. A "
-                     "bigger edge is a bigger disagreement with the market, not proof we're "
-                     f"right. (Mean: {edge_vals.mean():+.3f}, n={len(edge_vals)})")
+    col3.metric("Median Edge", f"{edge_vals.median():.3f}",
+                help="'Edge' is the SIZE of the gap between what Leviathan thinks the real "
+                     "odds are and what the market is charging -- e.g. 0.10 is a 10 "
+                     "percentage point disagreement. It doesn't say which way; 'direction' "
+                     "(YES/NO, shown per bet) is what tells you that. A bigger edge is a "
+                     "bigger disagreement with the market, not proof we're right. Edge is "
+                     "meant to always be zero or positive -- a rare negative reading here "
+                     "reflects the model's own self-reported number on that one call, not a "
+                     f"meaningful 'against us' signal. (Mean: {edge_vals.mean():.3f}, n={len(edge_vals)})")
 else:
     col3.metric("Median Edge", "no data")
 

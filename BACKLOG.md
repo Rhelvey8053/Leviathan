@@ -1,16 +1,11 @@
-=== LEVIATHAN BACKLOG UPDATE ===
-Date: 2026-08-31
-Newly Unlocked: 0
+# Leviathan Backlog
+Last updated: 2026-08-31 | Metrics: resolved=19, fills=7
 
-Live Metrics:
-resolved_count: 19
-resolved_count_per_category_max: 2
-resolved_count_per_wallet_max: 0 (not tracked yet -- smart_money_fills table missing, not a real 0)
-fills_count: 7
+Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-Full backlog: 7 ready / 6 locked / 6 blocked
-===
-----|
+## Ready (7)
+| Priority | ID | Action | Area |
+|----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
@@ -39,7 +34,7 @@ Full backlog: 7 ready / 6 locked / 6 blocked
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (87)
+## Done (88)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -96,6 +91,7 @@ Full backlog: 7 ready / 6 locked / 6 blocked
 | 3 | daily-operations-digest | Built and verified 2026-08-24. | infra |
 | 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 3 | dailyrun-missed-run-2026-08-30-silent-failure-gaps | Found 2026-08-30: main.py's scheduled 7am run launched a real process (confirmed via Task Scheduler operational event log, PID 20048, ran 21m58s) and Task Scheduler reported clean exit 0, but zero… | infra |
+| 3 | dashboard-caption-accuracy-passthrough | User feedback after the Smart Money redesign (smart-money-winning-whales-panel): a direct question ("so the streak on the table is associated with a wallet correct?") caught a real inaccuracy in my… | reporting |
 | 3 | dependabot-setup | .github/dependabot.yml added 2026-08-24, covering pip (root requirements.txt, used by CI; dashboard/requirements.txt, not CI-checked but a real dependency manifest) and github-actions… | infra |
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |

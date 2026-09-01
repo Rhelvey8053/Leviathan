@@ -344,8 +344,18 @@ def test_parses_and_96_items(backlog_data):
     pipeline already computed but never surfaced), and made the whale
     activity table's tickers readable via real market titles + clickable
     Kalshi links instead of raw ticker strings.
+
+    107, not 106: dashboard-caption-accuracy-passthrough (2026-08-31) --
+    user asked for the same code-verified accuracy pass applied to every
+    remaining dashboard page. Fixed a wallet/identity-conflation caption on
+    Signal Log matching the one just caught on Smart Money, a stale
+    hardcoded resolved-bet count on Signal Breakdown, and an inaccurate
+    edge-sign implication on the Overview page. Also surfaced (via AppTest,
+    not just reading) a real production bug: Signal Breakdown's
+    click-to-filter chart crashed on every load because on_select requires
+    Streamlit >=1.35 but the deployed environment pins 1.30.0.
     """
-    assert len(backlog_data["items"]) == 106
+    assert len(backlog_data["items"]) == 107
 
 
 def test_all_ids_unique(backlog_data):

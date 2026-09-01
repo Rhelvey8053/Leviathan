@@ -60,9 +60,11 @@ s1.metric("Bets in view", n_total)
 s2.metric("Resolved", n_resolved)
 s3.metric("Win rate", win_rate_str, help=f"n={n_resolved}" if n_resolved else "no resolved bets in view")
 s4.metric("Whale-flagged", int(filtered["whale_detected"].sum()),
-          help="A 'whale' is an unusually large trade on Kalshi's order book -- a big bettor "
-               "moving real money on this market, which can be a useful clue that someone "
-               "with information is confident.")
+          help="A 'whale' is an unusually large order on Kalshi's order book at the time this "
+               "bet was made -- real, serious money on one side. Kalshi's order book shows "
+               "size and direction only, never who placed it, so this has NO identity behind "
+               "it -- not a specific trader with a track record, just an anonymous signal that "
+               "someone was willing to bet big on this particular market.")
 
 with st.expander("Bets per day in this view", expanded=False):
     per_day = filtered.dropna(subset=["date"]).groupby(filtered["date"].dt.date).size().reset_index(name="count")

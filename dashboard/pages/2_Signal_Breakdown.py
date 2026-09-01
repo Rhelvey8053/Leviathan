@@ -83,7 +83,12 @@ else:
         on_select="rerun", selection_mode="points", key="fp_click_chart",
     )
     selected_fp = None
-    points = (event or {}).get("selection", {}).get("points", [])
+    # event is only a selection-state dict on Streamlit >=1.35 (on_select support);
+    # the deployed dashboard runs 1.30.0, where on_select/selection_mode/key are
+    # silently swallowed by plotly_chart's **kwargs and this always returns a plain
+    # DeltaGenerator instead -- guard against that so the page doesn't crash, rather
+    # than assuming the newer return shape.
+    points = event.get("selection", {}).get("points", []) if isinstance(event, dict) else []
     if points:
         selected_fp = points[0].get("x")
 
@@ -143,7 +148,12 @@ st.caption(
 )
 drift = view["market_drift_pp"].dropna()
 if drift.empty:
-    st.info("No CLV drift data for the current filter yet -- market_drift_pp is only populated for resolved signals (13/46 real bets across the full dataset right now).")
+    _total_drift_n = int(signals["market_drift_pp"].notna().sum())
+    st.info(
+        f"No CLV drift data for the current filter yet -- market_drift_pp is only populated "
+        f"for resolved signals ({_total_drift_n}/{len(signals)} real bets across the full "
+        "dataset right now)."
+    )
 else:
     fig = px.histogram(drift, nbins=20, labels={"value": "market_drift_pp"})
     fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=280)

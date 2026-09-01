@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-08-24",
+  "updated": "2026-08-31",
   "metrics_glossary": {
     "resolved_count": "total resolved signals in DB",
     "resolved_count_per_category_max": "max resolved across any single heuristic category",
@@ -8,7 +8,7 @@
     "fills_count": "count of real_fill rows",
     "api_spend_authorized": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent, so any trigger condition on it can only be satisfied by a human deliberately editing backlog.json again. Used to gate items that require real metered Anthropic API spend the user has not currently authorized (see replay-instrument-validation), so `python -m backlog.checker` can never auto-unlock them on a passing pipeline metric.",
     "graphify_corpus_shape_changed": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent. Documents graphify-skill-evaluation's real blocking condition (Leviathan's project shape changing to include a heterogeneous, non-code corpus -- research papers, notes, screenshots -- alongside the code) without inventing a fake depends_on for a non-item condition; only a human editing backlog.json again can clear it. Same sentinel pattern as api_spend_authorized, applied to a different gate.",
-  "sufficient_per_heuristic_label_resolved_data": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent. Documents empirical-base-rates-poly's real blocking condition (backtesting/base_rates.py's merge_rates() needs >=15 resolved outcomes per individual heuristic_label, e.g. SCOTUS/CONFLICT/IMPEACHMENT -- not the flag_path-level resolved_count_per_category_max, see resolved-count-per-category-max-wrong-column) without a fake trigger a vacuous empty condition would auto-clear. Only a human editing backlog.json again can clear it, once core.logger.get_stats_by_heuristic_label()'s per-label minimum is actually checked and found sufficient."
+    "sufficient_per_heuristic_label_resolved_data": "sentinel, never computed by backlog.checker.compute_metrics() -- always reads as 0/absent. Documents empirical-base-rates-poly's real blocking condition (backtesting/base_rates.py's merge_rates() needs >=15 resolved outcomes per individual heuristic_label, e.g. SCOTUS/CONFLICT/IMPEACHMENT -- not the flag_path-level resolved_count_per_category_max, see resolved-count-per-category-max-wrong-column) without a fake trigger a vacuous empty condition would auto-clear. Only a human editing backlog.json again can clear it, once core.logger.get_stats_by_heuristic_label()'s per-label minimum is actually checked and found sufficient."
   },
   "items": [
     {
@@ -332,7 +332,11 @@
       "status": "locked",
       "trigger": {
         "all": [
-          {"metric": "sufficient_per_heuristic_label_resolved_data", "op": "==", "value": 1}
+          {
+            "metric": "sufficient_per_heuristic_label_resolved_data",
+            "op": "==",
+            "value": 1
+          }
         ]
       },
       "depends_on": [],
@@ -930,7 +934,7 @@
         "all": []
       },
       "depends_on": [],
-      "action": "Investigated: ext_estimate/ext_edge/ext_n_signals/ext_alpha are 100% blank not due to a bug but because their >=2-agreeing-signals trigger has never once been met -- reconstructed _count_agreeing_signals against all 27 historical YES/NO paper signals: 15 at n=0, 12 at n=1, zero at n>=2. No code change made: loosening the threshold to fire on a single weak corroborating signal would apply the Satop\u00e4\u00e4 et al. extremizing transform outside its statistical justification (it corrects for info-dilution when averaging multiple independent forecasts -- there's no \"averaging\" with only one). The real lever is signal richness elsewhere (whale-detection recall, watchlist coverage), not this threshold -- closing as understood, not a plumbing fix.",
+      "action": "Investigated: ext_estimate/ext_edge/ext_n_signals/ext_alpha are 100% blank not due to a bug but because their >=2-agreeing-signals trigger has never once been met -- reconstructed _count_agreeing_signals against all 27 historical YES/NO paper signals: 15 at n=0, 12 at n=1, zero at n>=2. No code change made: loosening the threshold to fire on a single weak corroborating signal would apply the Satopää et al. extremizing transform outside its statistical justification (it corrects for info-dilution when averaging multiple independent forecasts -- there's no \"averaging\" with only one). The real lever is signal richness elsewhere (whale-detection recall, watchlist coverage), not this threshold -- closing as understood, not a plumbing fix.",
       "notes": "Backfilled 2026-08-17 from git history (commit d43ec5c6d) to reconcile backlog.json with the monday.com board and pre-generated-markdown BACKLOG.md history -- see docs/monday_sync_discovery.md."
     },
     {
@@ -1510,6 +1514,19 @@
       "action": "User feedback: the old dashboard/pages/4_Smart_Money.py page was not clear about what the most recent trades were, raw Kalshi tickers were unreadable, and there was no way to see or act on which wallets were actually winning. Investigated: sources.accounts.diagnose_discovery() only ever surfaced aggregate funnel COUNTS, never the actual vetted wallet list -- discover_winners()'s real per-wallet data (address, display_name, win_rate, resolved_count, resolved_cash_pnl, and each wallet's current active_markets with title/outcome/pct_pnl/url) was already computed and persisted to data/winning_accounts.json by the live daily pipeline, but had zero UI anywhere on this page. Separately, the whale-activity (streak) table showed a bare ticker column with no way to build a real Kalshi link (streak.json only ever stored the raw ticker) and no way to sort by recency (only by streak length).",
       "notes": "RESOLVED 2026-08-31. Full page redesign: (1) NEW 'Winning Whales' panel, now first on the page -- reads a new sources.accounts.read_cached_winners() (pure read-only peek at winning_accounts.json, deliberately never triggers a live discover_winners() crawl, unlike load_winners()) and renders a wallet leaderboard (win rate, resolved count, cash P&L, clickable Polymarket profile link) plus a 'Live Picks' feed: every winning wallet's current open position, market title, side, conviction %, and a clickable link, sorted by conviction descending -- the literal actionable output the user asked for. Handles the real current state (0 winning wallets qualify right now) with an honest empty-state message pointing at the funnel diagnostic, not a broken-looking blank page. (2) The existing Wallet Discovery Funnel panel is kept but reframed as supporting 'why' context for panel 1, moved second. (3) Whale Activity (renamed from 'Whale Streak Leaderboard' to disambiguate from panel 1 -- explicit new page-level caption distinguishes 'proven track record' from 'no track record, just big size') gets a new core.logger.get_market_meta_for_tickers() (resolves series_ticker/event_ticker, not just title) so every row gets a real clickable Kalshi link instead of a bare ticker, plus a 'Most recent / Longest streak' sort toggle. Since core/kalshi.py unconditionally imports the kalshi-sdk package (not installed in the dashboard's actual Python environment -- streamlit isn't in the project's own venv either), the tiny confirmed kalshi_market_url() URL-format logic is deliberately duplicated inline in the dashboard page rather than imported, avoiding a real import crash. 2 new logger tests, 3 new accounts tests, full suite green (2309 passed). Verified via Streamlit's AppTest harness against both real live data (0 winners, correctly shows the honest empty state; 101 real whale-activity rows render with working links/titles) and synthetic populated winner data (to exercise the leaderboard/live-picks tables, which real data can't currently cover) -- both clean, no exceptions, interactive sort/slider controls exercised successfully.",
       "status": "done"
+    },
+    {
+      "id": "dashboard-caption-accuracy-passthrough",
+      "title": "Dashboard-wide caption/help-text accuracy passthrough + fix broken Signal Breakdown click-filter",
+      "area": "reporting",
+      "priority": 3,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "User feedback after the Smart Money redesign (smart-money-winning-whales-panel): a direct question (\"so the streak on the table is associated with a wallet correct?\") caught a real inaccuracy in my own dashboard captions (whale-activity streak wrongly implied wallet/trader identity, when core/whales.py has zero wallet concept -- Kalshi order book exposes size/direction only, never who placed a trade). User then asked for the same code-verified passthrough on every other dashboard page. Findings, each cross-checked against actual code/live data, not assumed: (1) dashboard/app.py -- Median Edge KPI help text implied a signed/directional meaning for `edge`, but core/scorer.py designs edge as an unsigned magnitude (direction is a separate field) and live data/powerbi_export/signals.csv had genuine negative edge values (6/37 non-null) since the primary scoring path lets Claude self-report edge without server-side abs() enforcement -- caption rewritten, forced +sign removed from the number format. (2) dashboard/pages/2_Signal_Breakdown.py -- a stale hardcoded \"13/46\" resolved-count figure in the CLV-drift empty-state message, now computed live from the current signals DataFrame instead. (3) dashboard/pages/3_Signal_Log.py -- same wallet/identity-conflation pattern as the whale-streak fix, in the whale_detected KPI help text (\"a big bettor... someone with information is confident\") -- reworded to state plainly there is no identity behind the signal. (4) dashboard/pages/5_Backlog.py -- reviewed against backlog/checker.py's actual functions, no inaccuracies found. Separately, while running AppTest against 2_Signal_Breakdown.py for the first time this session (previous verification only read the file, never executed it), found a REAL production bug unrelated to wording: st.plotly_chart(..., on_select=\"rerun\") requires Streamlit >=1.35, but the dashboard's actually-deployed environment (anaconda python, confirmed via streamlit.__version__) pins 1.30.0, where on_select/selection_mode/key are silently swallowed by plotly_chart's **kwargs and the call always returns a plain DeltaGenerator, not a selection-state dict -- so the click-to-filter chart crashed the entire page on every load with real flag_path data (i.e. always). Fixed by guarding with isinstance(event, dict) so the feature no-ops safely on 1.30.0 and will light back up automatically if Streamlit is ever upgraded. Also fixed the matching false claim in dashboard/README.md (\"confirmed present in the pinned Streamlit version's signature\") and a second stale hardcoded count (\"13-16 resolved bets\", actual live count 25/54) in the same file.",
+      "notes": "Verified: all 5 dashboard files (app.py, pages/2-5) syntax-checked via ast.parse; app.py and pages 2_Signal_Breakdown.py/3_Signal_Log.py re-run via streamlit.testing.v1.AppTest (timeout=150) with zero exceptions both before and after the plotly_chart fix; full test suite (tests/, anaconda python for AppTest, project python for pytest) 2309 passed / 1 skipped, no regressions. Dashboard server restart still pending as of this commit."
     }
   ]
 }

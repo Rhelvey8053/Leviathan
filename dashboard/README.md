@@ -81,14 +81,21 @@ bar and every chart below it (edge/confidence distributions, category
 breakdown, CLV drift, the resolved-bets outcome strips) filters to that
 flag_path. Click the same bar again or use "Clear selection" to reset.
 Uses Streamlit's native `st.plotly_chart(..., on_select="rerun")` --
-confirmed present in the pinned Streamlit version's signature, and the
-empty-selection code path is exercised by the bare-mode smoke test, but
-the click interaction itself needs a real browser to fully verify.
+`on_select` requires Streamlit >=1.35, but the dashboard's actually-deployed
+environment (anaconda's Python, confirmed via `streamlit.__version__`) pins
+1.30.0, where `on_select`/`selection_mode`/`key` are silently swallowed by
+`plotly_chart`'s `**kwargs` and the call always returns a plain
+`DeltaGenerator` rather than a selection-state dict. Found live 2026-08-31
+when an `AppTest` run (never previously exercised against this page)
+crashed on `(event or {}).get(...)` -- fixed by guarding with
+`isinstance(event, dict)` so the click-to-filter feature no-ops safely on
+1.30.0 instead of crashing the page, and will light back up automatically
+if Streamlit is ever upgraded past 1.35.
 
 The resolved-bets section (Signal Breakdown) shows individual outcomes as
-strip plots rather than a binned reliability curve -- 13-16 resolved bets
-is too few for binning to mean anything without manufacturing false
-precision.
+strip plots rather than a binned reliability curve -- the resolved-bet
+count is still small enough (in the dozens, growing daily) that binning
+would manufacture false precision rather than reveal a real pattern.
 
 Overview and Smart Money previously had no interactive controls at all
 (Signal Breakdown and Signal Log already had sidebar filters/sliders).
