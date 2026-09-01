@@ -80,10 +80,12 @@ inject_css()
 page_header("Smart Money", "vetted winning wallets, live picks, and whale order-book activity")
 st.caption(
     "Two different signals live on this page, easy to conflate but not the same thing. "
-    "**Winning Whales** are Polymarket wallets with a real, resolved track record -- proven "
-    "skill, not just size. **Whale Activity** further down is unusually large Kalshi order-book "
-    "bets -- someone betting big, with no track record attached at all. Size isn't skill; "
-    "both are worth watching, for different reasons."
+    "**Winning Whales** are specific, identified Polymarket wallets with a real, resolved "
+    "track record -- proven skill, not just size. **Whale Activity** further down has NO "
+    "wallet behind it at all -- Kalshi's order book shows a trade's size and direction, never "
+    "who placed it, so a 'streak' there is tied to a MARKET (has one side kept attracting big "
+    "money, scan after scan?), not to any trader. Size isn't skill, and there's no one to "
+    "credit or discredit; both signals are worth watching, for different reasons."
 )
 
 
@@ -263,10 +265,11 @@ st.divider()
 
 st.subheader("Whale Activity")
 st.caption(
-    "A 'whale' trade is an unusually large order on Kalshi's order book -- someone betting "
-    "real, serious money on one side of a question. A 'streak' means the same big-money "
-    "direction has kept showing up scan after scan -- not a guarantee it's right, and unlike "
-    "the wallets above, there's no resolved track record behind this at all."
+    "A 'whale' trade is an unusually large order on Kalshi's order book -- real, serious "
+    "money on one side of a question. Kalshi's order book shows a trade's size and direction "
+    "only, never who placed it, so this is NOT tied to any wallet or trader -- a 'streak' "
+    "means one *market* has kept attracting the same big-money direction scan after scan, "
+    "which is different from the wallets above having a resolved track record."
 )
 
 if not _streak_data:
