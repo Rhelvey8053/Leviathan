@@ -39,7 +39,7 @@ Full backlog: 7 ready / 6 locked / 6 blocked
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (86)
+## Done (87)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -106,6 +106,7 @@ Full backlog: 7 ready / 6 locked / 6 blocked
 | 3 | signal-category-mostly-blank-despite-real-data | Found 2026-08-25 while adding a win-rate-by-category chart to the dashboard at the owner's request -- only 4 of 51 rows in signals.csv have a populated `category` (Sports, Economics, Entertainment,… | data-quality |
 | 3 | smart-money-discovery-dashboard | Built and verified 2026-08-23/24. | reporting |
 | 3 | smart-money-drift-alerts | Alert when a tracked wallet materially shifts position size or direction between daily scans. | smart-money |
+| 3 | smart-money-winning-whales-panel | User feedback: the old dashboard/pages/4_Smart_Money.py page was not clear about what the most recent trades were, raw Kalshi tickers were unreadable, and there was no way to see or act on which… | reporting |
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 3 | weekly-code-audit-exit-code-not-proof-of-report | Found 2026-08-30 while investigating that day's missed DailyRun (see dailyrun-missed-run-2026-08-30-silent-failure-gaps): Leviathan-CodeAudit's Sunday run showed LastTaskResult=0 in Task Scheduler,… | infra |
 | 3 | wire-llm-model-cli-flag | Second, independent lever from the same user request ('expand scope... | infra |

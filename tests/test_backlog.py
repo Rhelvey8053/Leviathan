@@ -336,8 +336,16 @@ def test_parses_and_96_items(backlog_data):
     ready-not-executed item -- a heavier model consumes more Pro-plan
     usage/session budget per call, a real trade-off against "faster" that
     needed its own explicit decision point rather than a bundled default.
+
+    106, not 105: smart-money-winning-whales-panel (2026-08-31) -- user
+    feedback that the Smart Money dashboard page's tickers were unreadable
+    and there was no view of/action on actually-winning wallets. Added a
+    Winning Whales leaderboard + live-picks feed (reading data the live
+    pipeline already computed but never surfaced), and made the whale
+    activity table's tickers readable via real market titles + clickable
+    Kalshi links instead of raw ticker strings.
     """
-    assert len(backlog_data["items"]) == 105
+    assert len(backlog_data["items"]) == 106
 
 
 def test_all_ids_unique(backlog_data):
