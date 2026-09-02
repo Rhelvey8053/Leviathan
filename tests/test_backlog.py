@@ -387,8 +387,20 @@ def test_parses_and_96_items(backlog_data):
     that) with 4 new read-only tools: get_run_history,
     get_category_breakdown, get_backlog_status, get_pipeline_health --
     each a thin wrapper over logic that already existed elsewhere.
+
+    111, not 110: research-diligence-before-pass (2026-09-01) -- user
+    asked to stop passing on bets and do additional research instead.
+    Separated into two asks before building either: "research harder
+    before PASS" (safe, built) vs. "never pass, always call a side"
+    (would inject noise into the exact track record this project uses
+    to measure real skill -- declined, matching core/sizing.py's own
+    documented precedent that edge-magnitude sizing made hypothetical
+    P&L ~4x worse). Added a RESEARCH DILIGENCE paragraph to
+    SYSTEM_PROMPT requiring genuine multi-search effort before PASS,
+    explicitly without lowering the evidence bar the existing 47
+    calibration rules set.
     """
-    assert len(backlog_data["items"]) == 110
+    assert len(backlog_data["items"]) == 111
 
 
 def test_all_ids_unique(backlog_data):

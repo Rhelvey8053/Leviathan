@@ -33,7 +33,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (92)
+## Done (93)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -99,6 +99,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | monday-com-retired-backlog-dashboard-page | User's monday.com trial expired 2026-08-30. | infra |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
 | 3 | replay-runner-crash-on-malformed-cli-response | Found 2026-08-28 running a replay-instrument-validation corpus-build batch: it crashed with 'str' object has no attribute 'keys'. | validation |
+| 3 | research-diligence-before-pass | User request: "I don't want to pass on bets... | calibration |
 | 3 | resolve-first-never-carried-category | User feedback: dashboard/live category diversity felt low. | data-quality |
 | 3 | resolved-count-per-category-max-wrong-column | Found 2026-08-27 while fixing empirical-base-rates-poly's gating (see that item's notes). | calibration |
 | 3 | signal-category-mostly-blank-despite-real-data | Found 2026-08-25 while adding a win-rate-by-category chart to the dashboard at the owner's request -- only 4 of 51 rows in signals.csv have a populated `category` (Sports, Economics, Entertainment,… | data-quality |

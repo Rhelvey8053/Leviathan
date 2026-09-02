@@ -260,6 +260,26 @@ def test_empty_markets_returns_empty_prompt():
 
 # ─── Calibration rules in system prompt ──────────────────────────────────────
 
+def test_system_prompt_has_research_diligence_instruction():
+    """
+    Added 2026-09-01 at the user's request ("don't want to pass without
+    additional research"): requires actual search effort before PASS,
+    without lowering the evidence bar the numbered rules set -- a
+    genuine no-catalyst-found PASS still passes, an under-researched
+    one no longer should.
+    """
+    sp = scorer.SYSTEM_PROMPT
+    assert "RESEARCH DILIGENCE" in sp
+    assert "does NOT lower the evidence bar" in sp
+    assert "CROSS-MARKET" in sp.split("RESEARCH DILIGENCE")[1][:600]
+
+
+def test_research_diligence_precedes_calibration_rules():
+    """The diligence instruction must be read before Rule 1, not after."""
+    sp = scorer.SYSTEM_PROMPT
+    assert sp.index("RESEARCH DILIGENCE") < sp.index("CALIBRATION RULES")
+
+
 def test_system_prompt_has_ipo_rule():
     assert "IPO ANNOUNCEMENT" in scorer.SYSTEM_PROMPT
     assert "confidentially filed" in scorer.SYSTEM_PROMPT.lower()
