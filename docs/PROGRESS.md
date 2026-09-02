@@ -2,6 +2,216 @@
 
 ---
 
+## 2026-09-01/02 — HANDOFF: read this first if picking up a new session
+
+**Start here for continuity.** This entry exists specifically so a fresh
+Claude Code session can pick up mid-stream without re-deriving context.
+The narrative below it (and the 08-20 gap before this section) covers
+what happened; this top block is "what to actually do next."
+
+### Claude's role: PM for Leviathan (new, as of this session)
+
+The user retired the Liam/monday.com PM integration (trial expired
+2026-08-30) and, after a direct back-and-forth about scope, designated
+Claude as its replacement — not a separate spawned agent, this ongoing
+session role. **Hard boundaries, agreed explicitly, apply regardless of
+how the request is phrased:**
+- Paper-only until profitability is actually proven — no real trade
+  execution, ever (also a hard constraint on how Claude operates, not
+  just project policy).
+- No metered Anthropic API spend without fresh, explicit per-instance
+  authorization (unchanged from [[feedback-leviathan-no-api-billing]]
+  memory / this file's 2026-08-19 entry below).
+- Don't loosen the statistical/sample-size validation gates
+  (`resolved_count` thresholds, `edge_threshold`, etc.) just to produce
+  results faster — advancing the project means feeding the gates real
+  data faster, not moving them. Any such change needs explicit user
+  sign-off with the tradeoff stated plainly, not silent implementation.
+- Mandate otherwise: proactively advance ready backlog items, run/
+  monitor the pipeline, investigate anomalies, run authorized
+  experiments to completion, surface recommendations — the autonomy
+  the user explicitly wants, just not over money or the gates.
+
+This is also saved to memory (`feedback_leviathan_pm_role_boundaries`)
+so it persists even if this file isn't read first.
+
+### What's actively running right now (check these first)
+
+1. **Replay-corpus build toward n=300** — `backtesting.replay_runner
+   --max-markets 180`, launched via OS-level `&`/`disown` detachment
+   (not the Bash tool's own `run_in_background`, which does not survive
+   session/task boundaries — confirmed the hard way, twice, earlier
+   this session). PID 263 as of this entry. Last known count:
+   **219/300** in `data/leviathan.db`'s `replay_signals` table. Pace has
+   been uneven (roughly 9-15 new rows per ~50min check cycle, with
+   occasional longer stalls) — check via `python -c "import sqlite3;
+   print(sqlite3.connect('data/leviathan.db').execute('SELECT COUNT(*)
+   FROM replay_signals').fetchone()[0])"` or the new
+   `mcp_server` tool surface (see below). **When it reaches 300**: call
+   `backtesting.replay_runner.export_and_report()` directly to
+   regenerate `data/replay_export/*.csv` and
+   `reports/replay_backtest_report.txt`, then report the Brier/hit-rate
+   summary — but do NOT present the raw hit rate as a profitability
+   signal. A preliminary check at n=210 found 88.9% raw hit rate on
+   directional calls vs. 42.1% on the live paper track record — almost
+   certainly look-ahead contamination (Claude may already know how
+   these historical, already-settled markets resolved), exactly the
+   structural limitation `replay_runner.py`'s own docstring warns about.
+   This corpus's real purpose is `replay-instrument-validation` (testing
+   the grading machinery itself), not a profitability readout, once
+   n>=300 is reached.
+2. **Bounded Opus-vs-Sonnet trial** (`trial-stronger-model-main-scoring`,
+   user-authorized) — `config.json`'s `llm.cli_model_override` is set to
+   `"opus"` (confirmed live-accessible under the Pro plan at no extra
+   cost; Fable 5/5.1 was checked and rejected for this — it requires
+   separate metered credits not covered by the flat-rate plan). Baseline
+   captured from 7 pre-trial Sonnet runs: mean `signals_generated`=0.29,
+   `whale_flags`=13.6, `runtime_ms`=650506 (~10.8min), `markets_scanned`
+   =2969. **Trial run 1** landed 2026-09-01T22:09:26Z (run_id
+   `865ba8a5`): signals_generated=1, whale_flags=7, runtime_ms=339040
+   (~5.65min, notably faster than baseline — n=1, could easily be normal
+   variance, not a real speed signal). Target is 5-7 total runs,
+   accumulated via the **normal daily schedule only** — do not manually
+   trigger extra `main.py` runs, since Opus calls share the same Pro/CLI
+   usage budget as the concurrent replay-corpus build. After 5-7 runs:
+   compare against baseline, then set `cli_model_override` back to
+   `null` regardless of outcome (bounded measurement, not a default
+   change) — see the item's notes in `backlog/backlog.json` for the
+   exact plan.
+3. **RESEARCH DILIGENCE prompt change** (commit `0fb2148`) — added to
+   `core/scorer.py`'s `SYSTEM_PROMPT`, requiring genuine multi-search
+   effort before a market gets scored PASS, without lowering the
+   evidence bar the existing 47 calibration rules set. **The next
+   scheduled `main.py` run is simultaneously Opus-trial run 2 AND the
+   first live run under this new prompt** — when it lands, check both
+   effects, but don't over-read n=1 on either axis.
+4. **`model_used` field is now trustworthy again** (commit `a495ea0`) —
+   it used to read a dead cosmetic config key; it now reflects
+   `cli_model_override` when the `cli` backend has one set. Trial run
+   1's own DB row still shows the stale label (predates the fix) but was
+   confirmed via code-path analysis to have actually used Opus.
+
+Query all of the above without one-off SQL by using the MCP server's
+new v2 tools (`mcp_server/server.py`, commit `6492ce3`):
+`get_run_history`, `get_category_breakdown`, `get_backlog_status`,
+`get_pipeline_health` — each wraps logic that already existed
+(`backlog.checker.compute_metrics`, `automation_health_check.
+check_scheduled_tasks`, etc.), never a separately-computed number.
+
+### What changed this session (2026-08-20 through 2026-09-02) — no PROGRESS.md entries existed for this whole window before now
+
+**Smart Money dashboard redesign** — user feedback that the page didn't
+make clear what the most recent trades were and gave no way to act on
+actually-winning wallets. Added a Winning Whales leaderboard + live-picks
+feed (surfacing wallet data `sources/accounts.py` already computed but
+never rendered), made the whale-activity table's tickers readable via
+real market titles + clickable Kalshi links. Verified via Streamlit's
+`AppTest` harness against both real and synthetic data.
+
+**Dashboard-wide caption accuracy passthrough** (commit `4bcca10`,
+prompted directly by the user catching a real inaccuracy: "so the streak
+on the table is associated with a wallet correct?" — it wasn't;
+`core/whales.py` has zero wallet concept, Kalshi's order book exposes
+size/direction only, never identity). Applied the same
+verify-against-actual-code rigor to every remaining dashboard page:
+fixed an edge-sign implication on Overview, a stale hardcoded resolved-
+count on Signal Breakdown, a matching wallet-identity-conflation caption
+on Signal Log. **Found a real production bug in the process, not just a
+wording issue**: Signal Breakdown's click-to-filter chart crashed on
+every load with real data because `st.plotly_chart(on_select=...)`
+requires Streamlit >=1.35, but the actually-deployed environment
+(anaconda's Python, not the project's own) pins 1.30.0, where
+`on_select` silently falls into `**kwargs` and the call returns a plain
+`DeltaGenerator` instead of a selection-state dict. Fixed with an
+`isinstance` guard.
+
+**Task Scheduler outage, caught and mis-attributed once before getting
+it right** (commit `5b76aec`) — `ResolveFirst`, `GateNotifier`,
+`PositionReconciliation`, and `AutomationHealthCheck` all silently failed
+to launch on 2026-09-01 despite `DailyRun`/`SmartMoneyScan` firing
+normally that morning; even `WakeCatchup` (the dedicated safety net for
+exactly this) never fired via either of its triggers. Manually ran the
+missed scripts directly, bypassing Task Scheduler. **First attributed
+this to the machine sleeping through the window — wrong, and corrected
+in the same session**: a second background process (the replay-corpus
+build) ran continuously through the exact same window and produced 53
+real scored rows, proving the machine was awake throughout. Logged as
+new evidence on the existing open item
+`task-scheduler-manual-trigger-stuck-queued` — confirms the known
+flakiness also affects natural/wake-event triggers, not just manual
+`Start-ScheduledTask` calls as previously documented.
+
+**Resolve-first acceleration + model-override wiring** (landed just
+before this visible window, referenced by later work) —
+`resolve_first_picks_per_bucket` raised 1→3, near-dated fetch ceiling
+raised 200→300 markets, and a real bug fixed: `core/scorer.py`'s live
+CLI-backend scoring call never passed `--model`, so `config.llm.model`
+was completely dead for the live pipeline (only fed the disabled
+metered-API backend). Added the new, separate `config.llm.
+cli_model_override` key (defaults `null`, live-verified that a bare
+`claude --print` already defaults to `claude-sonnet-5`, so leaving it
+unset changes nothing) — this is the mechanism the Opus trial above now
+uses.
+
+**`resolve_first.py` was silently dropping category on every signal it
+logged** (commit `6c06b02`, found from user feedback that category
+diversity "felt low") — 100% of RESOLVE_FIRST-flagged signals (39/39)
+had a blank category despite the source snapshot having it on all 3037
+markets; `log_selected()` built its signal dict field-by-field and
+simply never included `category`. One-line fix. Separately confirmed
+(not a bug): Kalshi's real taxonomy has 15 categories, already sourced
+directly with no synthetic mapping anywhere in this codebase; the 4
+categories never seen in `signals.category` (Social, Health, World,
+Transportation) are just thin market slices (<=19 open markets each)
+that haven't produced a flagged signal yet.
+
+**Confidence-scaled bet sizing already exists** — investigated in
+response to the user asking for it; turned out `core/sizing.py` was
+already built 2026-07-27, correctly gated behind
+`resolved_count>=30 AND resolved_count_per_category_max>=15` (currently
+~22/3, not yet eligible) plus a manual opt-in flag (off). No new
+engineering needed on the mechanism itself, just more resolved samples —
+which is exactly what the resolve-first acceleration above, and the PM
+role generally, are already working toward.
+
+**MCP server v2** (commit `6492ce3`) — see "what's running now" above.
+Prompted by the user, as PM, asking what new plugins/connectors could
+help. Third-party Kalshi/Polymarket MCP connectors were researched and
+explicitly rejected (trade-execution-capable, conflicts with paper-only
+discipline, would hand a real API key to an unverified third party).
+
+**Research diligence prompt change** — see "what's running now" above.
+Prompted by the user asking to stop passing on bets; that request was
+split before building anything into "research harder before PASS"
+(built) vs. "never pass, always call a side" (declined — `core/
+sizing.py`'s own docstring already documents the same failure mode:
+edge-magnitude sizing made hypothetical P&L ~4x worse on real data at
+low sample size; forcing a call with no real edge would inject the same
+noise into the exact track record this project uses to measure whether
+skill exists at all).
+
+**Unrelated side task, same session**: a 10-repo investigation for the
+user (`C:\Users\Administrator\Downloads\repo-investigation-handoff.md`),
+reports written to `..\repo-investigation\reports\`. Top picks:
+[herdr](https://github.com/herdrdev/herdr) (persistent cross-platform
+runtime for coding-agent terminals — solves the exact background-
+process-survives-disconnect problem hit twice this session with the
+replay-corpus build and an earlier dashboard-server restart), claudex-
+loop (Claude Code skill, adversarial cross-model plan review before code
+exists), and deepseek-harness (novel "everything is a plugin" agent-
+harness architecture, worth a read even if never adopted). **herdr was
+then actually installed** at `C:\Users\Administrator\AppData\Local\
+Programs\herdr\` and added to the user's PATH, after a clean security
+sweep (byte-exact match to the official GitHub release, Windows Defender
+full scan found nothing, Microsoft-signed ConPTY components verified).
+Not yet used for anything in this project — worth trying against
+Leviathan's own background-job-persistence pain point directly.
+
+Backlog stands at **111 items** as of this entry (6 ready / 6 locked /
+6 blocked / 93 done). Current HEAD commit: `0fb2148`.
+
+---
+
 ## 2026-08-19 — Codebase audit, PowerBI retirement, hard runtime spend guard
 
 Asked for a project-wide look for bloat and conflicting systems. Found and
