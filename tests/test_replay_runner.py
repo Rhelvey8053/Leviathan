@@ -169,6 +169,30 @@ def test_row_from_scored_pass_direction_has_no_hit():
     assert row["hit"] is None
 
 
+def test_row_from_scored_persists_market_price_and_our_estimate():
+    """
+    backlog: replay-instrument-validation. edge/direction alone can't
+    reconstruct a baseline (market-price-as-forecast) Brier score --
+    both fields already exist in `cs` (Claude's own scored dict) at this
+    point, just weren't being carried into the persisted row.
+    """
+    enriched = _enriched("T1")
+    cs = {"direction": "yes", "confidence": "high", "edge": 0.2, "reasoning": "r",
+          "market_price": 0.35, "our_estimate": 0.55}
+    row = rr._row_from_scored(enriched, cs, "YES", datetime(2026, 5, 1, tzinfo=timezone.utc))
+    assert row["market_price"] == 0.35
+    assert row["our_estimate"] == 0.55
+
+
+def test_row_from_scored_market_price_none_when_absent():
+    """Never fabricates a price the scored dict doesn't have."""
+    enriched = _enriched("T1")
+    cs = {"direction": "yes", "confidence": "high", "edge": 0.2, "reasoning": "r"}
+    row = rr._row_from_scored(enriched, cs, "YES", datetime(2026, 5, 1, tzinfo=timezone.utc))
+    assert row["market_price"] is None
+    assert row["our_estimate"] is None
+
+
 # ─── run_replay integration ─────────────────────────────────────────────────
 
 def test_run_replay_forces_cli_backend(tmp_db, monkeypatch):
@@ -200,7 +224,8 @@ def test_run_replay_persists_scored_rows(tmp_db, monkeypatch):
                         lambda *a, **k: _enriched("T1"))
     monkeypatch.setattr(rr.scorer, "score_markets",
                         lambda markets, config, now=None: (
-                            [{"ticker": "T1", "direction": "YES", "confidence": "HIGH", "edge": 0.2, "reasoning": "r"}], {}
+                            [{"ticker": "T1", "direction": "YES", "confidence": "HIGH", "edge": 0.2,
+                              "reasoning": "r", "market_price": 0.35, "our_estimate": 0.55}], {}
                         ))
     summary = rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
     assert summary["scored"] == 1
@@ -210,6 +235,11 @@ def test_run_replay_persists_scored_rows(tmp_db, monkeypatch):
     assert row is not None
     assert row["direction"] == "YES"
     assert row["hit"] == 1
+    # backlog: replay-instrument-validation -- needed to compute a baseline
+    # (market-price-as-forecast) Brier score, which edge/direction alone
+    # can't reconstruct.
+    assert row["market_price"] == 0.35
+    assert row["our_estimate"] == 0.55
 
 
 def test_run_replay_stops_on_cost_ceiling(tmp_db, monkeypatch):

@@ -120,10 +120,23 @@ def _init_table(db_path: str = DB_PATH) -> None:
                 time_horizon        TEXT,
                 resolved_yes        INTEGER,
                 hit                 INTEGER,
-                scored_at           TEXT
+                scored_at           TEXT,
+                market_price        REAL,
+                our_estimate        REAL
             );
             CREATE INDEX IF NOT EXISTS idx_replay_signals_close ON replay_signals(close_time);
         """)
+        # backlog: replay-instrument-validation. market_price/our_estimate were
+        # never persisted even though both exist in `cs` (Claude's own scored
+        # dict) at row-construction time -- edge and direction alone can't
+        # reconstruct a baseline (market-price-as-forecast) Brier score, which
+        # this item's "Brier computes correctly across the full price range"
+        # clause needs. Additive migration for any DB that already has the
+        # table without these columns (mirrors core.logger._add_col's own
+        # idempotent pattern).
+        from core.logger import _add_col
+        for col in ("market_price REAL", "our_estimate REAL"):
+            _add_col(conn, col, table="replay_signals")
 
 
 def _candidate_tickers(db_path: str, limit: int) -> list[dict]:
@@ -194,6 +207,8 @@ def _row_from_scored(enriched: dict, cs: dict, result: str, as_of_dt: datetime) 
         "resolved_yes":        int(resolved_yes),
         "hit":                 None if hit is None else int(hit),
         "scored_at":           datetime.now(timezone.utc).isoformat(),
+        "market_price":        cs.get("market_price"),
+        "our_estimate":        cs.get("our_estimate"),
     }
 
 
@@ -255,9 +270,11 @@ def run_replay(config: dict, max_markets: int = DEFAULT_MAX_MARKETS, db_path: st
             conn.execute(
                 "INSERT OR IGNORE INTO replay_signals "
                 "(ticker, as_of_date, close_time, reconstruction_tier, direction, "
-                " confidence, edge, reasoning, flag_path, time_horizon, resolved_yes, hit, scored_at) "
+                " confidence, edge, reasoning, flag_path, time_horizon, resolved_yes, hit, scored_at, "
+                " market_price, our_estimate) "
                 "VALUES (:ticker, :as_of_date, :close_time, :reconstruction_tier, :direction, "
-                ":confidence, :edge, :reasoning, :flag_path, :time_horizon, :resolved_yes, :hit, :scored_at)",
+                ":confidence, :edge, :reasoning, :flag_path, :time_horizon, :resolved_yes, :hit, :scored_at, "
+                ":market_price, :our_estimate)",
                 row,
             )
         summary["scored"] += 1
