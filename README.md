@@ -44,6 +44,8 @@ Each daily run executes an 8-step pipeline:
 
 **Price-blind shadow arm:** `core/blind_scorer.py` can score a sampled subset of markets with no market price shown and none of the price-anchoring calibration rules, as a counterfactual for whether the anchored scorer's use of price adds real signal over the price itself. Off by default (`config.blind_arm.enabled`) since every run it fires spends real metered API cost, unlike the main scan's CLI/Pro-subscription path.
 
+**Cross-model corroboration:** `core/cross_model.py` can get an independent second opinion from a *different* model family (never Claude) via a local [OmniRoute](https://github.com/diegosouzapw/OmniRoute) gateway, for the small shortlisted-pick set only — same call site as citations grounding. Purely auxiliary: persisted to its own `signals.cross_model_opinion` column, never blended into direction/confidence/edge, never read by any win-rate/Brier calculation. Off by default (`config.cross_model.enabled`). Uses OmniRoute's keyless `auto` route by default — zero API key, zero signup — so unlike the price-blind arm above, turning it on costs nothing in metered spend; the real cost is needing OmniRoute running locally (`npm i -g omniroute`, then `omniroute` in its own terminal — not a hard Leviathan dependency, the pipeline runs unchanged if it's never running) and a real, live-verified ~90s round-trip latency, since the free backend is a genuine reasoning model, not a trivial completion.
+
 ---
 
 ## What This Demonstrates

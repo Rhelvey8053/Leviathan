@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-09-03 | Metrics: resolved=22, fills=7
+Last updated: 2026-09-03 | Metrics: resolved=25, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
@@ -33,7 +33,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (94)
+## Done (95)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -110,6 +110,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 3 | weekly-code-audit-exit-code-not-proof-of-report | Found 2026-08-30 while investigating that day's missed DailyRun (see dailyrun-missed-run-2026-08-30-silent-failure-gaps): Leviathan-CodeAudit's Sunday run showed LastTaskResult=0 in Task Scheduler,… | infra |
 | 3 | wire-llm-model-cli-flag | Second, independent lever from the same user request ('expand scope... | infra |
+| 4 | cross-model-corroboration | User pushback ('I don't see how this wouldn't benefit the project and you're rejecting it entirely') on an earlier OmniRoute rejection was correct to push on -- that rejection conflated two different… | calibration |
 | 4 | kalshi-sdk-migration-implementation | Built the adapter, but not the field-by-field typed-model remapping the Ready-item scope note called for. | infra |
 | 4 | net-edge-fee-depth-model | net_edge_after_fee priced a trade off the top-of-book quote only -- it had no idea whether the visible order book could actually fill unit_size contracts on the side the picked direction needed. | execution |
 | 4 | per-heuristic-scorecard | get_stats_by_heuristic_label() (core/logger.py) already existed -- win rate/P&L/avg_edge grouped by heuristic_label -- and was already wired into a real display in analysis/calibration.py's "BY… | reporting |

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core import kalshi, scanner, whales, scorer, logger, report
+from core import kalshi, scanner, whales, scorer, logger, report, cross_model
 from core.fees import kalshi_fee
 from sources import polymarket, external_markets, accounts
 from analysis.smart_money_scan import run_smart_money_scan, save_report as save_sm_report
@@ -133,6 +133,13 @@ def _rescore_shortlist_for_clean_sources(
     A citations-grounding failure is non-fatal and independent of the
     `sources` re-score above: it never removes or downgrades `sources`,
     it just leaves `citations` unset on that signal.
+
+    Also mutates `cross_model_opinion` (backlog: cross-model-corroboration)
+    via an independent, different-model second opinion (never Claude) --
+    off by default, see core.cross_model.get_opinion's own docstring for
+    the full off-switch/failure-mode contract. Purely auxiliary: never
+    read by any win-rate/Brier calculation, never blended into direction/
+    confidence/edge.
     """
     shortlist = report.determine_top_shortlist(final_signals, config)
     markets_by_ticker = {m.get("ticker", ""): m for m in flagged_markets}
@@ -165,6 +172,16 @@ def _rescore_shortlist_for_clean_sources(
                             (cite_info.get("output_tokens", 0) or 0)
             except Exception as e:
                 print(f"      Citations grounding FAILED for {sig.get('ticker', '?')} (non-fatal): {e}")
+            # backlog: cross-model-corroboration. get_opinion() already
+            # no-ops to None when config.cross_model.enabled is falsy (the
+            # live default), so this is a zero-cost call to add here even
+            # while the feature stays off pipeline-wide.
+            try:
+                opinion = cross_model.get_opinion(market, fresh_score, config)
+                if opinion:
+                    sig["cross_model_opinion"] = opinion
+            except Exception as e:
+                print(f"      Cross-model corroboration FAILED for {sig.get('ticker', '?')} (non-fatal): {e}")
 
     return {
         "shortlist_size": len(shortlist),

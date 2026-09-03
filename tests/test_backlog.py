@@ -416,8 +416,18 @@ def test_parses_and_96_items(backlog_data):
     to --output-format json to capture real token/cache/cost data --
     main.py needed zero changes, it already had the wiring, just never
     real data to wire.
+
+    113, not 112: cross-model-corroboration (2026-09-02) -- user pushed
+    back on the earlier OmniRoute rejection, correctly: that rejection
+    only applied to rerouting Claude Code's own auth through it, not to
+    using it as a completely separate, unrelated model endpoint. Built
+    core/cross_model.py's get_opinion() -- an independent second
+    opinion via OmniRoute's keyless free route, off by default, never
+    blended into direction/confidence/edge, persisted to its own
+    signals.cross_model_opinion column. Live-verified against a real
+    running OmniRoute server, not just mocks.
     """
-    assert len(backlog_data["items"]) == 112
+    assert len(backlog_data["items"]) == 113
 
 
 def test_all_ids_unique(backlog_data):

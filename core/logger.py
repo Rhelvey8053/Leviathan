@@ -236,6 +236,20 @@ def _init_db() -> None:
             # reached or found no citations (see _rescore_shortlist_for_
             # clean_sources's non-fatal try/except in main.py).
             "citations             TEXT",
+            # backlog: cross-model-corroboration. An independent second
+            # opinion from a different, unrelated model (via a local
+            # OmniRoute gateway, keyless free routing -- never Claude, never
+            # blended into direction/confidence/edge). JSON-encoded like
+            # `sources`/`citations` above: {"model", "direction",
+            # "estimate", "reasoning"} or NULL. Only ever populated for the
+            # small shortlisted-pick set (see core.cross_model.get_opinion,
+            # called from main.py's shortlist re-score step, same place
+            # ground_citations runs) -- never for the full scan. Off by
+            # default (config.cross_model.enabled=false); a corroboration
+            # call failing (gateway not running, backend timeout) is
+            # non-fatal and never costs the pick anything, same discipline
+            # as ground_citations's own try/except.
+            "cross_model_opinion   TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -367,9 +381,10 @@ def log_signal(signal: dict) -> None:
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
-                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations)
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
+                 cross_model_opinion)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -432,6 +447,7 @@ def log_signal(signal: dict) -> None:
                 1 if signal.get("liquidity_checked") else 0,
                 1 if signal.get("liquidity_thin") else 0,
                 json.dumps(signal.get("citations") or []),
+                json.dumps(signal["cross_model_opinion"]) if signal.get("cross_model_opinion") else None,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -461,9 +477,10 @@ def log_pass(signal: dict) -> None:
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
                  poly_price,poly_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
-                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations)
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
+                 cross_model_opinion)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -532,6 +549,7 @@ def log_pass(signal: dict) -> None:
                 1 if signal.get("liquidity_checked") else 0,
                 1 if signal.get("liquidity_thin") else 0,
                 json.dumps(signal.get("citations") or []),
+                json.dumps(signal["cross_model_opinion"]) if signal.get("cross_model_opinion") else None,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")

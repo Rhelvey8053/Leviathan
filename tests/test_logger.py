@@ -627,6 +627,51 @@ def test_log_signal_stores_watchlist_flag(tmp_db):
     assert row["watchlist_signal"] == 1
 
 
+# ─── cross_model_opinion (backlog: cross-model-corroboration) ────────────────
+
+def test_log_signal_stores_cross_model_opinion_as_json(tmp_db):
+    """log_signal must JSON-encode a present cross_model_opinion dict."""
+    logger.log_signal({
+        "ticker": "KXCM-01", "title": "Test", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES", "confidence": "MED",
+        "run_id": "r1",
+        "cross_model_opinion": {"model": "big-pickle", "direction": "NO",
+                                 "estimate": 0.3, "reasoning": "disagree"},
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT cross_model_opinion FROM signals WHERE ticker='KXCM-01'").fetchone()
+    import json as _json
+    assert _json.loads(row["cross_model_opinion"]) == {
+        "model": "big-pickle", "direction": "NO", "estimate": 0.3, "reasoning": "disagree",
+    }
+
+
+def test_log_signal_cross_model_opinion_null_when_absent(tmp_db):
+    """Never fabricates a corroboration opinion the caller didn't provide --
+    NULL in the DB, not an empty dict/string."""
+    logger.log_signal({
+        "ticker": "KXCM-02", "title": "Test", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES", "confidence": "MED",
+        "run_id": "r1",
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT cross_model_opinion FROM signals WHERE ticker='KXCM-02'").fetchone()
+    assert row["cross_model_opinion"] is None
+
+
+def test_log_pass_stores_cross_model_opinion_as_json(tmp_db):
+    logger.log_pass({
+        "ticker": "KXCM-03", "title": "Test", "market_price": 0.40,
+        "our_estimate": 0.40, "edge": 0.0, "confidence": "LOW", "run_id": "r1",
+        "cross_model_opinion": {"model": "big-pickle", "direction": "PASS",
+                                 "estimate": 0.4, "reasoning": "no edge either"},
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT cross_model_opinion FROM signals WHERE ticker='KXCM-03'").fetchone()
+    import json as _json
+    assert _json.loads(row["cross_model_opinion"])["direction"] == "PASS"
+
+
 def test_log_signal_flag_path_none(tmp_db):
     """log_signal must accept flag_path=None (no flag path set)."""
     logger.log_signal({
