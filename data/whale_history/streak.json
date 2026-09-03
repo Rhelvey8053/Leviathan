@@ -11,13 +11,13 @@
   },
   "KXFDAAPPROVE-MDMA-27JAN01": {
     "direction": "NO",
-    "streak": 35,
-    "last_updated": "2026-08-25T01:58:13.655220+00:00"
+    "streak": 49,
+    "last_updated": "2026-09-02T14:15:37.647643+00:00"
   },
   "KXRECOGSOMALI-29-27": {
     "direction": "NO",
-    "streak": 35,
-    "last_updated": "2026-08-25T01:58:13.655220+00:00"
+    "streak": 50,
+    "last_updated": "2026-09-03T15:56:21.394244+00:00"
   },
   "KXAGICO-COMP-26Q3": {
     "direction": "YES",
@@ -31,28 +31,28 @@
   },
   "KXNFLRETIRE-LJOHNSON65-2627": {
     "direction": "NO",
-    "streak": 13,
-    "last_updated": "2026-08-24T16:00:50.121233+00:00"
+    "streak": 25,
+    "last_updated": "2026-09-03T15:56:21.394244+00:00"
   },
   "KXTVSEASONRELEASETHELASTOFUS-27-JAN": {
     "direction": "NO",
-    "streak": 25,
-    "last_updated": "2026-08-21T19:39:01.894193+00:00"
+    "streak": 27,
+    "last_updated": "2026-08-28T15:12:57.956250+00:00"
   },
   "KXIMPEACHCABINET-27JAN01": {
     "direction": "NO",
-    "streak": 14,
-    "last_updated": "2026-08-16T03:39:31.518631+00:00"
+    "streak": 16,
+    "last_updated": "2026-08-28T15:12:57.956250+00:00"
   },
   "KXARTISTCOLLABTHUGANDGUNNA-30-2027": {
     "direction": "NO",
-    "streak": 11,
-    "last_updated": "2026-08-04T19:00:51.697327+00:00"
+    "streak": 12,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
   },
   "KXALBUMRELEASEDATEBEY-NEW-JAN01-27": {
     "direction": "NO",
-    "streak": 14,
-    "last_updated": "2026-08-19T13:13:24.574892+00:00"
+    "streak": 25,
+    "last_updated": "2026-09-03T15:56:21.394244+00:00"
   },
   "KXCABLEAVE-26MAY22-26SEP": {
     "direction": "YES",
@@ -60,9 +60,9 @@
     "last_updated": "2026-08-17T15:08:41.574803+00:00"
   },
   "KXVETOOVERRIDE-29JAN20-27": {
-    "direction": "YES",
-    "streak": 11,
-    "last_updated": "2026-08-25T01:58:13.655220+00:00"
+    "direction": "NO",
+    "streak": 14,
+    "last_updated": "2026-09-03T15:56:21.394244+00:00"
   },
   "KXCHINAEUV-30-27JAN01": {
     "direction": "NO",
@@ -91,13 +91,13 @@
   },
   "KXAGICO-COMP-26Q4": {
     "direction": "YES",
-    "streak": 20,
-    "last_updated": "2026-08-25T01:58:13.655220+00:00"
+    "streak": 35,
+    "last_updated": "2026-09-03T15:56:21.394244+00:00"
   },
   "KXMLBDEBUT-FARIAS-26NOV01": {
     "direction": "YES",
-    "streak": 19,
-    "last_updated": "2026-08-24T16:00:50.121233+00:00"
+    "streak": 21,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
   },
   "KXUSDJPY-26AUG0510-B157.375": {
     "direction": "YES",
@@ -293,5 +293,285 @@
     "direction": "YES",
     "streak": 1,
     "last_updated": "2026-08-24T16:00:50.121233+00:00"
+  },
+  "KXPCECORE-26JUL-T0.2": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-25T15:39:52.507781+00:00"
+  },
+  "KXHIGHTSEA-26AUG25-B87.5": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-25T15:39:52.507781+00:00"
+  },
+  "KXTVSTATSMOVIE-26AUG26-SPI": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-08-26T18:41:42.003422+00:00"
+  },
+  "KXTVSTATSSHOW-26AUG26-LAN": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-08-26T18:41:42.003422+00:00"
+  },
+  "KXTVSTATSPARA-26AUG26-LIO": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-08-26T18:41:42.003422+00:00"
+  },
+  "KXAPRPOTUS-26AUG28-39.2": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-27T15:03:28.212127+00:00"
+  },
+  "KXRAIN-26AUG27-PHX": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-27T15:03:28.212127+00:00"
+  },
+  "KXHIGHTSEA-26AUG27-B70.5": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-27T15:03:28.212127+00:00"
+  },
+  "KXRAIN-26AUG28-LV": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-08-28T15:12:57.956250+00:00"
+  },
+  "KXKBOTOTAL-26AUG270530LOTKIA-10": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-08-28T15:12:57.956250+00:00"
+  },
+  "KXKBORFI-26AUG270530LOTKIA-Y": {
+    "direction": "NO",
+    "streak": 2,
+    "last_updated": "2026-08-28T15:12:57.956250+00:00"
+  },
+  "KXHIGHTSATX-26AUG28-B99.5": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-28T15:10:24.389036+00:00"
+  },
+  "KXHIGHTPHX-26AUG28-B114.5": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-28T15:12:57.956250+00:00"
+  },
+  "KXHIGHTNOLA-26AUG28-T91": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-28T15:12:57.956250+00:00"
+  },
+  "KXNPBSPREAD-26AUG290500YAKHIR-YAK2": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXNPBSPREAD-26AUG290500YOMHAN-HAN2": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXNPBSPREAD-26AUG290500FUKORI-FUK2": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXEPLTCORNERS-26AUG29LFCNFO-LFC7": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXVALORANTTOTALMAPS-26AUG290700T1GENG-3": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXVALORANTMAP-26AUG290700T1GENG-1-GENG": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXDOTA2GAME-26AUG290700YESMOUZ-YES": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXCS2MAP-26AUG290700INOXEXR-1-EXR": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXCS2GAME-26AUG290700INOXEXR-EXR": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXCS2GAME-26AUG290630PHACFAZEUN-FAZEUN": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXLOLGAME-26AUG290600PCSKCBS-KCBS": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXCS2GAME-26AUG290600JUSTSA-JUS": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXNPBTOTAL-26AUG290500YOMHAN-10": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXNPBTOTAL-26AUG290500YAKHIR-10": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXNPBTOTAL-26AUG290500FUKORI-8": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXNPBTOTAL-26AUG290500CHUYOK-8": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXNPBGAME-26AUG290500CHUYOK-CHU": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-29T12:03:38.604232+00:00"
+  },
+  "KXMUSKNW-26AUG31-T850": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-08-30T23:44:05.180686+00:00"
+  },
+  "KXARNAULTNW-26AUG31-T175": {
+    "direction": "NO",
+    "streak": 2,
+    "last_updated": "2026-08-30T23:44:05.180686+00:00"
+  },
+  "KXSANCTIONRUSSIA-26JUL": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXYTVIEWSW-YOU26AUG30-8.0M": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXYTVIEWSW-TAY26AUG30-15.9M": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXYTVIEWSW-MOR26AUG30-5.25M": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXYTVIEWS-MIC26SEP-28.0M": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXYTVIEWSHIGH-TAY26SEP-16.0M": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXYTVIEWSHIGH-MIC26SEP-23.0M": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXTRUMPSAYMONTH-26SEP01-FAT": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXRUT-26AUG31-3200": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-08-31T14:29:06.913420+00:00"
+  },
+  "KXRAIN-26SEP01-SEA": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-01T12:10:51.917446+00:00"
+  },
+  "KXHIGHTSEA-26SEP01-T70": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-09-01T12:10:51.917446+00:00"
+  },
+  "KXDOTA2GAME-26SEP010800LYNXIC-LYNX": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-01T12:10:51.917446+00:00"
+  },
+  "KXCS2GAME-26SEP010800COLHOTU-COL": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-01T12:10:51.917446+00:00"
+  },
+  "KXCS2TOTALMAPS-26SEP010700BRUTEWRA-3": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-01T12:10:51.917446+00:00"
+  },
+  "KXCS2MAP-26SEP010700BRUTEWRA-1-BRUTE": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-09-01T12:10:51.917446+00:00"
+  },
+  "KXSILVERD-26SEP0217-T64": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-01T22:12:45.076880+00:00"
+  },
+  "KXCHAICUTS-26SEP03-T1": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-09-02T14:15:37.647643+00:00"
+  },
+  "KXRAIN-26SEP02-DEN": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-09-02T14:15:37.647643+00:00"
+  },
+  "KXLOLMAP-26SEP010900TPWLG-3-WLG": {
+    "direction": "YES",
+    "streak": 2,
+    "last_updated": "2026-09-02T14:15:37.647643+00:00"
+  },
+  "KXLOLMAP-26SEP010900TPWLG-2-WLG": {
+    "direction": "NO",
+    "streak": 2,
+    "last_updated": "2026-09-02T14:15:37.647643+00:00"
+  },
+  "KXHIGHTSATX-26SEP02-B102.5": {
+    "direction": "NO",
+    "streak": 2,
+    "last_updated": "2026-09-02T14:15:37.647643+00:00"
+  },
+  "KXHIGHTDAL-26SEP02-B96.5": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-09-02T14:09:17.805492+00:00"
+  },
+  "KXAPRPOTUS-26SEP04-40.4": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-03T15:56:21.394244+00:00"
   }
 }

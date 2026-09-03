@@ -1,0 +1,176 @@
+
+=== Leviathan v1 | run ccc94365 | 2026-08-30T23:40:51.656738+00:00 ===
+
+Environment: PROD
+[1/8] Authenticating with Kalshi...
+  [kalshi] Authenticated. Balance: {'balance': 1, 'balance_breakdown': [{'balance': '0.0113', 'exchange_index': 0}, {'balance': '0.0000', 'exchange_index': 1}, {'balance': '0.0000', 'exchange_index': 2}, {'balance': '0.0000', 'exchange_index': 3}], 'balance_dollars': '0.0113', 'portfolio_value': 2945, 'updated_ts': 1788133253}
+      OK
+[2/8] Fetching markets via events catalog...
+      Fetched 2768 markets from 400 events
+      Near-dated supplement: +200 markets (closing within 14d, 200 fetched)
+[3/8] Scanning for mispriced markets...
+[FILTERED] KXZUCKERBERGNW-26AUG31-T195 — market price 87% above 0.85 threshold, low return potential
+[FILTERED] KXPAGENW-26AUG31-T275 — market price 86% above 0.85 threshold, low return potential
+[FILTERED] KXMUSKNW-26AUG31-T800 — market price 93% above 0.85 threshold, low return potential
+[FILTERED] KXMUSKNW-26AUG31-T550 — market price 92% above 0.85 threshold, low return potential
+      Dedup: 52 -> 31 markets (kept best-signal market per event)
+      56 markets passed filter (from 2968)
+      21 markets flagged for edge
+[4/8] Cross-referencing with Polymarket...
+      7 Polymarket matches found, 4 with gap ≥5%
+  [ext] Searching Manifold (21 queries)... 10 binary markets
+  [ext] Searching Metaculus (21 queries)... 0 questions
+  [ext] Fetching PredictIt... 186 markets
+  [ext] Index built: 225 normalized entries
+  [ext] 11 Kalshi markets matched (16 cross-market comparisons)
+  [accounts] Loaded 0 cached winners
+  [accounts] No winning wallets found — skipping smart money scan
+[5/8] Checking whale activity and order book depth...
+      7 whale flags  |  18 order book imbalances
+      Whale streak: 40 ticker(s) with 2+ consecutive directional scan(s)
+      PASS suppress: 6 market(s) hard-suppressed (5+ PASSes in 14d — systematic false-positives)
+[6/8] Scoring with Claude...
+      Scored 10 markets via claude CLI
+[7/8] Logging signals...
+      Logged 0 new, 2 repeat signal(s)
+[export] signals.csv — 54 rows, 68 columns
+[export] Resolved: 25 | Pending: 29 | Wins: 9 | Losses: 16
+[export] Win Rate: 36.0%
+[export] Net PnL: -$0.85
+[export] BLANK RATE WARNING (signals.csv, >50% blank):
+         category: 90% blank
+         net_edge: 57% blank
+         net_edge_after_fee: 81% blank
+         ev_after_fee_per_contract: 70% blank
+         base_rate: 57% blank
+         leviathan_score: 61% blank — lv_band will show Unscored
+         whale_direction: 92% blank
+         whale_max_trade_size: 92% blank
+         heuristic_label: 81% blank
+         heuristic_direction: 57% blank
+         ob_imbalance: 90% blank
+         ob_direction: 94% blank
+         spread_pct: 90% blank
+         ext_estimate: 94% blank
+         ext_edge: 94% blank
+         ext_n_signals: 94% blank
+         ext_alpha: 94% blank
+         confluence_count: 92% blank
+         poly_price: 98% blank
+         poly_price_gap: 98% blank
+         consensus_gap: 94% blank
+         consensus_dir: 94% blank
+         smart_money_dir: 100% blank
+         result: 53% blank
+         is_win: 53% blank
+         pnl_if_traded: 53% blank
+         pnl_scaled: 53% blank
+         resolved_at: 83% blank
+         days_to_resolution: 83% blank
+         brier_scorer: 59% blank
+         brier_market: 55% blank
+         market_drift_pp: 59% blank
+         volume: 96% blank
+         open_interest: 96% blank
+         event_ticker: 75% blank
+         series_ticker: 75% blank
+         kalshi_url: 75% blank
+[export] scan_log.csv — 553 rows, 68 columns
+[export] Resolved: 190 | Pending: 363 | Wins: 9 | Losses: 181
+[export] Win Rate: 4.7%
+[export] Net PnL: -$0.85
+[export] BLANK RATE WARNING (scan_log.csv, >50% blank):
+         net_edge_after_fee: 78% blank
+         ev_after_fee_per_contract: 97% blank
+         whale_direction: 70% blank
+         whale_max_trade_size: 69% blank
+         heuristic_label: 78% blank
+         ob_direction: 63% blank
+         ext_estimate: 99% blank
+         ext_edge: 99% blank
+         ext_n_signals: 99% blank
+         ext_alpha: 99% blank
+         confluence_count: 99% blank
+         poly_price: 90% blank
+         poly_price_gap: 90% blank
+         consensus_gap: 66% blank
+         consensus_dir: 68% blank
+         smart_money_dir: 100% blank
+         result: 65% blank
+         is_win: 65% blank
+         pnl_if_traded: 65% blank
+         pnl_scaled: 65% blank
+         resolved_at: 74% blank
+         days_to_resolution: 74% blank
+         brier_scorer: 96% blank
+         brier_market: 95% blank
+         market_drift_pp: 96% blank
+         volume: 64% blank
+         open_interest: 64% blank
+[export] CSVs updated — 54 signals, 553 scan_log, 98 runs
+  [report] Sent to reed.helvey@gmail.com
+      Weekly digest sent
+[7b] Running smart money watchlist scan...
+
+=== Smart Money Watchlist Scan | 2026-08-30T23:49:59Z ===
+
+Fetching open positions for watchlist traders...
+  [watchlist] Loaded from cache
+
+  Kalshi snapshot: 2968 markets loaded for cross-reference
+
+====================================================================================================
+
+  EXCLUDED  mintblade  — no positions returned from API
+
+  EXCLUDED  fishalive  — no positions returned from API
+
+  EXCLUDED  endlessFate  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  Inaccuratestake  — no positions returned from API
+
+  EXCLUDED  Latina  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  Grenderen  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  BreakTheBank  — win rate 0.0% < 55% threshold
+
+  EXCLUDED  0x2c3350  — only 6 resolved positions (need >=10)
+
+  EXCLUDED  0x8cb4ca  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  afghj2421  — no positions returned from API
+
+  EXCLUDED  wan123  — win rate 0.0% < 55% threshold
+
+  EXCLUDED  0x6db279  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  denizz  — only 7 resolved positions (need >=10)
+
+  EXCLUDED  downtownfee  — no positions returned from API
+
+  EXCLUDED  Winnerdinnerchickenjr  — only 1 resolved positions (need >=10)
+
+  EXCLUDED  MrLoLo8899  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  swisstony  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  0xC41D73  — only 3 resolved positions (need >=10)
+
+  EXCLUDED  gardenshed  — only 0 resolved positions (need >=10)
+
+  EXCLUDED  Erasmus  — win rate 0.0% < 55% threshold
+
+====================================================================================================
+
+  Traders with open positions: 0
+  Total significant positions: 0
+
+  No Kalshi cross-references found in this snapshot.
+
+      0 traders  |  0 positions  |  0 Kalshi X-refs  |  saved C:\Users\Administrator\Downloads\Leviathan\data\smart_money\2026-08-30.md
+[8/8] Sending report...
+  [report] Sent to reed.helvey@gmail.com
+
+=== Done in 552.3s | 2 signals | cost $0.0000 ===
+

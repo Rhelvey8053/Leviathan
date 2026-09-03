@@ -1,3 +1,453 @@
 {
-  "last_sent": "2026-08-24"
+  "last_sent": "2026-09-03",
+  "backlog_snapshot": {
+    "trade-reconciliation": {
+      "status": "done",
+      "notes_len": 88
+    },
+    "realfill-dedup": {
+      "status": "done",
+      "notes_len": 83
+    },
+    "sample-size-gates": {
+      "status": "done",
+      "notes_len": 88
+    },
+    "wilson-intervals": {
+      "status": "done",
+      "notes_len": 94
+    },
+    "title-scraping-fix": {
+      "status": "done",
+      "notes_len": 87
+    },
+    "smart-money-drift-alerts": {
+      "status": "done",
+      "notes_len": 94
+    },
+    "backtest-harness": {
+      "status": "done",
+      "notes_len": 68
+    },
+    "position-reconciliation-job": {
+      "status": "done",
+      "notes_len": 99
+    },
+    "brier-tracking": {
+      "status": "done",
+      "notes_len": 87
+    },
+    "confluence-detection": {
+      "status": "done",
+      "notes_len": 98
+    },
+    "edge-decay-analysis": {
+      "status": "locked",
+      "notes_len": 73
+    },
+    "per-wallet-track-record": {
+      "status": "locked",
+      "notes_len": 87
+    },
+    "skill-vs-luck-weighting": {
+      "status": "locked",
+      "notes_len": 94
+    },
+    "walk-forward-validation": {
+      "status": "done",
+      "notes_len": 74
+    },
+    "slippage-tracking": {
+      "status": "locked",
+      "notes_len": 81
+    },
+    "calibration-curve": {
+      "status": "locked",
+      "notes_len": 81
+    },
+    "calibration-curve-dashboard": {
+      "status": "blocked",
+      "notes_len": 84
+    },
+    "per-heuristic-scorecard": {
+      "status": "done",
+      "notes_len": 88
+    },
+    "heuristic-sunsetting": {
+      "status": "done",
+      "notes_len": 89
+    },
+    "empirical-base-rates-poly": {
+      "status": "locked",
+      "notes_len": 3950
+    },
+    "resolved-count-per-category-max-wrong-column": {
+      "status": "done",
+      "notes_len": 2415
+    },
+    "replay-runner-crash-on-malformed-cli-response": {
+      "status": "done",
+      "notes_len": 619
+    },
+    "auto-calibration-loop": {
+      "status": "blocked",
+      "notes_len": 88
+    },
+    "wallet-tracking-dashboard": {
+      "status": "blocked",
+      "notes_len": 128
+    },
+    "high-price-filter": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "ev-per-contract": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "betting-queue": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "gate-unlock-notifier": {
+      "status": "done",
+      "notes_len": 160
+    },
+    "show-detail-fix": {
+      "status": "done",
+      "notes_len": 162
+    },
+    "discovery-funnel-diagnostic": {
+      "status": "done",
+      "notes_len": 336
+    },
+    "kalshi-event-ticker-capture": {
+      "status": "done",
+      "notes_len": 568
+    },
+    "email-html-render": {
+      "status": "done",
+      "notes_len": 295
+    },
+    "market-baseline-brier": {
+      "status": "done",
+      "notes_len": 1132
+    },
+    "preregistration": {
+      "status": "done",
+      "notes_len": 1052
+    },
+    "llm-cost-ceiling": {
+      "status": "done",
+      "notes_len": 1004
+    },
+    "replay-settled-fetcher": {
+      "status": "done",
+      "notes_len": 995
+    },
+    "replay-asof-reconstruction": {
+      "status": "done",
+      "notes_len": 2305
+    },
+    "replay-runner": {
+      "status": "done",
+      "notes_len": 2614
+    },
+    "replay-instrument-validation": {
+      "status": "ready",
+      "notes_len": 6010
+    },
+    "price-blind-arm": {
+      "status": "done",
+      "notes_len": 3466
+    },
+    "unattended-ops": {
+      "status": "done",
+      "notes_len": 2229
+    },
+    "methodology-writeup": {
+      "status": "blocked",
+      "notes_len": 192
+    },
+    "multi-sample-scoring": {
+      "status": "done",
+      "notes_len": 192
+    },
+    "powerbi-schema-hardening": {
+      "status": "done",
+      "notes_len": 1380
+    },
+    "fix-fetch-market-history-endpoint": {
+      "status": "done",
+      "notes_len": 1505
+    },
+    "kalshi-sdk-migration-implementation": {
+      "status": "done",
+      "notes_len": 453
+    },
+    "kalshi-sdk-evaluation-2026-08": {
+      "status": "done",
+      "notes_len": 168
+    },
+    "whale-flag-lv-guarantee": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "whale-only-none-direction-crash": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "resolved-count-metric-desync": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "whale-actionability-scorecard": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "signal-csv-strategy-review-2026-08": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "streamlit-dashboard-2026-08": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "signal-scan-log-split-2026-08": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "citations-provenance-grounding": {
+      "status": "done",
+      "notes_len": 1884
+    },
+    "net-edge-fee-depth-model": {
+      "status": "done",
+      "notes_len": 0
+    },
+    "cross-venue-expansion": {
+      "status": "blocked",
+      "notes_len": 0
+    },
+    "ci-kalshi-auth-env-2026-08": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "db-audit-2026-08": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "down-ballot-election-recalibration": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "export-validation-pass-exclusion": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "ext-signal-activation": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "heuristic-backtest-tool": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "heuristic_label-vs-base_rate-desync": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "hurricane-recalibration": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "log-pass-schema-parity": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "near-dated-markets-supplement": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "near-dated-window-chunking": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "price-threshold-recalibration": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "production-delivery-milestone-recalibration": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "prop-market-skill-filter": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "show-renewal-recalibration": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "sports-award-recalibration": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "subscriber-report-rework-2026-08": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "subscriber-report-wiring": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "win-catchall-recalibration": {
+      "status": "done",
+      "notes_len": 193
+    },
+    "graphify-skill-evaluation": {
+      "status": "blocked",
+      "notes_len": 1362
+    },
+    "smart-money-discovery-dashboard": {
+      "status": "done",
+      "notes_len": 473
+    },
+    "market-price-divergence-tracking": {
+      "status": "done",
+      "notes_len": 234
+    },
+    "rolled-market-repeat-detection": {
+      "status": "done",
+      "notes_len": 183
+    },
+    "kalshi-wa-geofencing-exposure-check": {
+      "status": "done",
+      "notes_len": 150
+    },
+    "verify-liam-post-context-doc-alignment": {
+      "status": "done",
+      "notes_len": 1742
+    },
+    "subscriber-hosting-billing-decision": {
+      "status": "done",
+      "notes_len": 348
+    },
+    "polymarket-data-api-rate-limit-pacing": {
+      "status": "done",
+      "notes_len": 403
+    },
+    "automation-health-monitoring": {
+      "status": "done",
+      "notes_len": 194
+    },
+    "daily-operations-digest": {
+      "status": "done",
+      "notes_len": 102
+    },
+    "dependabot-setup": {
+      "status": "done",
+      "notes_len": 101
+    },
+    "wake-triggered-task-catchup": {
+      "status": "done",
+      "notes_len": 102
+    },
+    "fix-weekly-code-audit-timeout": {
+      "status": "done",
+      "notes_len": 592
+    },
+    "task-scheduler-manual-trigger-stuck-queued": {
+      "status": "ready",
+      "notes_len": 4658
+    },
+    "smart-money-fills-table-missing": {
+      "status": "done",
+      "notes_len": 1296
+    },
+    "dailyrun-logontype-interactive": {
+      "status": "done",
+      "notes_len": 1363
+    },
+    "subscriber-report-removed-2026-08": {
+      "status": "done",
+      "notes_len": 127
+    },
+    "cftc-rule-40-11-event-contract-rulemaking": {
+      "status": "ready",
+      "notes_len": 1259
+    },
+    "metaculus-community-prediction-inaccessible": {
+      "status": "done",
+      "notes_len": 196
+    },
+    "signal-category-mostly-blank-despite-real-data": {
+      "status": "done",
+      "notes_len": 1868
+    },
+    "smart-money-fills-persistence-build": {
+      "status": "ready",
+      "notes_len": 166
+    },
+    "dailyrun-missed-run-2026-08-30-silent-failure-gaps": {
+      "status": "done",
+      "notes_len": 1922
+    },
+    "weekly-code-audit-exit-code-not-proof-of-report": {
+      "status": "done",
+      "notes_len": 679
+    },
+    "windows-defender-cpu-contention-2026-08-30": {
+      "status": "ready",
+      "notes_len": 617
+    },
+    "monday-com-retired-backlog-dashboard-page": {
+      "status": "done",
+      "notes_len": 1107
+    },
+    "resolve-first-top-n-per-bucket": {
+      "status": "done",
+      "notes_len": 1275
+    },
+    "near-dated-fetch-headroom-increase": {
+      "status": "done",
+      "notes_len": 1466
+    },
+    "wire-llm-model-cli-flag": {
+      "status": "done",
+      "notes_len": 1266
+    },
+    "trial-stronger-model-main-scoring": {
+      "status": "ready",
+      "notes_len": 4583
+    },
+    "smart-money-winning-whales-panel": {
+      "status": "done",
+      "notes_len": 2136
+    },
+    "dashboard-caption-accuracy-passthrough": {
+      "status": "done",
+      "notes_len": 435
+    },
+    "model-used-field-disconnected-from-cli-override": {
+      "status": "done",
+      "notes_len": 853
+    },
+    "resolve-first-never-carried-category": {
+      "status": "done",
+      "notes_len": 729
+    },
+    "mcp-server-v2-operational-tools": {
+      "status": "done",
+      "notes_len": 1820
+    },
+    "research-diligence-before-pass": {
+      "status": "done",
+      "notes_len": 1580
+    },
+    "cli-backend-token-telemetry": {
+      "status": "done",
+      "notes_len": 1955
+    }
+  }
 }
