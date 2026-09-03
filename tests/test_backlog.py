@@ -399,8 +399,25 @@ def test_parses_and_96_items(backlog_data):
     SYSTEM_PROMPT requiring genuine multi-search effort before PASS,
     explicitly without lowering the evidence bar the existing 47
     calibration rules set.
+
+    112, not 111: cli-backend-token-telemetry (2026-09-02) -- user asked
+    to research reducing Leviathan's own token footprint (after a
+    detour into whether OmniRoute could help, rejected -- it requires
+    replacing Claude Code's native Pro/Max OAuth with an OmniRoute
+    session, real credential handling this project doesn't do
+    autonomously, and fights an existing deliberate safeguard in
+    _score_via_cli() that strips ANTHROPIC_API_KEY to force native
+    auth). Found empirically (two real CLI calls, not assumed) that
+    Anthropic prompt caching already works across separate `claude
+    --print` subprocess invocations on a 1-hour TTL -- likely already
+    helping today. The real gap: the live CLI call used --output-format
+    text, discarding all usage telemetry, which is why runs.tokens_used/
+    cost_usd have always been hardcoded 0 for CLI-backend runs. Switched
+    to --output-format json to capture real token/cache/cost data --
+    main.py needed zero changes, it already had the wiring, just never
+    real data to wire.
     """
-    assert len(backlog_data["items"]) == 111
+    assert len(backlog_data["items"]) == 112
 
 
 def test_all_ids_unique(backlog_data):

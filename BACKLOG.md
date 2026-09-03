@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-09-02 | Metrics: resolved=22, fills=7
+Last updated: 2026-09-03 | Metrics: resolved=22, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
@@ -33,7 +33,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (93)
+## Done (94)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -87,6 +87,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 2 | wake-triggered-task-catchup | Built 2026-08-24, registered and confirmed State=Ready (not stuck Queued, unlike the two tasks registered earlier the same day). | infra |
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
+| 3 | cli-backend-token-telemetry | User asked to research reducing Leviathan's own token footprint (after a separate detour into whether OmniRoute could help -- rejected, since routing Claude Code through it means replacing native… | infra |
 | 3 | daily-operations-digest | Built and verified 2026-08-24. | infra |
 | 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 3 | dailyrun-missed-run-2026-08-30-silent-failure-gaps | Found 2026-08-30: main.py's scheduled 7am run launched a real process (confirmed via Task Scheduler operational event log, PID 20048, ran 21m58s) and Task Scheduler reported clean exit 0, but zero… | infra |

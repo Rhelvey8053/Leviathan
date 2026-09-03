@@ -870,7 +870,7 @@ class TestBackendCliRegression:
             "open_interest": 50,
         }
 
-        with patch("core.scorer._score_via_cli", return_value=[]) as mock_cli, \
+        with patch("core.scorer._score_via_cli", return_value=([], {})) as mock_cli, \
              patch("core.llm._make_client") as mock_client_fn:
             from core.scorer import score_markets
             score_markets([market], config)

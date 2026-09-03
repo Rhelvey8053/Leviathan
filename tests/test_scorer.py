@@ -1305,7 +1305,7 @@ def test_pre_claude_lv_gate_whale_detected_clears_previously_failing_market():
     lv = __import__("core.report", fromlist=["compute_leviathan_score"]).compute_leviathan_score(m)
     assert lv >= 20, f"pre-condition: whale_detected should raise LV to >=20, got {lv}"
     config = {"scoring": {"min_pre_claude_lv": 20, "max_markets_per_run": 10}}
-    with patch("core.scorer._score_via_cli", return_value=[]) as mock_cli:
+    with patch("core.scorer._score_via_cli", return_value=([], {})) as mock_cli:
         scorer.score_markets([m], config)
     mock_cli.assert_called_once()  # gate passed -- reached the CLI batch step
 
@@ -1354,11 +1354,23 @@ def test_pre_claude_lv_gate_passes_strong_market_to_batch():
 
 # ─── _score_via_cli: response validation ─────────────────────────────────────
 
-def _mock_cli_result(stdout, returncode=0):
+def _mock_cli_result(model_text, returncode=0, usage=None, total_cost_usd=0.0):
+    """
+    2026-09-02: _score_via_cli switched --output-format from "text" to
+    "json" to capture real usage/cache telemetry (see core/scorer.py's
+    docstring). model_text is what used to be the bare stdout -- now
+    wrapped in the envelope the real CLI emits, so every existing test
+    call site (`_mock_cli_result(good_response)`) keeps working unchanged.
+    """
     from unittest.mock import MagicMock
+    import json as _json
     result = MagicMock()
     result.returncode = returncode
-    result.stdout = stdout
+    result.stdout = _json.dumps({
+        "result": model_text,
+        "usage": usage or {},
+        "total_cost_usd": total_cost_usd,
+    })
     result.stderr = ""
     return result
 
@@ -1430,7 +1442,7 @@ def test_score_via_cli_accepts_valid_response(monkeypatch):
     }])
     with patch("core.scorer._find_claude", return_value="claude"), \
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
 
 
@@ -1496,7 +1508,7 @@ def test_score_via_cli_normalizes_sources_checked_to_sources(monkeypatch):
     }])
     with patch("core.scorer._find_claude", return_value="claude"), \
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["sources"] == [
         {"url": "Reuters: headline text", "title": "Reuters: headline text"},
         {"url": "https://example.com/article", "title": "https://example.com/article"},
@@ -1517,7 +1529,7 @@ def test_score_via_cli_empty_sources_checked_leaves_sources_unset(monkeypatch):
     }])
     with patch("core.scorer._find_claude", return_value="claude"), \
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert "sources" not in scores[0]
 
 
@@ -1544,7 +1556,7 @@ def test_score_via_cli_retries_after_timeout_then_succeeds(monkeypatch):
              _mock_cli_result(good_response),
          ]) as mock_run, \
          patch("time.sleep"):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
     assert mock_run.call_count == 2
 
@@ -1581,7 +1593,7 @@ def test_score_via_cli_recovers_from_mixed_timeout_and_nonzero_exit():
              _mock_cli_result(good_response),
          ]) as mock_run, \
          patch("time.sleep"):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
     assert mock_run.call_count == 3
 
@@ -1737,7 +1749,7 @@ def test_score_markets_default_multi_sample_n_calls_backend_once(monkeypatch):
     from unittest.mock import patch
     m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
     config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10}}
-    with patch("core.scorer._score_via_cli", return_value=[_sample()]) as mock_cli:
+    with patch("core.scorer._score_via_cli", return_value=([_sample()], {})) as mock_cli:
         result, token_info = scorer.score_markets([m], config)
     assert mock_cli.call_count == 1
     assert token_info == {}
@@ -1749,11 +1761,17 @@ def test_score_markets_multi_sample_n_calls_cli_backend_n_times(monkeypatch):
     m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
     config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10,
                           "multi_sample_n": 5}}
-    responses = [[_sample(our_estimate=0.50 + i * 0.01)] for i in range(5)]
+    responses = [([_sample(our_estimate=0.50 + i * 0.01)], {}) for i in range(5)]
     with patch("core.scorer._score_via_cli", side_effect=responses) as mock_cli:
         result, token_info = scorer.score_markets([m], config)
     assert mock_cli.call_count == 5
-    assert token_info == {}
+    # CLI branch now feeds combined_token_info too (mocked _score_via_cli returns {}
+    # per call, so every key sums to its zero default -- no longer a bare {}).
+    assert token_info == {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+    }
     assert len(result) == 1
     assert result[0]["n_samples"] == 5
 
@@ -1781,7 +1799,7 @@ def test_score_markets_multi_sample_n_one_explicit_same_as_default(monkeypatch):
     m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
     config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10,
                           "multi_sample_n": 1}}
-    with patch("core.scorer._score_via_cli", return_value=[_sample()]) as mock_cli:
+    with patch("core.scorer._score_via_cli", return_value=([_sample()], {})) as mock_cli:
         result, token_info = scorer.score_markets([m], config)
     assert mock_cli.call_count == 1
     assert token_info == {}
@@ -1877,7 +1895,7 @@ def test_rescore_single_market_cli_backend():
         "reasoning": "x", "sources_checked": [],
     }
     config = {"llm": {"backend": "cli"}}
-    with patch("core.scorer._score_via_cli", return_value=[score]):
+    with patch("core.scorer._score_via_cli", return_value=([score], {})):
         result, info = scorer.rescore_single_market(market, config)
     assert result == score
     assert info == {}

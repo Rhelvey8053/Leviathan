@@ -1050,9 +1050,22 @@ def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
     return "\n".join(lines)
 
 
-def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None) -> list[dict]:
+def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None) -> tuple[list[dict], dict]:
     """
     Legacy CLI path -- subprocess to local claude binary with Pro OAuth.
+
+    2026-09-02: switched --output-format from "text" to "json" so this can
+    return real usage telemetry (input/output/cache tokens, total_cost_usd)
+    the same shape core.llm.score_via_api already returns -- previously
+    every CLI-backend run table row hardcoded tokens_used=0/cost_usd=0.0
+    with no way to ever measure it. Live-verified before this change:
+    two consecutive `claude --print --output-format json` calls with the
+    identical ~42KB SYSTEM_PROMPT showed real prompt caching already
+    working across separate subprocess invocations on a 1-hour TTL
+    (cache_creation_input_tokens on call 1, cache_read_input_tokens
+    roughly doubling and total_cost_usd dropping ~50% on call 2) -- this
+    change only makes that existing, already-happening caching visible,
+    it does not change what gets cached or how.
 
     Validates the parsed response the same way score_via_api does
     (core.llm._validate_scores) before returning. This is the DEFAULT
@@ -1093,7 +1106,7 @@ def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None
     _sp_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
     _sp_file.write(sys_prompt); _sp_file.close(); _sp_path = _sp_file.name
     cli_args = [claude_cmd, "--print", "--system-prompt-file", _sp_path,
-                "--allowedTools", "WebSearch", "--output-format", "text"]
+                "--allowedTools", "WebSearch", "--output-format", "json"]
     model_override = (config or {}).get("llm", {}).get("cli_model_override")
     if model_override:
         cli_args += ["--model", model_override]
@@ -1127,9 +1140,32 @@ def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None
         raise RuntimeError(
             f"scorer.py: claude CLI returned exit {result.returncode} after {max_retries + 1} attempt(s): {err[:300]}"
         )
-    all_text = result.stdout.strip()
-    if not all_text:
+    raw_stdout = result.stdout.strip()
+    if not raw_stdout:
         raise RuntimeError("scorer.py: claude CLI returned empty output")
+    try:
+        envelope = json.loads(raw_stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"scorer.py: --output-format json returned non-JSON envelope: {exc}\n"
+            f"Raw output: {raw_stdout[:500]}"
+        ) from exc
+    if not isinstance(envelope, dict) or "result" not in envelope:
+        raise RuntimeError(
+            f"scorer.py: --output-format json envelope missing 'result' key. "
+            f"Raw output: {raw_stdout[:500]}"
+        )
+    all_text = (envelope.get("result") or "").strip()
+    usage = envelope.get("usage") or {}
+    token_info = {
+        "input_tokens":                usage.get("input_tokens", 0),
+        "output_tokens":               usage.get("output_tokens", 0),
+        "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
+        "cache_read_input_tokens":     usage.get("cache_read_input_tokens", 0),
+        "cost_usd":                    round(envelope.get("total_cost_usd", 0.0) or 0.0, 6),
+    }
+    if not all_text:
+        raise RuntimeError("scorer.py: claude CLI returned empty 'result' text")
     fence_match = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", all_text, re.DOTALL)
     if fence_match:
         raw_json = fence_match.group(1).strip()
@@ -1169,7 +1205,7 @@ def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None
     for s in scores:
         if "sources" not in s and s.get("sources_checked"):
             s["sources"] = [{"url": src, "title": src} for src in s["sources_checked"] if src]
-    return scores
+    return scores, token_info
 
 
 def _aggregate_multi_sample(passes: list[list[dict]]) -> list[dict]:
@@ -1326,7 +1362,7 @@ def score_markets(
     if n_samples <= 1:
         if backend == "api":
             return _score_via_api(sys_prompt, user_prompt, config)
-        return _score_via_cli(sys_prompt, user_prompt, config), {}
+        return _score_via_cli(sys_prompt, user_prompt, config)
 
     passes: list[list[dict]] = []
     combined_token_info = {
@@ -1337,14 +1373,13 @@ def score_markets(
     for _ in range(n_samples):
         if backend == "api":
             pass_scores, tok = _score_via_api(sys_prompt, user_prompt, config)
-            for key in combined_token_info:
-                combined_token_info[key] += tok.get(key, 0)
         else:
-            pass_scores = _score_via_cli(sys_prompt, user_prompt, config)
+            pass_scores, tok = _score_via_cli(sys_prompt, user_prompt, config)
+        for key in combined_token_info:
+            combined_token_info[key] += tok.get(key, 0)
         passes.append(pass_scores)
 
-    token_info = combined_token_info if backend == "api" else {}
-    return _aggregate_multi_sample(passes), token_info
+    return _aggregate_multi_sample(passes), combined_token_info
 
 
 def rescore_single_market(
@@ -1384,7 +1419,7 @@ def rescore_single_market(
     if backend == "api":
         scores, token_info = _score_via_api(sys_prompt, user_prompt, config)
     else:
-        scores, token_info = _score_via_cli(sys_prompt, user_prompt, config), {}
+        scores, token_info = _score_via_cli(sys_prompt, user_prompt, config)
 
     if not scores:
         return None, token_info

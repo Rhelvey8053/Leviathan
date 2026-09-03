@@ -92,7 +92,7 @@ def rescore_dataset(dataset: dict, temperature: float = 0.0, config: dict | None
             sys_prompt, user_prompt, config, temperature=temperature
         )
     else:
-        scores = _score_via_cli(sys_prompt, user_prompt, config)
+        scores, _token_info = _score_via_cli(sys_prompt, user_prompt, config)
     return {s["ticker"]: s for s in scores}
 
 
