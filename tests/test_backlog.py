@@ -426,8 +426,26 @@ def test_parses_and_96_items(backlog_data):
     blended into direction/confidence/edge, persisted to its own
     signals.cross_model_opinion column. Live-verified against a real
     running OmniRoute server, not just mocks.
+
+    115, not 113: user asked, with the NFL/college football seasons
+    starting, whether any lines flag for edge -- answering it for real
+    (live Kalshi fetch, not a guess) surfaced two distinct, evidenced
+    findings. (1) kalshi-event-recency-window-misses-new-markets:
+    core.kalshi.fetch_events()'s max_events=400 cap sorted by
+    last_updated_ts desc means thin, newly-listed markets never
+    surface -- confirmed 0 of 400 top events are NFL/NCAAF games right
+    now, and 0 KXNFLGAME/KXNCAAFGAME rows exist anywhere in the signals
+    table, all-time. (2) win-catchall-two-team-game-misfire: the
+    already-recalibrated generic " win " heuristic (0.08, tuned on a
+    12,600-row historical corpus that contains zero football game
+    markets) misfires on real 2-team NCAAF games, flagging 17 of 500
+    live markets with an identical base_rate=0.08 regardless of
+    matchup -- a spurious signal, not real edge. Neither fixed
+    autonomously -- both need the user's own call on the tradeoffs
+    (max_events raises API/local-compute cost; the heuristic fix needs
+    a real prior, not a guess).
     """
-    assert len(backlog_data["items"]) == 113
+    assert len(backlog_data["items"]) == 115
 
 
 def test_all_ids_unique(backlog_data):

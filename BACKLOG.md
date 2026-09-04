@@ -3,11 +3,13 @@ Last updated: 2026-09-04 | Metrics: resolved=25, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (7)
+## Ready (9)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 2 | kalshi-event-recency-window-misses-new-markets | core.kalshi.fetch_events() caps at config.markets.max_events (400) events, sorted by last_updated_ts desc ('recently active events first'). | infra |
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
+| 3 | win-catchall-two-team-game-misfire | win-catchall-recalibration (done, 2026-08-01) correctly dropped the generic ' win ' heuristic from 0.52 to the measured 0.08, explicitly declining to split the pattern by entrant count 'since that… | calibration |
 | 3 | windows-defender-cpu-contention-2026-08-30 | Found 2026-08-30 while investigating a garbled weekly_code_audit.py run and a main.py catch-up run that appeared stuck on one step for a long stretch (both eventually completed -- confirmed slow, not… | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
