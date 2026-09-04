@@ -3,15 +3,16 @@ Last updated: 2026-09-03 | Metrics: resolved=25, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (6)
+## Ready (7)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
-| 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
 | 3 | windows-defender-cpu-contention-2026-08-30 | Found 2026-08-30 while investigating a garbled weekly_code_audit.py run and a main.py catch-up run that appeared stuck on one step for a long stretch (both eventually completed -- confirmed slow, not… | infra |
+| 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 4 | trial-stronger-model-main-scoring | Using the now-live config.llm.cli_model_override (see wire-llm-model-cli-flag, done -- no depends_on here since that item is already done as of this item's own creation, not a real gate), run a… | calibration |
+| 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 
 ## Locked (6)
 | Priority | ID | Gate | Area |
@@ -23,17 +24,15 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (6)
+## Blocked (4)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
-| 4 | cross-venue-expansion | net-edge-fee-depth-model, replay-instrument-validation | data-quality |
-| 5 | methodology-writeup | replay-instrument-validation, preregistration | reporting |
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (95)
+## Done (96)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -98,6 +97,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | mcp-server-v2-operational-tools | User (as PM, following Liam/monday.com's retirement) asked what new plugins or connectors could streamline the project. | infra |
 | 3 | model-used-field-disconnected-from-cli-override | Found 2026-09-01 while checking the first Opus-trial run's result row: run_meta['model_used'] (main.py:246) read config.scoring.scorer_model -- a static, cosmetic-only field never passed to any… | infra |
 | 3 | monday-com-retired-backlog-dashboard-page | User's monday.com trial expired 2026-08-30. | infra |
+| 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
 | 3 | replay-runner-crash-on-malformed-cli-response | Found 2026-08-28 running a replay-instrument-validation corpus-build batch: it crashed with 'str' object has no attribute 'keys'. | validation |
 | 3 | research-diligence-before-pass | User request: "I don't want to pass on bets... | calibration |
