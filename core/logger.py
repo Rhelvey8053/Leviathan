@@ -162,6 +162,13 @@ def _init_db() -> None:
             # predict outcomes" can never be answered even retroactively.
             "poly_price            REAL",
             "poly_price_gap        REAL",
+            # Fee-adjusted version of poly_price_gap (backlog:
+            # cross-venue-expansion) -- core.fees-modeled Kalshi+Polymarket
+            # taker fees shrink the raw gap toward zero (never flip its
+            # sign). Purely auxiliary/informational: never blended into
+            # direction/confidence/edge, never read by any win-rate/Brier
+            # calculation, same discipline as cross_model_opinion.
+            "poly_net_price_gap    REAL",
             "consensus_gap         REAL",
             "consensus_dir         TEXT",
             "smart_money_count     INTEGER DEFAULT 0",
@@ -379,12 +386,12 @@ def log_signal(signal: dict) -> None:
                  volume,open_interest,
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
-                 poly_price,poly_price_gap,consensus_gap,consensus_dir,
+                 poly_price,poly_price_gap,poly_net_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
                  ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
                  cross_model_opinion)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -436,6 +443,7 @@ def log_signal(signal: dict) -> None:
                 _to_int(signal.get("confluence_count")),
                 _to_float(signal.get("poly_price")),
                 _to_float(signal.get("poly_price_gap")),
+                _to_float(signal.get("poly_net_price_gap")),
                 _to_float(signal.get("consensus_gap")),
                 signal.get("consensus_dir"),
                 _to_int(signal.get("smart_money_count")) or 0,
@@ -475,12 +483,12 @@ def log_pass(signal: dict) -> None:
                  volume,open_interest,
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
-                 poly_price,poly_price_gap,consensus_gap,consensus_dir,
+                 poly_price,poly_price_gap,poly_net_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
                  ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
                  cross_model_opinion)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -538,6 +546,7 @@ def log_pass(signal: dict) -> None:
                 _to_int(signal.get("confluence_count")),
                 _to_float(signal.get("poly_price")),
                 _to_float(signal.get("poly_price_gap")),
+                _to_float(signal.get("poly_net_price_gap")),
                 _to_float(signal.get("consensus_gap")),
                 signal.get("consensus_dir"),
                 _to_int(signal.get("smart_money_count")) or 0,

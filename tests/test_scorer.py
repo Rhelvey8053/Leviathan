@@ -205,6 +205,42 @@ def test_flag_reason_cross_market_lower():
     assert "lower" in prompt
 
 
+def test_flag_reason_cross_market_no_fee_adjusted_line_when_absent():
+    """Existing poly dicts without net_price_gap (pre-cross-venue-expansion) render unchanged."""
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": 0.18, "poly_price": 0.68, "poly_question": "Will X happen?", "match_score": 0.72},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FEE-ADJUSTED GAP" not in prompt
+
+
+def test_flag_reason_cross_market_fee_adjusted_gap_shown_still_real():
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": 0.18, "net_price_gap": 0.15, "poly_price": 0.68,
+              "poly_question": "Will X happen?", "match_score": 0.72},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FEE-ADJUSTED GAP" in prompt
+    assert "15.0pp" in prompt
+    assert "still a real gap after modeled fees" in prompt
+
+
+def test_flag_reason_cross_market_fee_adjusted_gap_shown_mostly_noise():
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": 0.03, "net_price_gap": 0.004, "poly_price": 0.53,
+              "poly_question": "Will X happen?", "match_score": 0.72},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FEE-ADJUSTED GAP" in prompt
+    assert "mostly or entirely fee noise" in prompt
+
+
 def test_flag_reason_absent_when_no_path():
     m = _base_market(flag_path=None)
     prompt = scorer.build_prompt([m])

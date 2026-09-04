@@ -7,9 +7,12 @@ market object, so one bulk fetch gives us everything we need.
 """
 
 import json
+import math
 import re
 import requests
 from difflib import SequenceMatcher
+
+from core import fees
 
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 
@@ -156,11 +159,27 @@ def match_markets(
     min_gap and min_match_score override config values when provided.
 
     Result per ticker:
-      poly_question, poly_price, poly_slug, condition_id, match_score, price_gap
+      poly_question, poly_price, poly_slug, condition_id, match_score,
+      price_gap, net_price_gap
+
+    net_price_gap (backlog: cross-venue-expansion) is price_gap after
+    modeling both venues' own taker fees (core.fees.kalshi_fee/
+    polymarket_fee) at config.betting.unit_size contracts/shares, shrunk
+    toward zero by the combined fee (never flipped in sign) — the same
+    "cost consumes the theoretical edge" pattern core.scanner.score_market
+    already applies to net_edge. This is a purely informational,
+    auxiliary field: it does not change price_gap, the existing
+    CROSS_MARKET flag trigger, or cross_market_promote's gap threshold,
+    all of which still key off the raw price_gap exactly as before —
+    Leviathan never executes cross-venue trades, so this exists to give
+    Claude honest fee context on an already-surfaced gap, not to define a
+    new executable arbitrage claim. None when either side's price is
+    unusable (0 or 1) or unit_size can't be resolved.
     """
     cfg       = config.get("polymarket", {})
     threshold = min_match_score if min_match_score is not None else cfg.get("min_match_score", 0.50)
     gap_floor = min_gap         if min_gap         is not None else cfg.get("min_price_gap",   0.0)
+    unit_size = config.get("betting", {}).get("unit_size", 10)
 
     results = {}
     for m in markets:
@@ -174,7 +193,8 @@ def match_markets(
             continue
 
         kalshi_mid = m.get("mid_price")
-        price_gap  = (match["yes_price"] - kalshi_mid) if kalshi_mid is not None else None
+        poly_price = match["yes_price"]
+        price_gap  = (poly_price - kalshi_mid) if kalshi_mid is not None else None
 
         # When a gap floor is set, we need a measurable gap — skip if unknown
         if gap_floor > 0 and price_gap is None:
@@ -182,13 +202,22 @@ def match_markets(
         if price_gap is not None and abs(price_gap) < gap_floor:
             continue
 
+        net_price_gap = None
+        if price_gap is not None and unit_size > 0:
+            k_fee = fees.kalshi_fee(kalshi_mid, unit_size)
+            p_fee = fees.polymarket_fee(poly_price, unit_size, m.get("category"))
+            total_fee_pp = (k_fee + p_fee) / unit_size
+            shrunk = max(abs(price_gap) - total_fee_pp, 0.0)
+            net_price_gap = round(math.copysign(shrunk, price_gap), 4) if price_gap != 0 else 0.0
+
         results[ticker] = {
-            "poly_question": match["question"],
-            "poly_price":    match["yes_price"],
-            "poly_slug":     match["slug"],
-            "condition_id":  match["condition_id"],
-            "match_score":   match["match_score"],
-            "price_gap":     round(price_gap, 4) if price_gap is not None else None,
+            "poly_question":  match["question"],
+            "poly_price":     poly_price,
+            "poly_slug":      match["slug"],
+            "condition_id":   match["condition_id"],
+            "match_score":    match["match_score"],
+            "price_gap":      round(price_gap, 4) if price_gap is not None else None,
+            "net_price_gap":  net_price_gap,
         }
 
     return results

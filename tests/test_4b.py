@@ -361,3 +361,71 @@ class TestKalshiFee:
             net_edge    = 0.20
             net_edge_after_fee = net_edge - fee_as_pp
             assert net_edge_after_fee <= net_edge
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART D: Polymarket fee (backlog: cross-venue-expansion)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from core.fees import polymarket_fee, polymarket_category_fee_rate
+
+
+class TestPolymarketFee:
+    """polymarket_fee formula: shares * category_rate * p * (1-p), rounded to the cent."""
+
+    def test_category_rate_politics(self):
+        assert polymarket_category_fee_rate("Politics") == 0.04
+
+    def test_category_rate_sports(self):
+        assert polymarket_category_fee_rate("Sports") == 0.05
+
+    def test_category_rate_crypto(self):
+        assert polymarket_category_fee_rate("Crypto") == 0.07
+
+    def test_category_rate_case_insensitive(self):
+        assert polymarket_category_fee_rate("CRYPTO") == polymarket_category_fee_rate("crypto")
+
+    def test_category_rate_unmapped_falls_back_to_other(self):
+        assert polymarket_category_fee_rate("Some Unknown Category") == 0.05
+
+    def test_category_rate_missing_falls_back_to_other(self):
+        assert polymarket_category_fee_rate(None) == 0.05
+
+    def test_fee_at_50pct_politics(self):
+        # 0.04 * 0.5 * 0.5 * 10 = 0.10
+        assert polymarket_fee(0.5, 10, "Politics") == pytest.approx(0.10, abs=1e-6)
+
+    def test_fee_at_50pct_crypto_higher_than_politics(self):
+        crypto_fee   = polymarket_fee(0.5, 10, "Crypto")
+        politics_fee = polymarket_fee(0.5, 10, "Politics")
+        assert crypto_fee > politics_fee
+
+    def test_fee_symmetric(self):
+        # p*(1-p) is exactly symmetric, but cent-rounding two independently
+        # computed floats can land a single cent apart at an unlucky
+        # halfway boundary (same reason kalshi_fee's own symmetry test
+        # tolerates rounding noise) -- assert within a cent, not bit-exact.
+        assert polymarket_fee(0.9, 10, "Sports") == pytest.approx(polymarket_fee(0.1, 10, "Sports"), abs=0.02)
+
+    def test_fee_scales_with_shares(self):
+        assert polymarket_fee(0.3, 20, "Sports") == pytest.approx(2 * polymarket_fee(0.3, 10, "Sports"), abs=0.02)
+
+    def test_zero_shares_returns_zero(self):
+        assert polymarket_fee(0.5, 0, "Politics") == 0.0
+
+    def test_boundary_price_zero_returns_zero(self):
+        assert polymarket_fee(0.0, 10, "Politics") == 0.0
+
+    def test_boundary_price_one_returns_zero(self):
+        assert polymarket_fee(1.0, 10, "Politics") == 0.0
+
+    def test_fee_never_negative(self):
+        for p in (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95):
+            assert polymarket_fee(p, 10, "Sports") >= 0.0
+
+    def test_fee_highest_at_mid_price(self):
+        assert polymarket_fee(0.5, 10, "Sports") > polymarket_fee(0.1, 10, "Sports")
+        assert polymarket_fee(0.5, 10, "Sports") > polymarket_fee(0.9, 10, "Sports")
+
+    def test_missing_category_uses_other_rate(self):
+        assert polymarket_fee(0.5, 10, None) == pytest.approx(polymarket_fee(0.5, 10, "some junk"))

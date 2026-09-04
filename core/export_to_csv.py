@@ -95,11 +95,14 @@ WHITELIST = [
     # consensus_dir/smart_money_count/smart_money_dir are new columns
     # (2026-07-27) -- previously computed fresh every run for the
     # prompt/report and discarded, never persisted at all.
+    # poly_net_price_gap (2026-09-04, backlog: cross-venue-expansion) is
+    # poly_price_gap after modeling both venues' own taker fees -- purely
+    # auxiliary/informational, same as poly_price_gap itself.
     "whale_detected", "whale_direction", "whale_max_trade_size",
     "heuristic_label", "heuristic_direction",
     "ob_flag", "ob_imbalance", "ob_direction", "spread_wide", "spread_pct",
     "ext_estimate", "ext_edge", "ext_n_signals", "ext_alpha", "confluence_count",
-    "poly_price", "poly_price_gap", "consensus_gap", "consensus_dir",
+    "poly_price", "poly_price_gap", "poly_net_price_gap", "consensus_gap", "consensus_dir",
     "smart_money_count", "smart_money_dir",
 
     # Outcome / resolution. market_drift_pp is the GOAL_subscriber_report.md

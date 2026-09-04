@@ -940,8 +940,9 @@ def main():
             # Flattened for persistence -- the raw poly/ext_consensus/
             # smart_money structures above are used for the prompt/report
             # only and are never stored on the signals row.
-            "poly_price":        (m.get("poly") or {}).get("poly_price"),
-            "poly_price_gap":    (m.get("poly") or {}).get("price_gap"),
+            "poly_price":         (m.get("poly") or {}).get("poly_price"),
+            "poly_price_gap":     (m.get("poly") or {}).get("price_gap"),
+            "poly_net_price_gap": (m.get("poly") or {}).get("net_price_gap"),
             "consensus_gap":     (m.get("ext_consensus") or {}).get("consensus_gap"),
             "consensus_dir":     (m.get("ext_consensus") or {}).get("consensus_dir"),
             "smart_money_count": len(m.get("smart_money") or []),
@@ -1080,9 +1081,10 @@ def main():
                     "ext_markets":     m.get("ext_markets", []),
                     "ext_consensus":   m.get("ext_consensus", {}),
                     "smart_money":     m.get("smart_money", []),
-                    "poly_price":        (m.get("poly") or {}).get("poly_price"),
-                    "poly_price_gap":    (m.get("poly") or {}).get("price_gap"),
-                    "consensus_gap":     (m.get("ext_consensus") or {}).get("consensus_gap"),
+                    "poly_price":         (m.get("poly") or {}).get("poly_price"),
+                    "poly_price_gap":     (m.get("poly") or {}).get("price_gap"),
+                    "poly_net_price_gap": (m.get("poly") or {}).get("net_price_gap"),
+                    "consensus_gap":      (m.get("ext_consensus") or {}).get("consensus_gap"),
                     "consensus_dir":     (m.get("ext_consensus") or {}).get("consensus_dir"),
                     "smart_money_count": len(m.get("smart_money") or []),
                     "smart_money_dir":   _smart_money_majority_dir(m.get("smart_money") or []),

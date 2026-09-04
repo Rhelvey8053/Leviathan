@@ -3479,6 +3479,55 @@ def test_log_signal_stores_cross_market_fields(tmp_db):
     assert row["smart_money_dir"] == "YES"
 
 
+# ─── poly_net_price_gap (backlog: cross-venue-expansion) ──────────────────────
+
+def test_schema_includes_poly_net_price_gap_column(tmp_db):
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "poly_net_price_gap" in cols
+
+
+def test_log_signal_stores_poly_net_price_gap(tmp_db):
+    sig = {
+        "ticker": "KXNPG1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "poly_price": 0.45, "poly_price_gap": 0.15, "poly_net_price_gap": 0.12,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT poly_net_price_gap FROM signals WHERE ticker='KXNPG1'"
+        ).fetchone()
+    assert row["poly_net_price_gap"] == pytest.approx(0.12)
+
+
+def test_log_signal_poly_net_price_gap_null_when_absent(tmp_db):
+    sig = {
+        "ticker": "KXNPG2", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT poly_net_price_gap FROM signals WHERE ticker='KXNPG2'"
+        ).fetchone()
+    assert row["poly_net_price_gap"] is None
+
+
+def test_log_pass_stores_poly_net_price_gap(tmp_db):
+    sig = {
+        "ticker": "KXNPG3", "confidence": "LOW", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.32, "edge": 0.02,
+        "poly_price": 0.31, "poly_price_gap": 0.01, "poly_net_price_gap": 0.0,
+    }
+    logger.log_pass(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT poly_net_price_gap FROM signals WHERE ticker='KXNPG3'"
+        ).fetchone()
+    assert row["poly_net_price_gap"] == pytest.approx(0.0)
+
+
 def test_log_signal_tier23_defaults_when_absent(tmp_db):
     """No Tier-2/3 keys provided -- must default cleanly, not raise."""
     sig = {

@@ -713,6 +713,14 @@ def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
                 f"Polymarket question is priced {gap_pct:.0f}% {direction} than Kalshi. "
                 f"Determine whether Kalshi or Polymarket is better calibrated for this event."
             )
+            net_gap = poly.get("net_price_gap")
+            if net_gap is not None:
+                net_pct = abs(net_gap) * 100
+                note = "still a real gap after modeled fees" if net_pct >= 1.0 else "mostly or entirely fee noise, weight the raw gap accordingly"
+                lines.append(
+                    f"   FEE-ADJUSTED GAP: after modeled Kalshi+Polymarket taker fees, "
+                    f"the gap narrows to {net_pct:.1f}pp — {note}."
+                )
 
         # Pre-computed Leviathan Score — composite signal quality (0-100, A-D band)
         _lv = compute_leviathan_score(m)
