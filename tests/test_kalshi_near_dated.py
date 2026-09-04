@@ -238,6 +238,51 @@ def test_attach_event_category_metadata_prints_warning_on_failure(capsys):
     assert "network error" in captured.out
 
 
+def test_per_day_quota_prevents_early_abundant_day_from_starving_later_day():
+    """
+    backlog: kalshi-event-recency-window-misses-new-markets. Day 0 alone has
+    far more real markets than target_count -- under the old global-target
+    early-exit, the day-loop would never even reach day 2, so day 2's
+    market ('LATE-1') would never appear in the output regardless of how
+    many days max_days allowed. max_days=3, target_count=9 -> per_day_target
+    = 3, so day 0 is capped at 3 guaranteed picks and the walk continues.
+    """
+    day0_page = _resp({
+        "markets": [_market(f"EARLY-{i}", f"E{i}") for i in range(20)],
+        "cursor": None,
+    })
+    day1_page = _resp({"markets": [], "cursor": None})
+    day2_page = _resp({"markets": [_market("LATE-1", "E-LATE")], "cursor": None})
+    with patch("core.kalshi._sdk_json", side_effect=[day0_page, day1_page, day2_page]), \
+         patch("core.kalshi.fetch_event_detail", return_value={}):
+        markets = kalshi.fetch_near_dated_markets(
+            {"environment": "demo"}, max_days=3, target_count=9, max_pages=30,
+        )
+    tickers = [m["ticker"] for m in markets]
+    assert "LATE-1" in tickers
+
+
+def test_leftover_budget_backfilled_from_abundant_day_surplus():
+    """
+    The per-day cap must not shrink total yield versus the pre-fix
+    behavior when most days are thin: day 0 has far more real markets than
+    its own quota, and every other day is empty, so the final list should
+    still fill up to target_count by drawing on day 0's surplus (already
+    fetched at zero extra API cost) rather than stopping at the per-day cap.
+    """
+    day0_page = _resp({
+        "markets": [_market(f"M-{i}", f"E{i}") for i in range(20)],
+        "cursor": None,
+    })
+    empty_page = _resp({"markets": [], "cursor": None})
+    with patch("core.kalshi._sdk_json", side_effect=[day0_page] + [empty_page] * 4), \
+         patch("core.kalshi.fetch_event_detail", return_value={}):
+        markets = kalshi.fetch_near_dated_markets(
+            {"environment": "demo"}, max_days=5, target_count=15, max_pages=30,
+        )
+    assert len(markets) == 15
+
+
 def test_attach_event_category_metadata_one_call_per_unique_event():
     markets = [_market("A", "EVT-SHARED"), _market("B", "EVT-SHARED"), _market("C", "EVT-OTHER")]
     def fake_detail(config, event_ticker):

@@ -336,6 +336,37 @@ def fetch_near_dated_markets(
     so this is far cheaper than one call per market), matching the same
     two fields main.py's events-catalog loop already attaches from the
     event object it already has in hand.
+
+    Per-day quota (kalshi-event-recency-window-misses-new-markets, 2026-09-04):
+    the day-loop used to stop entirely once the GLOBAL target_count was
+    reached, walking days in chronological order starting from today.
+    Live-verified this let 1-2 abundant, low-flood early days (e.g. today,
+    tomorrow) consume the whole budget before the loop ever reached a later
+    day — confirmed against the NFL/NCAAF 2026 season: KXNFLGAME/
+    KXNCAAFGAME game-winner markets, which happened to close on days 9-10 of
+    the window, never appeared in a live call's output despite 0% overlap
+    with fetch_events()'s output (i.e. no other path into all_markets ever
+    surfaced them either). This isn't football-specific — ANY market family
+    whose close dates land after an early abundant day was structurally
+    unreachable, the same "recency crowds out newness" shape fetch_events()
+    itself has, just keyed on day-order instead of last_updated_ts.
+
+    Fix: each day is capped at a fair per-day quota
+    (target_count // max_days, minimum 1) of "guaranteed" markets, and the
+    day-loop always walks every day up to max_days (bounded only by
+    max_pages, the pre-existing hard cost cap) instead of stopping once the
+    global target is hit — so a market family closing on day 10 gets the
+    same shot as one closing on day 0. Guaranteed picks from every day are
+    combined first, so no single day's abundance can crowd another day out
+    of the final list. Anything a day collects beyond its own quota (already
+    fetched over the wire at zero extra cost — a single page is 200
+    markets, far more than most days' quota) is kept as surplus and used to
+    backfill the final list up to target_count if the guaranteed picks alone
+    don't fill it, so this fix does not reduce total yield on the days that
+    used to dominate — confirmed live 2026-09-04: same page count (38,
+    under the existing 40-page config cap) and same final count (300) as
+    before, but now with KXNFLGAME/KXNCAAFGAME markets included where
+    previously there were zero, in any live run, ever.
     """
     path = "/markets"
     now = datetime.now(timezone.utc)
@@ -350,19 +381,26 @@ def fetch_near_dated_markets(
     # pages there wouldn't have helped.
     CHUNK_MAX_PAGES = 5
 
-    collected: list[dict] = []
+    # Fair per-day share of the final list -- see docstring. Floor of 1 so a
+    # large max_days relative to target_count never zeroes every day out.
+    per_day_target = max(target_count // max_days, 1)
+
+    guaranteed: list[dict] = []
+    surplus: list[dict] = []
     seen_tickers: set[str] = set()
     pages = 0
     day = 0
-    while day < max_days and len(collected) < target_count and pages < max_pages:
+    while day < max_days and pages < max_pages:
         chunk_min_ts = int((now + timedelta(days=day)).timestamp())
         chunk_max_ts = int((now + timedelta(days=day + 1)).timestamp())
         day += 1
 
+        day_bucket: list[dict] = []
+        day_surplus: list[dict] = []
         cursor = None
         chunk_pages = 0
         while (chunk_pages < CHUNK_MAX_PAGES and pages < max_pages
-               and len(collected) < target_count):
+               and len(day_bucket) < per_day_target):
             params = {
                 "status": "open", "limit": 200,
                 "min_close_ts": chunk_min_ts, "max_close_ts": chunk_max_ts,
@@ -379,11 +417,19 @@ def fetch_near_dated_markets(
                 t = m.get("ticker", "")
                 if t and t not in seen_tickers and not t.startswith(exclude_prefixes):
                     seen_tickers.add(t)
-                    collected.append(m)
+                    if len(day_bucket) < per_day_target:
+                        day_bucket.append(m)
+                    else:
+                        day_surplus.append(m)
             cursor = data.get("cursor")
             if not cursor:
                 break
+        guaranteed.extend(day_bucket)
+        surplus.extend(day_surplus)
 
+    collected = guaranteed
+    if len(collected) < target_count:
+        collected = collected + surplus[: target_count - len(collected)]
     collected = collected[:target_count]
     return attach_event_category_metadata(config, collected)
 
