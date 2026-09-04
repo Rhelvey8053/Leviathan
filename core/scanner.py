@@ -191,6 +191,39 @@ def dedup_by_event_scored(markets: list[dict]) -> list[dict]:
     return list(by_event.values()) + no_event
 
 
+# backlog: win-catchall-two-team-game-misfire (2026-09-04). Kalshi's
+# older/verbose game-market title template -- "Will Notre Dame win the
+# Rice vs Notre Dame college football game?" -- puts team names between
+# "win the" and "vs", so it never matches the "sports game" rule's own
+# 'win the game' keyword below and instead falls all the way through to
+# the generic ' win ' catch-all (rate 0.08, tuned on a 12,600-row
+# historical corpus that -- confirmed empirically -- contains zero real
+# head-to-head game markets). Live-verified 2026-09-04: 17 of 500 open
+# KXNCAAFGAME markets hit this exact gap, each showing an identical
+# base_rate=0.08 regardless of matchup (Ohio St. vs Texas, LSU vs Ole
+# Miss, ...) -- a fair two-team game's naive prior is ~50%, not 8%.
+# This is a pre-check, not another _HEURISTIC_RULES row, because the
+# table's rows can only OR plain substrings together and this pattern
+# needs an AND: ' vs ' alone also matches structurally unrelated
+# many-way "announcer mention" props ("What will the announcers say
+# during Wings vs Fire...?", confirmed against 443 real historical
+# titles) that never mention winning at all. Requiring both substrings
+# together is verified safe against history: zero settled_markets titles
+# (of 12,600) contain both ' vs ' and ' win ', so this cannot silently
+# reclassify anything that used to resolve through the real table.
+# Reuses the SAME rate/label as the existing "sports game" rule just
+# below (0.52) rather than inventing a new one -- this is the same
+# real-world category, just a title-phrasing gap, not a genuinely
+# distinct sub-population the way down-ballot-election's many-way split
+# was.
+_TWO_WAY_MATCHUP_RATE  = 0.52
+_TWO_WAY_MATCHUP_LABEL = "sports game"
+
+
+def _is_two_way_matchup_phrasing(title: str) -> bool:
+    return " vs " in title and " win " in title
+
+
 _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['win the world series', 'win world series'], 0.5, 'sports championship'),
     (['win the championship', 'win the nba', 'win the nfl', 'win the cup', 'win the world cup', 'win the fifa', 'world cup winner', 'world series winner', 'win the champions league', 'champions league winner', 'stanley cup'], 0.5, 'sports championship'),
@@ -475,6 +508,8 @@ def estimate_base_rate(market: dict) -> float | None:
     2,344 heuristic-matched settled markets got a rate but no label).
     """
     title = (market.get("title") or "").lower()
+    if _is_two_way_matchup_phrasing(title):
+        return _TWO_WAY_MATCHUP_RATE
     for keywords, rate, _label in _HEURISTIC_RULES:
         if any(k in title for k in keywords):
             return rate
@@ -487,10 +522,13 @@ def get_heuristic_label(market: dict) -> str | None:
     Used in build_prompt() so Claude sees the category name alongside the base
     rate, enabling it to apply category-specific calibration rules.
     Returns None when estimate_base_rate() would also return None -- both
-    read the same _HEURISTIC_RULES table, so this is now structurally
-    guaranteed rather than merely intended.
+    read the same _HEURISTIC_RULES table (plus the shared
+    _is_two_way_matchup_phrasing pre-check both functions run first), so
+    this is now structurally guaranteed rather than merely intended.
     """
     title = (market.get("title") or "").lower()
+    if _is_two_way_matchup_phrasing(title):
+        return _TWO_WAY_MATCHUP_LABEL
     for keywords, _rate, label in _HEURISTIC_RULES:
         if any(k in title for k in keywords):
             return label

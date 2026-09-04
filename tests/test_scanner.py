@@ -1678,6 +1678,49 @@ def test_generic_win_catchall_rate():
     assert scanner.estimate_base_rate(m) == pytest.approx(0.08)
 
 
+def test_two_way_matchup_phrasing_gets_sports_game_rate_not_catchall():
+    """
+    backlog: win-catchall-two-team-game-misfire. Kalshi's verbose
+    game-market title template puts team names between "win the" and
+    "vs" ("Will Notre Dame win the Rice vs Notre Dame college football
+    game?"), so it never matches the "sports game" rule's own literal
+    'win the game' keyword and previously fell through to the generic
+    ' win ' catch-all (0.08) -- live-verified 2026-09-04 against 17 of
+    500 real open KXNCAAFGAME markets, all showing base_rate=0.08
+    regardless of matchup. A fair two-team game's naive prior is ~50%,
+    not a many-way-tournament rate.
+    """
+    m = _market(title="Will Notre Dame win the Rice vs Notre Dame college football game?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.52)
+    assert scanner.get_heuristic_label(m) == "sports game"
+
+
+def test_two_way_matchup_phrasing_requires_both_vs_and_win():
+    """
+    ' vs ' alone must NOT trigger the two-way-matchup rate -- it also
+    appears in structurally unrelated many-way "announcer mention" props
+    ("What will the announcers say during Wings vs Fire...?", confirmed
+    against 443 real historical settled_markets titles) that never
+    mention winning and have nothing to do with who wins the game.
+    """
+    m = _market(title="What will the announcers say during Wings vs Fire Women's Professional Basketball Game?")
+    assert scanner.estimate_base_rate(m) is None
+    assert scanner.get_heuristic_label(m) is None
+
+
+def test_two_way_matchup_phrasing_short_form_title_unaffected():
+    """
+    Kalshi's newer, terser title format ("Team Name wins", no 'vs') for
+    the same KXNFLGAME/KXNCAAFGAME series never matches ' win ' (no
+    trailing space after 'win' in 'wins') and is untouched by this fix --
+    confirmed live 2026-09-04 that these already fall through to no
+    heuristic (Claude scores them directly) or DRIFT, never HEURISTIC.
+    """
+    m = _market(title="Kansas City wins")
+    assert scanner.estimate_base_rate(m) is None
+    assert scanner.get_heuristic_label(m) is None
+
+
 def test_show_renewal_recalibration():
     """
     backlog: show-renewal-recalibration. Was 0.25 labeled "show renewal"
