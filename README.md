@@ -97,7 +97,7 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `core/logger.py` | SQLite persistence — signals, runs, fills, probes |
 | `core/report.py` | Report compiler and email sender |
 | `core/export_to_csv.py` | Exports `data/leviathan.db` tables to `data/powerbi_export/` |
-| `core/fees.py` | Kalshi fee schedule and net-of-fee edge math |
+| `core/fees.py` | Kalshi + Polymarket fee schedules, net-of-fee edge math, and the fee-adjusted cross-venue gap calculation |
 | `core/sizing.py` | Confidence-weighted hypothetical stake sizing — self-gated on live resolved-signal counts, fully inert until the same threshold as `auto-calibration-loop` clears |
 | `sources/polymarket.py` | Polymarket Gamma API price cross-reference |
 | `sources/external_markets.py` | Manifold + PredictIt + Metaculus aggregator |
