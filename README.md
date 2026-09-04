@@ -6,6 +6,8 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 **Not a developer?** [`docs/STORY.md`](docs/STORY.md) tells the same project as a plain-language narrative — no code required.
 
+**Want to poke holes in it?** [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) covers the market-price anchoring problem this project found in itself, the baseline comparison it built to catch it, and the pre-registered kill criterion it's holding itself to — written for outside review, current numbers included, unflattering ones not omitted.
+
 **Working here with Claude Code?** Read [`CLAUDE.md`](CLAUDE.md) first — orientation, hard policy constraints (Pro-subscription-only, confirm before running `main.py`), and where to look instead of re-deriving things that are already documented.
 
 ---
