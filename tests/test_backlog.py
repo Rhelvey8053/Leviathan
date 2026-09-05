@@ -444,8 +444,18 @@ def test_parses_and_96_items(backlog_data):
     autonomously -- both need the user's own call on the tradeoffs
     (max_events raises API/local-compute cost; the heuristic fix needs
     a real prior, not a guess).
+
+    116, not 115: ai-workflow-research-findings-2026-09, a PM-directed
+    research pass (user asked to look into repos/AI developments that
+    could help this project) -- logged rather than actioned autonomously
+    since both findings (an Anthropic-hosted scheduler as a possible fix
+    for the still-unresolved Task Scheduler reliability bug; external
+    LLM-forecasting benchmarks as a possible calibration check beyond
+    this project's own small resolved-signal sample) involve either a
+    real cost-policy question or real comparison effort the user should
+    weigh in on.
     """
-    assert len(backlog_data["items"]) == 115
+    assert len(backlog_data["items"]) == 116
 
 
 def test_all_ids_unique(backlog_data):
