@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-09-04 | Metrics: resolved=25, fills=7
+Last updated: 2026-09-05 | Metrics: resolved=33, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
@@ -14,13 +14,12 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | trial-stronger-model-main-scoring | Using the now-live config.llm.cli_model_override (see wire-llm-model-cli-flag, done -- no depends_on here since that item is already done as of this item's own creation, not a real gate), run a… | calibration |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 
-## Locked (6)
+## Locked (5)
 | Priority | ID | Gate | Area |
 |----------|-----|------|------|
 | 4 | empirical-base-rates-poly | sufficient_per_heuristic_label_resolved_data == 1 | calibration |
 | 4 | per-wallet-track-record | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | calibration-curve | resolved_count >= 50 | calibration |
-| 5 | edge-decay-analysis | resolved_count >= 30 | validation |
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
@@ -32,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (98)
+## Done (99)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -126,6 +125,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 | 4 | whale-actionability-scorecard | User asked what we're actually doing with whale-flag data beyond identifying it -- the report's WHALE ACTIVITY table just lists sightings (a market a whale traded, no track record attached), so there… | reporting |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
+| 5 | edge-decay-analysis | Measure how quickly identified edges decay as markets approach their resolution date. | validation |
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
 | 5 | heuristic-sunsetting | Ran analysis/heuristic_backtest.py fresh and screened every label with n>=10 for underperformance -- but the correct comparison isn't raw Brier vs. | calibration |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
