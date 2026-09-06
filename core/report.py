@@ -8,6 +8,7 @@ from datetime import datetime, date, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formatdate, make_msgid
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from analysis.smart_money_scan import _is_sports_title
 from core.fees import kalshi_fee
@@ -44,6 +45,20 @@ def _usd(v) -> str:
 
 def _rule(char="-") -> str:
     return char * W
+
+
+_CENTRAL_TZ = ZoneInfo("America/Chicago")
+
+
+def _report_time_str(now_utc: datetime) -> str:
+    """
+    Report header time, in US Central rather than UTC (user preference,
+    2026-09-06 -- UTC was confusing in the actual emails). Uses the
+    America/Chicago IANA zone rather than a fixed UTC-6 offset so it
+    correctly reads CST or CDT depending on the time of year, and labels
+    itself accordingly (%Z) rather than hardcoding either.
+    """
+    return now_utc.astimezone(_CENTRAL_TZ).strftime("%H:%M %Z")
 
 
 def _ev_float(direction: str, market_price, estimate, unit_size: float = 10) -> float | None:
@@ -1321,7 +1336,7 @@ def compile_report(
     unit_size  = config.get("betting", {}).get("unit_size", 10)
     now_utc    = now_utc or datetime.now(timezone.utc)
     date_str   = now_utc.strftime("%B %d, %Y")
-    time_str   = now_utc.strftime("%H:%M UTC")
+    time_str   = _report_time_str(now_utc)
     env        = config.get("environment", "prod").upper()
     qualifying = _qualifying(signals, threshold_rank, min_lv)
     new_q      = _qualifying(new_signals or [], threshold_rank, min_lv)
@@ -1345,9 +1360,7 @@ def compile_report(
     out.append("")
     out.append(f"  New Signals:    {hdr['new_count']}")
     out.append(f"  Repeat Signals: {hdr['repeat_count']}")
-    out.append(f"  Whale Flags:    {hdr['whale_count']}")
     out.append(f"  Markets Scanned:{hdr['markets_scanned']}")
-    out.append(f"  Smart Money:    {hdr['smart_money_xref_count']} Kalshi x-refs from top Polymarket traders")
     if hdr["next_resolution_date"]:
         out.append(f"  Next resolution: {hdr['next_resolution_date']}  ({hdr['next_resolution_days']} days)")
     out.append("")
@@ -1454,56 +1467,16 @@ def compile_report(
         ))
     out.append("")
 
-    # ── Smart money watchlist ─────────────────────────────────────────────────
-    # show_detail must reflect whether the smart-money scan itself found
-    # anything (kalshi_signals) — NOT the scanner's unrelated qualifying
-    # count, which used to hide trader detail during scanner dry spells
-    # even when smart money had real cross-references to show.
-    _sm_has_signals = bool((smart_money_result or {}).get("kalshi_signals"))
-    out.extend(_smart_money_section(smart_money_result, show_detail=_sm_has_signals))
-
-    # ── Whale activity ────────────────────────────────────────────────────
-    out.append(_rule("="))
-    out.append("WHALE ACTIVITY  (no qualifying signal)")
-    out.append(_rule("="))
-    out.append("")
-    if not whale_only:
-        out.append("  No unusual whale activity this run.")
-    else:
-        _wh_rows = []
-        for w in whale_only:
-            avg   = w.get("avg_trade_size", 0)
-            ratio = f"{w.get('max_trade_size', 0)/avg:.1f}x" if avg else "—"
-            # whale-flag-lv-guarantee (2026-08-05 crash): whale_direction is
-            # explicitly None (not absent) whenever whales.detect_whale()
-            # finds unusual volume/block trades with no clear directional
-            # lean (core/whales.py sets whale_direction=None by default,
-            # independent of whale_detected) -- dict.get(key, default) only
-            # substitutes the default for a MISSING key, not a present key
-            # whose value is None, so this crashed _render_table's _cell()
-            # (`len(None)`) the first time a whale-only row with no
-            # determinable direction survived into the report. Whale flags
-            # reaching this table at all got much more likely once
-            # whale_detected started guaranteeing the min_pre_claude_lv gate
-            # (same commit) instead of silently dropping out beforehand --
-            # this exact shape apparently never actually reached this
-            # render path before. `or` (not the .get default) is the same
-            # None-safe pattern already used for this identical field in
-            # _week_whale_rows below.
-            _wh_rows.append([
-                _trunc(w.get("ticker") or "", 22),
-                w.get("whale_direction") or "?",
-                ratio,
-                _trunc(w.get("title") or "", 32),
-            ])
-        out.extend(_render_table(
-            ["Ticker", "Direction", "Size vs Avg", "Title"],
-            _wh_rows,
-            widths=[22, 10, 11, 32],
-        ))
-    out.append("")
-
     # ── Upcoming resolutions ──────────────────────────────────────────────
+    # daily-report-drop-whale-smart-money (2026-09-06): both sections
+    # removed from the daily per-run report -- user feedback was that
+    # neither carried real insight in this email (near-always "no unusual
+    # activity" / "no smart money data available this run"). The weekly
+    # digest (compile_weekly_digest/render_weekly_html below) keeps its
+    # own whale section, which aggregates a real win-rate-by-bucket
+    # scorecard across the week rather than per-run sightings -- that one
+    # was not touched, and is a different question (has following whale
+    # activity actually predicted wins) than this one was answering.
     upcoming = _get_upcoming(days=14)
     out.append(_rule("="))
     out.append("UPCOMING RESOLUTIONS  (closing within 14 days)")
@@ -1800,7 +1773,7 @@ def render_html(
     min_lv   = int(config.get("scoring", {}).get("min_report_lv", 0))
     now_utc  = now_utc or datetime.now(timezone.utc)
     date_str = now_utc.strftime("%B %d, %Y")
-    time_str = now_utc.strftime("%H:%M UTC")
+    time_str = _report_time_str(now_utc)
     env      = config.get("environment", "prod").upper()
     n_mkt    = run_meta.get("markets_scanned", 0)
     runtime_s = run_meta.get("runtime_ms", 0) / 1000
@@ -1841,7 +1814,7 @@ def render_html(
         'No unplaced signals in queue.</td></tr>'
     )
 
-    preheader = (f"{preheader_signals} signals · {hdr['whale_count']} whale flags · "
+    preheader = (f"{preheader_signals} signals · "
                  f"next resolution {next_res_short or '—'} · {len(picks)} picks live on Kalshi")
 
     html_doc = f'''<!DOCTYPE html>
@@ -1895,27 +1868,17 @@ def render_html(
     <tr><td>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #D9E0DD;border-radius:3px;">
         <tr>
-          <td class="stack" width="20%" style="padding:18px 10px 18px 22px;">
+          <td class="stack" width="32%" style="padding:18px 10px 18px 22px;">
             <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">New</div>
             <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['new_count']}</div>
           </td>
           <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
-          <td class="stack" width="20%" style="padding:18px 10px;">
+          <td class="stack" width="32%" style="padding:18px 10px;">
             <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Repeat</div>
             <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['repeat_count']}</div>
           </td>
           <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
-          <td class="stack" width="20%" style="padding:18px 10px;">
-            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Whale</div>
-            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['whale_count']}</div>
-          </td>
-          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
-          <td class="stack" width="20%" style="padding:18px 10px;">
-            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Smart&nbsp;$</div>
-            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{hdr['smart_money_xref_count']}</div>
-          </td>
-          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
-          <td class="stack" width="20%" style="padding:18px 22px 18px 10px;">
+          <td class="stack" width="36%" style="padding:18px 22px 18px 10px;">
             <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Next&nbsp;Res.</div>
             <div style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:14px;font-weight:600;color:#14191B;padding-top:6px;">{_esc(next_res_s or "—")}</div>
           </td>
@@ -2011,8 +1974,13 @@ def _week_whale_rows(week_signals: list[dict]) -> list[dict]:
         whale_dir = row.get("whale_direction") or "?"
         ev = _ev_per_contract(whale_dir, row.get("market_price"), row.get("our_estimate"))
         rows.append({
-            "ticker":      row.get("ticker", ""),
-            "title":       row.get("title", ""),
+            # or "" (not .get(key, "")) -- ticker/title can be a present key
+            # with an explicit None value, not just a missing key; see the
+            # 2026-08-05 whale-direction crash this same pattern guards
+            # against just above (_trunc(None, ...) crashes the same way
+            # len(None) did for whale_direction).
+            "ticker":      row.get("ticker") or "",
+            "title":       row.get("title") or "",
             "whale_dir":   whale_dir,
             "claude_call": row.get("direction", "?"),
             "confidence":  row.get("confidence", ""),
@@ -2075,7 +2043,10 @@ def compile_weekly_digest(week_signals: list[dict], stats: dict, config: dict,
             ts_s = ts.strftime("%b %d %H:%M")
         except Exception:
             ts_s = ts_raw[:12]
-        ticker = _trunc(row.get("ticker", ""), 28, ellipsis=False)
+        # or "" (not .get(key, "")) -- ticker can be a present key with an
+        # explicit None value, not just missing; see _week_whale_rows below
+        # for the same pattern and its 2026-08-05 crash precedent.
+        ticker = _trunc(row.get("ticker") or "", 28, ellipsis=False)
         conf   = CONF_LABEL.get(row.get("confidence", "LOW"), "?")
         dir_   = row.get("direction", "?")
         try:
@@ -2230,7 +2201,7 @@ def _weekly_market_row_html(row: dict) -> str:
     lv = compute_leviathan_score(row)
     band = "A" if lv >= 70 else "B" if lv >= 55 else "C" if lv >= 40 else "D"
     return f'''<tr>
-      <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:10px 8px 10px 16px;border-bottom:1px solid #273246;">{_esc(_trunc(row.get("ticker",""), 24, ellipsis=False))}</td>
+      <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:10px 8px 10px 16px;border-bottom:1px solid #273246;">{_esc(_trunc(row.get("ticker") or "", 24, ellipsis=False))}</td>
       <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;font-weight:600;color:{dir_color};padding:10px 8px;border-bottom:1px solid #273246;">{_esc(dir_)}</td>
       <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#9aa7bd;padding:10px 8px;border-bottom:1px solid #273246;">{_esc(conf)}</td>
       <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:10px 8px;border-bottom:1px solid #273246;">{_esc(edge_s)}</td>

@@ -492,6 +492,51 @@ def _whale_stats(w_total=3, w_wins=2, w_wr=66.7, w_pnl=1.20, w_edge=0.10,
     }
 
 
+def test_week_whale_rows_none_direction_does_not_crash():
+    """
+    Regression guard (real crash, 2026-08-05 live run; relocated here
+    2026-09-06 when the equivalent per-run whale table was removed from
+    the daily report -- see test_compile_report_no_whale_or_smart_money_
+    section -- since this weekly-aggregation path is where the same risk
+    still lives). core.whales sets whale_direction=None (not absent)
+    whenever whale_detected fires from volume/block-trade activity with
+    no clear directional lean -- row.get("whale_direction", "?") only
+    substitutes the default for a MISSING key, not a present key whose
+    value is None, so this used to reach the table renderer as None and
+    crash on len(None). _week_whale_rows guards this with `or "?"`.
+    """
+    signals = [{
+        "ticker": "KXWHALE", "title": "Whale Market", "whale_detected": True,
+        "whale_direction": None, "whale_max_trade_size": 3000,
+        "direction": "YES", "confidence": "MED", "timestamp": "2026-09-01T00:00:00Z",
+    }]
+    rows = report._week_whale_rows(signals)
+    assert rows[0]["whale_dir"] == "?"
+    # Must also render through the plain-text and HTML weekly paths without
+    # crashing -- the original bug crashed at render time, not row-build time.
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "KXWHALE" in digest
+    html = report.render_weekly_html(signals, _stats(), {})
+    assert "KXWHALE" in html
+
+
+def test_week_whale_rows_none_ticker_and_title_do_not_crash():
+    """Same None-vs-missing gotcha, guarded for ticker/title -- both
+    plausibly None upstream, same as whale_direction above."""
+    signals = [{
+        "ticker": None, "title": None, "whale_detected": True,
+        "whale_direction": "YES", "whale_max_trade_size": 3000,
+        "direction": "YES", "confidence": "MED", "timestamp": "2026-09-01T00:00:00Z",
+    }]
+    rows = report._week_whale_rows(signals)
+    assert rows[0]["ticker"] == ""
+    assert rows[0]["title"] == ""
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "WHALE ACTIVITY THIS WEEK" in digest
+    html = report.render_weekly_html(signals, _stats(), {})
+    assert html  # must not raise
+
+
 def test_weekly_digest_whale_stats_shown_when_provided():
     """whale-actionability-scorecard: answers whether following whale
     activity has actually predicted wins, not just listed sightings."""
@@ -671,54 +716,34 @@ def test_compile_report_repeat_signals_section():
     assert "KXREPEAT-01" in body
 
 
-def test_compile_report_whale_activity_empty():
-    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
-    assert "WHALE ACTIVITY" in body
-    assert "No unusual whale activity" in body
-
-
-def test_compile_report_whale_activity_listed():
+def test_compile_report_no_whale_or_smart_money_section():
+    """
+    daily-report-drop-whale-smart-money (2026-09-06): both sections were
+    intentionally removed from the daily per-run report (user feedback --
+    neither carried real insight in the actual email, near-always "no
+    unusual activity"/"no smart money data available this run"). This is
+    a regression guard against silently reintroducing either section into
+    compile_report -- the weekly digest (see test_weekly_digest_* below)
+    intentionally keeps its own whale section, which aggregates a real
+    win-rate-by-bucket scorecard rather than per-run sightings; only the
+    daily report's sightings-only version was removed.
+    """
     whale = {
         "ticker": "KXWHALE", "title": "Whale Market",
         "whale_direction": "YES", "max_trade_size": 3000, "avg_trade_size": 600.0,
     }
-    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG)
-    assert "KXWHALE" in body
-    assert "YES" in body
-
-
-def test_compile_report_whale_activity_none_direction_does_not_crash():
-    """
-    Regression guard (real crash, 2026-08-05 live run): core.whales sets
-    whale_direction=None (not absent) whenever whale_detected fires from
-    volume/block-trade activity with no clear directional lean -- w.get(
-    "whale_direction", "?") only substitutes the default for a MISSING
-    key, not a present key whose value is None, so this used to reach
-    _render_table's _cell() as None and crash on len(None), meaning
-    compile_report() raised and the entire report (not just this section)
-    failed to send. Whale-only rows with no determinable direction became
-    much more likely to reach this table once whale_detected started
-    guaranteeing the min_pre_claude_lv gate (same session) instead of
-    silently dropping out beforehand.
-    """
-    whale = {
-        "ticker": "KXWHALE", "title": "Whale Market",
-        "whale_direction": None, "max_trade_size": 3000, "avg_trade_size": 600.0,
-    }
-    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG)
-    assert "KXWHALE" in body
-    assert "?" in body
-
-
-def test_compile_report_whale_activity_none_ticker_and_title_do_not_crash():
-    """Same None-vs-missing gotcha, guarded for the other two .get() calls
-    in the same row -- ticker and title, both plausibly None upstream."""
-    whale = {
-        "ticker": None, "title": None,
-        "whale_direction": "YES", "max_trade_size": 3000, "avg_trade_size": 600.0,
-    }
-    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG)
-    assert "WHALE ACTIVITY" in body
+    smart_money_result = _sm_result(kalshi_signals=[{
+        "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
+        "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
+        "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
+    }])
+    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG,
+                                  smart_money_result=smart_money_result)
+    assert "WHALE ACTIVITY" not in body
+    assert "Whale Flags:" not in body
+    assert "SMART MONEY WATCHLIST" not in body
+    assert "Smart Money:" not in body
+    assert "Per-Trader Cross-References" not in body
 
 
 def test_compile_report_track_record_section():
@@ -1758,52 +1783,40 @@ def test_smart_money_largest_positions_capped_at_8():
     assert count <= 8, f"Expected at most 8 rows, got {count}"
 
 
-# ─── show-detail-fix: show_detail decoupled from scanner qualifying count ────
+# ─── _smart_money_section direct coverage ────────────────────────────────────
+# daily-report-drop-whale-smart-money (2026-09-06): _smart_money_section() is
+# no longer called from compile_report (see
+# test_compile_report_no_whale_or_smart_money_section) -- it has no current
+# caller anywhere in the codebase, kept only in case a future report variant
+# wants it. These test the function's own contract directly rather than
+# through compile_report, which is what they used to do before the daily
+# report stopped wiring it in.
 
-def test_compile_report_shows_smart_money_detail_with_zero_qualifying_signals():
-    """
-    Regression: previously show_detail=len(qualifying) > 0, so a scanner dry
-    spell (no signals passed to compile_report at all -> qualifying=0) hid
-    smart-money trader detail even when the smart-money scan itself found
-    real cross-references. Detail must now appear based on kalshi_signals.
-    """
+def test_smart_money_section_show_detail_true_includes_cross_references():
     smart_money_signals = [{
         "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
         "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
         "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
     }]
-    smart_money_result = _sm_result(kalshi_signals=smart_money_signals)
-
-    body = report.compile_report(
-        [], [],  # zero scanner signals this run -> qualifying would be 0
-        _EMPTY_STATS, _run_meta(), _CFG,
-        smart_money_result=smart_money_result,
-    )
-    assert "Per-Trader Cross-References" in body
+    result = _sm_result(kalshi_signals=smart_money_signals)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    assert "Per-Trader Cross-References" in out
 
 
-def test_compile_report_hides_smart_money_detail_with_no_kalshi_signals():
-    """
-    The converse: even with scanner signals present this run, trader detail
-    must stay hidden when the smart-money scan itself has no kalshi_signals
-    — show_detail is about smart-money data, not the scanner.
-    """
-    s = _sig(ticker="KXQUALIFYING-01", confidence="HIGH")
-    smart_money_result = _sm_result(kalshi_signals=[])
-
-    body = report.compile_report(
-        [s], [],
-        _EMPTY_STATS, _run_meta(), _CFG,
-        new_signals=[s], repeat_signals=[],
-        smart_money_result=smart_money_result,
-    )
-    assert "Per-Trader Cross-References" not in body
+def test_smart_money_section_show_detail_false_hides_cross_references():
+    smart_money_signals = [{
+        "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
+        "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
+        "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
+    }]
+    result = _sm_result(kalshi_signals=smart_money_signals)
+    out = "\n".join(report._smart_money_section(result, show_detail=False))
+    assert "Per-Trader Cross-References" not in out
 
 
-def test_compile_report_smart_money_result_none_does_not_crash():
-    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
-                                  smart_money_result=None)
-    assert "No smart money data available this run." in body
+def test_smart_money_section_result_none_does_not_crash():
+    out = "\n".join(report._smart_money_section(None))
+    assert "No smart money data available this run." in out
 
 
 # ─── Goal 3e: logger resolution helpers ──────────────────────────────────────

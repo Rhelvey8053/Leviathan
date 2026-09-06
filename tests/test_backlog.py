@@ -454,8 +454,17 @@ def test_parses_and_96_items(backlog_data):
     this project's own small resolved-signal sample) involve either a
     real cost-policy question or real comparison effort the user should
     weigh in on.
+
+    117, not 116: report-ticker-none-vs-missing-audit -- fixing the daily
+    report's whale/smart-money removal surfaced 3 real crash sites in the
+    weekly digest (ticker=None hitting .get("ticker", "") then _trunc's
+    len(None)), same bug class as the 2026-08-05 whale_direction crash.
+    Fixed the 3 sites the regression tests actually exercised; 5 more
+    similar call sites elsewhere in core/report.py were deliberately left
+    for a dedicated follow-up audit rather than expanding this fix
+    unboundedly.
     """
-    assert len(backlog_data["items"]) == 116
+    assert len(backlog_data["items"]) == 117
 
 
 def test_all_ids_unique(backlog_data):
