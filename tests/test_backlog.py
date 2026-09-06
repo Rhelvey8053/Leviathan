@@ -463,8 +463,15 @@ def test_parses_and_96_items(backlog_data):
     similar call sites elsewhere in core/report.py were deliberately left
     for a dedicated follow-up audit rather than expanding this fix
     unboundedly.
+
+    118, not 117: weekly-digest-reskin-and-clip-fix -- render_weekly_html
+    reskinned to match render_html's real style (a prior 3-concept
+    attempt missed the mark; the actual ask was to match what already
+    exists, not propose alternatives), plus a real Gmail-clipping bug
+    fix found and fixed along the way (unbounded markets table produced
+    ~285KB of HTML against a ~102KB clip threshold).
     """
-    assert len(backlog_data["items"]) == 117
+    assert len(backlog_data["items"]) == 118
 
 
 def test_all_ids_unique(backlog_data):

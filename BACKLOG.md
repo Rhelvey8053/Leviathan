@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-09-05 | Metrics: resolved=36, fills=7
+Last updated: 2026-09-06 | Metrics: resolved=37, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
@@ -32,7 +32,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (100)
+## Done (101)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -110,6 +110,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | smart-money-winning-whales-panel | User feedback: the old dashboard/pages/4_Smart_Money.py page was not clear about what the most recent trades were, raw Kalshi tickers were unreadable, and there was no way to see or act on which… | reporting |
 | 3 | title-scraping-fix | Fix market title capture so titles are populated correctly for all logged signal rows. | data-quality |
 | 3 | weekly-code-audit-exit-code-not-proof-of-report | Found 2026-08-30 while investigating that day's missed DailyRun (see dailyrun-missed-run-2026-08-30-silent-failure-gaps): Leviathan-CodeAudit's Sunday run showed LastTaskResult=0 in Task Scheduler,… | infra |
+| 3 | weekly-digest-reskin-and-clip-fix | render_weekly_html rendered a completely different dark theme (IBM Plex Mono, #070a12 background) from render_html's real style -- its own docstring claimed the two matched, but that description was… | reporting |
 | 3 | win-catchall-two-team-game-misfire | win-catchall-recalibration (done, 2026-08-01) correctly dropped the generic ' win ' heuristic from 0.52 to the measured 0.08, explicitly declining to split the pattern by entrant count 'since that… | calibration |
 | 3 | wire-llm-model-cli-flag | Second, independent lever from the same user request ('expand scope... | infra |
 | 4 | cross-model-corroboration | User pushback ('I don't see how this wouldn't benefit the project and you're rejecting it entirely') on an earlier OmniRoute rejection was correct to push on -- that rejection conflated two different… | calibration |
