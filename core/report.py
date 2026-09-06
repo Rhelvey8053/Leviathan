@@ -2225,6 +2225,39 @@ def _weekly_whale_row_html(w: dict) -> str:
     </tr>'''
 
 
+def _weekly_section_header_html(label: str, descriptor: str) -> str:
+    """Section header matching render_html's serif-label/rule/descriptor
+    pattern exactly (see 'Top picks'/'Betting queue' in render_html)."""
+    return f'''
+    <tr><td class="px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:18px;font-style:italic;color:#14191B;white-space:nowrap;padding-right:14px;">{label}</td>
+        <td width="100%" style="border-bottom:1px solid #D9E0DD;">&nbsp;</td>
+        <td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#5B6B6C;white-space:nowrap;padding-left:14px;">{descriptor}</td>
+      </tr></table>
+    </td></tr>
+    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>'''
+
+
+def _weekly_table_shell_html(header_cells: str, rows_html: str) -> str:
+    """White-panel table shell matching render_html's Betting Queue table
+    (light header row, thin dividers) rather than the old dark-card style."""
+    return f'''
+    <tr><td>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #D9E0DD;border-radius:3px;">
+        <tr bgcolor="#F4F6F5" style="background-color:#F4F6F5;">
+          {header_cells}
+        </tr>
+        {rows_html}
+      </table>
+    </td></tr>'''
+
+
+_WEEKLY_TH = ("style=\"font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;"
+              "font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;"
+              "color:#5B6B6C;padding:11px 8px;border-bottom:1px solid #D9E0DD;\"")
+
+
 def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
                        flag_path_stats: list | None = None,
                        brier: dict | None = None,
@@ -2233,13 +2266,30 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
                        heuristic_label_stats: list | None = None,
                        whale_stats: dict | None = None) -> str:
     """
-    Renders the weekly digest as email-safe HTML matching the same visual
-    system as render_html() (dark theme, IBM Plex Mono, table-based, inline
-    CSS, 600px container) -- same header banner, same color palette, same
-    card/table styling. Unlike render_html(), the Track Record section is
-    KEPT here rather than dropped: the daily HTML omits it because Power BI
-    already covers that ground for daily use, but the weekly digest's whole
-    purpose IS a track-record-style summary, so it stays.
+    Renders the weekly digest as email-safe HTML matching render_html()'s
+    light "field instrument" visual system (2026-08-25 daily redesign;
+    cream ground, white panels, single teal accent, Georgia serif section
+    labels, tabular monospace reserved for numeric/ticker data only).
+
+    daily-report-weekly-reskin (2026-09-06): this function previously
+    rendered an entirely different dark/IBM-Plex-Mono theme -- its own
+    docstring claimed it matched render_html(), but that description was
+    stale from before the 2026-08-25 daily redesign; nobody ported weekly
+    forward when daily changed. Fixed as a faithful port of the ALREADY
+    -approved daily style, not a fresh design exploration -- an earlier
+    attempt at this task tried several original "concept" directions
+    instead and the result didn't meet the bar (user feedback: "vibe
+    coded"). Every color/font/spacing token here is copied directly from
+    render_html's real values, not reinvented.
+
+    Also fixes a real bug found while reskinning: with no row cap, a
+    normal week's "Markets Flagged" table (100+ unique tickers) produces
+    HTML well past Gmail's ~102KB clip threshold, silently truncating the
+    email before Track Record ever renders -- exactly the sections that
+    carry this project's honesty-about-performance signal. Markets and
+    heuristic-label rows are now capped with a visible "showing top N of
+    M" caption (ranked by compute_leviathan_score, matching render_html's
+    own Top Picks ranking logic) rather than rendering unboundedly.
 
     Every number here comes from the exact same inputs/computations
     compile_weekly_digest() uses (_week_whale_rows, compute_leviathan_score,
@@ -2248,11 +2298,16 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
     """
     now_utc  = now_utc or datetime.now(timezone.utc)
     date_str = now_utc.strftime("%B %d, %Y")
+    time_str = _report_time_str(now_utc)
     env      = config.get("environment", "prod").upper()
+
+    MAX_MARKET_ROWS = 25
+    MAX_WHALE_ROWS  = 15
+    MAX_LABEL_ROWS  = 20
 
     by_ticker: dict[str, dict] = {}
     for row in week_signals:
-        t = row.get("ticker", "")
+        t = row.get("ticker") or ""
         if t not in by_ticker:
             by_ticker[t] = row
     unique_markets = list(by_ticker.values())
@@ -2260,18 +2315,29 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
     n_mkts  = len(unique_markets)
     n_yes   = sum(1 for r in unique_markets if r.get("direction") == "YES")
     n_no    = sum(1 for r in unique_markets if r.get("direction") == "NO")
-    n_high  = sum(1 for r in unique_markets if r.get("confidence") == "HIGH")
 
-    whale_rows = _week_whale_rows(week_signals)
+    whale_rows_all = _week_whale_rows(week_signals)
+    whale_rows = whale_rows_all[:MAX_WHALE_ROWS]
     whale_rows_html = "".join(_weekly_whale_row_html(w) for w in whale_rows) if whale_rows else (
-        '<tr><td colspan="6" style="padding:16px;color:#8695ac;" class="plex">'
+        '<tr><td colspan="6" style="padding:16px;color:#5B6B6C;font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:13px;">'
         'No whale-flagged markets this week.</td></tr>'
     )
+    whale_caption = (
+        f'<tr><td style="font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:10.5px;color:#5B6B6C;padding:10px 2px 0;">'
+        f'Showing top {len(whale_rows)} of {len(whale_rows_all)} whale-flagged markets, by position size.</td></tr>'
+        if len(whale_rows_all) > MAX_WHALE_ROWS else ""
+    )
 
-    market_rows = sorted(unique_markets, key=lambda r: r.get("timestamp", ""), reverse=True)
+    market_rows_all = sorted(unique_markets, key=lambda r: -compute_leviathan_score(r))
+    market_rows = market_rows_all[:MAX_MARKET_ROWS]
     market_rows_html = "".join(_weekly_market_row_html(r) for r in market_rows) if market_rows else (
-        '<tr><td colspan="6" style="padding:16px;color:#8695ac;" class="plex">'
+        '<tr><td colspan="6" style="padding:16px;color:#5B6B6C;font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:13px;">'
         'No markets flagged this week.</td></tr>'
+    )
+    market_caption = (
+        f'<tr><td style="font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:10.5px;color:#5B6B6C;padding:10px 2px 0;">'
+        f'Showing top {len(market_rows)} of {len(market_rows_all)} markets flagged this week, by Leviathan score.</td></tr>'
+        if len(market_rows_all) > MAX_MARKET_ROWS else ""
     )
 
     wr  = stats.get("win_rate")
@@ -2284,82 +2350,82 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
     if brier and brier.get("brier_score") is not None:
         brier_s = f"{brier['brier_score']:.4f} ({brier.get('label','')}, n={brier.get('n',0)})"
 
+    def _light_row(cells: list[str]) -> str:
+        tds = "".join(cells)
+        return f'<tr>{tds}</tr>'
+
+    def _td(value: str, mono: bool = False, align: str = "left", color: str = "#14191B",
+            first: bool = False, last: bool = False) -> str:
+        font = "ui-monospace,'SF Mono',Consolas,Menlo,monospace" if mono else "-apple-system,'Segoe UI',Roboto,Arial,sans-serif"
+        pad_l = "18px" if first else "8px"
+        pad_r = "18px" if last else "8px"
+        align_attr = f' align="{align}"' if align != "left" else ""
+        return (f'<td{align_attr} style="font-family:{font};font-size:12px;color:{color};'
+                f'padding:12px {pad_r} 12px {pad_l};border-bottom:1px solid #E7ECEA;">{value}</td>')
+
     flag_rows_html = ""
     if flag_path_stats:
         resolved_paths = [r for r in flag_path_stats if r.get("total", 0) > 0]
         for r in resolved_paths:
             wr_p = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
             pnl_p = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
-            flag_rows_html += f'''<tr>
-              <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 8px 8px 16px;border-bottom:1px solid #273246;">{_esc(r['flag_path'])}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{r['total']}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{r['wins']}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{_esc(wr_p)}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 16px 8px 8px;border-bottom:1px solid #273246;">{_esc(pnl_p)}</td>
-            </tr>'''
+            flag_rows_html += _light_row([
+                _td(_esc(r['flag_path']), first=True),
+                _td(str(r['total']), mono=True, align="right"),
+                _td(str(r['wins']), mono=True, align="right"),
+                _td(_esc(wr_p), mono=True, align="right"),
+                _td(_esc(pnl_p), mono=True, align="right", last=True),
+            ])
 
     flag_section_html = ""
     if flag_rows_html:
-        flag_section_html = f'''
-    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td class="px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Win Rate by Signal Path</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-      </tr></table>
-    </td></tr>
-    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
-        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Path</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Total</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Wins</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Win%</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">P&amp;L</td>
-        </tr>
-        {flag_rows_html}
-      </table>
-    </td></tr>'''
+        header = "".join([
+            f'<td {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 8px 11px 18px")}>Path</td>',
+            f'<td align="right" {_WEEKLY_TH}>Total</td>',
+            f'<td align="right" {_WEEKLY_TH}>Wins</td>',
+            f'<td align="right" {_WEEKLY_TH}>Win%</td>',
+            f'<td align="right" {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 18px 11px 8px")}>P&amp;L</td>',
+        ])
+        flag_section_html = (
+            '<tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>'
+            + _weekly_section_header_html("Win rate by signal path", "resolved only")
+            + _weekly_table_shell_html(header, flag_rows_html)
+        )
 
     # per-heuristic-scorecard: same rationale as compile_report's identical section.
     heuristic_rows_html = ""
-    if heuristic_label_stats:
-        resolved_labels = [r for r in heuristic_label_stats if r.get("total", 0) > 0]
-        for r in resolved_labels:
-            wr_p = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
-            pnl_p = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
-            heuristic_rows_html += f'''<tr>
-              <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 8px 8px 16px;border-bottom:1px solid #273246;">{_esc(_trunc(str(r.get("heuristic_label") or "?"), 30))}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{r['total']}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{r['wins']}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{_esc(wr_p)}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 16px 8px 8px;border-bottom:1px solid #273246;">{_esc(pnl_p)}</td>
-            </tr>'''
+    heuristic_all = [r for r in (heuristic_label_stats or []) if r.get("total", 0) > 0]
+    heuristic_shown = heuristic_all[:MAX_LABEL_ROWS]
+    for r in heuristic_shown:
+        wr_p = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
+        pnl_p = f"${r['total_pnl']:.2f}" if r["total_pnl"] is not None else "—"
+        label = _trunc(str(r.get("heuristic_label") or "?"), 30)
+        heuristic_rows_html += _light_row([
+            _td(_esc(label), first=True),
+            _td(str(r['total']), mono=True, align="right"),
+            _td(str(r['wins']), mono=True, align="right"),
+            _td(_esc(wr_p), mono=True, align="right"),
+            _td(_esc(pnl_p), mono=True, align="right", last=True),
+        ])
 
     heuristic_section_html = ""
     if heuristic_rows_html:
-        heuristic_section_html = f'''
-    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td class="px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Win Rate by Heuristic Label</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-      </tr></table>
-    </td></tr>
-    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
-        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Label</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Total</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Wins</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Win%</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">P&amp;L</td>
-        </tr>
-        {heuristic_rows_html}
-      </table>
-    </td></tr>'''
+        header = "".join([
+            f'<td {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 8px 11px 18px")}>Label</td>',
+            f'<td align="right" {_WEEKLY_TH}>Total</td>',
+            f'<td align="right" {_WEEKLY_TH}>Wins</td>',
+            f'<td align="right" {_WEEKLY_TH}>Win%</td>',
+            f'<td align="right" {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 18px 11px 8px")}>P&amp;L</td>',
+        ])
+        caption = (f'<tr><td colspan="5" style="font-family:-apple-system,\'Segoe UI\',Roboto,Arial,sans-serif;'
+                   f'font-size:10.5px;color:#5B6B6C;padding:10px 18px 0;border-top:1px solid #ffffff;">'
+                   f'Showing top {len(heuristic_shown)} of {len(heuristic_all)} labels, by total resolved.</td></tr>'
+                   if len(heuristic_all) > MAX_LABEL_ROWS else "")
+        heuristic_section_html = (
+            '<tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>'
+            + _weekly_section_header_html("Win rate by heuristic label", "resolved only")
+            + _weekly_table_shell_html(header, heuristic_rows_html + caption)
+        )
 
     # whale-actionability-scorecard: see compile_report's identical section for why.
     whale_stat_rows_html = ""
@@ -2372,41 +2438,49 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
             wr_p = f"{d['win_rate']:.0f}%" if d.get("win_rate") is not None else "—"
             pnl_p = f"${d['total_pnl']:.2f}" if d.get("total_pnl") is not None else "—"
             ae_p = f"{d['avg_edge']*100:.1f}pp" if d.get("avg_edge") is not None else "—"
-            whale_stat_rows_html += f'''<tr>
-              <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 8px 8px 16px;border-bottom:1px solid #273246;">{_esc(label)}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{d['total']}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{d.get('wins',0)}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{_esc(wr_p)}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px;border-bottom:1px solid #273246;">{_esc(pnl_p)}</td>
-              <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11px;color:#c6cfde;padding:8px 16px 8px 8px;border-bottom:1px solid #273246;">{_esc(ae_p)}</td>
-            </tr>'''
+            whale_stat_rows_html += _light_row([
+                _td(_esc(label), first=True),
+                _td(str(d['total']), mono=True, align="right"),
+                _td(str(d.get('wins', 0)), mono=True, align="right"),
+                _td(_esc(wr_p), mono=True, align="right"),
+                _td(_esc(pnl_p), mono=True, align="right"),
+                _td(_esc(ae_p), mono=True, align="right", last=True),
+            ])
 
     whale_stat_section_html = ""
     if whale_stat_rows_html:
-        whale_stat_section_html = f'''
-    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td class="px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Win Rate: Whale-Flagged vs Not</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-      </tr></table>
-    </td></tr>
-    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
-        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Group</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Total</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Wins</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Win%</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">P&amp;L</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">AvgEdge</td>
-        </tr>
-        {whale_stat_rows_html}
-      </table>
-    </td></tr>'''
+        header = "".join([
+            f'<td {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 8px 11px 18px")}>Group</td>',
+            f'<td align="right" {_WEEKLY_TH}>Total</td>',
+            f'<td align="right" {_WEEKLY_TH}>Wins</td>',
+            f'<td align="right" {_WEEKLY_TH}>Win%</td>',
+            f'<td align="right" {_WEEKLY_TH}>P&amp;L</td>',
+            f'<td align="right" {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 18px 11px 8px")}>AvgEdge</td>',
+        ])
+        whale_stat_section_html = (
+            '<tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>'
+            + _weekly_section_header_html("Win rate: whale-flagged vs not", "resolved only")
+            + _weekly_table_shell_html(header, whale_stat_rows_html)
+        )
 
-    preheader = f"{n_mkts} markets flagged · {len(whale_rows)} whale flags · win rate {wr_s} this week"
+    preheader = f"{n_mkts} markets flagged · {len(whale_rows_all)} whale flags · win rate {wr_s} this week"
+
+    market_header = "".join([
+        f'<td {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 8px 11px 18px")}>Ticker</td>',
+        f'<td {_WEEKLY_TH}>Dir</td>',
+        f'<td {_WEEKLY_TH}>Conf</td>',
+        f'<td align="right" {_WEEKLY_TH}>Edge</td>',
+        f'<td align="right" {_WEEKLY_TH}>LV</td>',
+        f'<td {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 18px 11px 8px")}>Market</td>',
+    ])
+    whale_header = "".join([
+        f'<td {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 8px 11px 18px")}>Ticker</td>',
+        f'<td {_WEEKLY_TH}>Whale</td>',
+        f'<td {_WEEKLY_TH}>Claude</td>',
+        f'<td align="right" {_WEEKLY_TH}>Position</td>',
+        f'<td align="right" {_WEEKLY_TH}>EV</td>',
+        f'<td {_WEEKLY_TH.replace("padding:11px 8px", "padding:11px 18px 11px 8px")}>Market</td>',
+    ])
 
     html_doc = f'''<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -2414,157 +2488,113 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="color-scheme" content="dark light">
-<meta name="supported-color-schemes" content="dark light">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
 <title>Leviathan — Weekly Digest</title>
 <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
   body,table,td{{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}}
-  a{{color:#84b6fb;}}
-  .plex{{font-family:'IBM Plex Mono','SFMono-Regular',ui-monospace,Consolas,Menlo,monospace !important;}}
-  @media only screen and (max-width:620px){{
+  a{{color:#0B6E63;}}
+  .klink{{color:#0B6E63 !important;text-decoration:none;}}
+  .klink:hover{{text-decoration:underline;}}
+  @media only screen and (max-width:640px){{
     .container{{width:100% !important;}}
     .stack{{display:block !important;width:100% !important;box-sizing:border-box !important;}}
     .px{{padding-left:20px !important;padding-right:20px !important;}}
   }}
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:#070a12;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#070a12;font-size:1px;line-height:1px;">{_esc(preheader)}</div>
+<body style="margin:0;padding:0;background-color:#F4F6F5;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#F4F6F5;font-size:1px;line-height:1px;">{_esc(preheader)}</div>
 
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#070a12" style="background-color:#070a12;">
-<tr><td align="center" style="padding:34px 12px 56px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F4F6F5" style="background-color:#F4F6F5;">
+<tr><td align="center" style="padding:40px 12px 56px;">
 
-  <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+  <table role="presentation" class="container" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:640px;">
 
-    <!-- HEADER -->
-    <tr><td bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:12px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-        <tr><td class="px" style="padding:24px 28px 8px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td align="left" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#f2f5fa;">LEVIATHAN<span style="color:#4a90f2;">//</span></td>
-            <td align="right" class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;font-weight:500;letter-spacing:3px;color:#aab6ca;text-transform:uppercase;">Weekly&nbsp;Digest</td>
-          </tr></table>
-        </td></tr>
-        <tr><td class="px" style="padding:16px 28px 0;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-            <td width="50" height="2" bgcolor="#4a90f2" style="background-color:#4a90f2;font-size:0;line-height:0;">&nbsp;</td>
-            <td height="2" bgcolor="#273246" style="background-color:#273246;font-size:0;line-height:0;">&nbsp;</td>
-          </tr></table>
-        </td></tr>
-        <tr><td class="px plex" style="padding:15px 28px 24px;font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:11.5px;color:#aeb9cd;line-height:1.7;">
-          <span style="color:#3ddc9f;">●</span> <span style="color:#f2f5fa;">{_esc(env)}</span>&nbsp;&nbsp;·&nbsp;&nbsp;Week ending <span style="color:#f2f5fa;">{_esc(date_str)}</span>
-        </td></tr>
-      </table>
+    <!-- MASTHEAD -->
+    <tr><td class="px" style="padding:0 4px 22px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td align="left" style="font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:27px;font-style:italic;color:#14191B;">Leviathan</td>
+        <td align="right" style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:#5B6B6C;">Weekly&nbsp;Digest</td>
+      </tr></table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;"><tr>
+        <td width="34" height="2" bgcolor="#0B6E63" style="background-color:#0B6E63;font-size:0;line-height:0;">&nbsp;</td>
+        <td height="2" bgcolor="#D9E0DD" style="background-color:#D9E0DD;font-size:0;line-height:0;">&nbsp;</td>
+      </tr></table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:11px;"><tr>
+        <td style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:11.5px;color:#5B6B6C;">
+          <span style="color:#1F7A45;">●</span>&nbsp; {_esc(env)} &nbsp;·&nbsp; Week ending {_esc(date_str)} &nbsp;·&nbsp; {_esc(time_str)}
+        </td>
+      </tr></table>
     </td></tr>
 
-    <tr><td height="18" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-
-    <!-- SUMMARY -->
+    <!-- SUMMARY READOUT -->
     <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#273246" style="background-color:#273246;border:1px solid #273246;border-radius:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #D9E0DD;border-radius:3px;">
         <tr>
-          <td class="stack" width="25%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-radius:12px 0 0 0;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Markets</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{n_mkts}</div>
+          <td class="stack" width="25%" style="padding:18px 10px 18px 22px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Markets</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{n_mkts}</div>
           </td>
-          <td class="stack" width="25%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Instances</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{n_calls}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="25%" style="padding:18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Instances</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{n_calls}</div>
           </td>
-          <td class="stack" width="25%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Yes / No</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{n_yes}/{n_no}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="25%" style="padding:18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Yes&nbsp;/&nbsp;No</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{n_yes}/{n_no}</div>
           </td>
-          <td class="stack" width="25%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;border-radius:0 12px 0 0;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Whale Flags</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{len(whale_rows)}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="25%" style="padding:18px 22px 18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Whale&nbsp;Flags</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{len(whale_rows_all)}</div>
           </td>
         </tr>
       </table>
     </td></tr>
 
-    <tr><td height="34" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
 
-    <!-- WHALE ACTIVITY -->
-    <tr><td class="px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Whale Activity This Week</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-      </tr></table>
-    </td></tr>
-    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    {_weekly_section_header_html("Whale activity", "this week")}
+    {_weekly_table_shell_html(whale_header, whale_rows_html)}
+    {whale_caption}
+    <tr><td style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10.5px;color:#5B6B6C;padding:6px 2px 0;line-height:1.6;">EV assumes the whale's own direction, not Claude's final call — most whale-flagged markets end in a Claude PASS, so this is the number that actually differs from "no edge."</td></tr>
+
+    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+
+    {_weekly_section_header_html("Markets flagged", "this week")}
+    {_weekly_table_shell_html(market_header, market_rows_html)}
+    {market_caption}
+
+    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+
+    {_weekly_section_header_html("Track record", "all-time")}
     <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
-        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Ticker</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Whale</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Claude</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Position</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">EV</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">Market</td>
-        </tr>
-        {whale_rows_html}
-      </table>
-    </td></tr>
-    <tr><td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10.5px;color:#8695ac;padding:10px 2px 0;line-height:1.6;">EV assumes the whale's own direction, not Claude's final call — most whale-flagged markets end in a PASS, so this is the number that actually differs from "no edge". Position blank on rows logged before whale position tracking was added.</td></tr>
-
-    <tr><td height="34" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-
-    <!-- MARKETS FLAGGED -->
-    <tr><td class="px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Markets Flagged This Week</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-      </tr></table>
-    </td></tr>
-    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0f1521" style="background-color:#0f1521;border:1px solid #273246;border-radius:10px;">
-        <tr bgcolor="#151d2c" style="background-color:#151d2c;">
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px 11px 16px;border-bottom:1px solid #273246;">Ticker</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Dir</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Conf</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">Edge</td>
-          <td class="plex" align="right" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 8px;border-bottom:1px solid #273246;">LV</td>
-          <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:#9aa7bd;padding:11px 16px 11px 8px;border-bottom:1px solid #273246;">Market</td>
-        </tr>
-        {market_rows_html}
-      </table>
-    </td></tr>
-
-    <tr><td height="34" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-
-    <!-- TRACK RECORD -->
-    <tr><td class="px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#f2f5fa;white-space:nowrap;padding-right:14px;">Track Record (All-Time)</td>
-        <td width="100%" style="border-bottom:1px solid #273246;">&nbsp;</td>
-      </tr></table>
-    </td></tr>
-    <tr><td height="16" style="font-size:0;line-height:0;">&nbsp;</td></tr>
-    <tr><td>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#273246" style="background-color:#273246;border:1px solid #273246;border-radius:12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #D9E0DD;border-radius:3px;">
         <tr>
-          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-radius:12px 0 0 0;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Win Rate</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{_esc(wr_s)}</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9px;color:#8695ac;padding-top:3px;">{stats.get('resolved', 0)} resolved / {stats.get('total_calls', 0)} calls</div>
+          <td class="stack" width="33.33%" style="padding:18px 10px 18px 22px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Win Rate</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{_esc(wr_s)}</div>
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#5B6B6C;padding-top:4px;">{stats.get('resolved', 0)} resolved / {stats.get('total_calls', 0)} calls</div>
           </td>
-          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Avg Edge</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{_esc(ae_s)}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="33.33%" style="padding:18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Avg Edge</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{_esc(ae_s)}</div>
           </td>
-          <td class="stack" width="33.33%" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-left:1px solid #273246;border-radius:0 12px 0 0;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Hypo P&amp;L</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:20px;font-weight:600;color:#f2f5fa;padding-top:4px;">{_esc(pnl_s)}</div>
+          <td width="1" bgcolor="#E7ECEA" style="background-color:#E7ECEA;font-size:0;line-height:0;">&nbsp;</td>
+          <td class="stack" width="33.33%" style="padding:18px 22px 18px 10px;">
+            <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Hypo&nbsp;P&amp;L</div>
+            <div style="font-family:Georgia,serif;font-size:23px;color:#14191B;padding-top:3px;">{_esc(pnl_s)}</div>
           </td>
         </tr>
         <tr>
-          <td colspan="3" bgcolor="#0f1521" style="background-color:#0f1521;padding:15px 18px;border-top:1px solid #273246;border-radius:0 0 12px 12px;">
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:#93a1b8;">Brier Score</div>
-            <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:15px;font-weight:500;color:#c6cfde;padding-top:5px;">{_esc(brier_s)}</div>
+          <td colspan="5" style="padding:14px 22px;border-top:1px solid #D9E0DD;">
+            <span style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:#5B6B6C;">Brier Score&nbsp;&nbsp;</span>
+            <span style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:13px;color:#14191B;">{_esc(brier_s)}</span>
           </td>
         </tr>
       </table>
@@ -2573,11 +2603,14 @@ def render_weekly_html(week_signals: list[dict], stats: dict, config: dict,
     {heuristic_section_html}
     {whale_stat_section_html}
 
-    <tr><td height="30" style="font-size:0;line-height:0;">&nbsp;</td></tr>
+    <tr><td height="32" style="font-size:0;line-height:0;">&nbsp;</td></tr>
 
     <!-- FOOTER -->
-    <tr><td class="px" style="border-top:1px solid #273246;padding-top:18px;">
-      <div class="plex" style="font-family:'IBM Plex Mono',ui-monospace,Consolas,Menlo,monospace;font-size:10px;color:#66738a;letter-spacing:1px;">LEVIATHAN // PREDICTION-MARKET INTELLIGENCE · WEEKLY SUMMARY</div>
+    <tr><td class="px" style="border-top:1px solid #D9E0DD;padding-top:18px;">
+      <div style="font-family:ui-monospace,'SF Mono',Consolas,Menlo,monospace;font-size:10.5px;color:#5B6B6C;line-height:1.9;">
+        markets <span style="color:#14191B;">{n_mkts}</span> &nbsp;·&nbsp; instances <span style="color:#14191B;">{n_calls}</span> &nbsp;·&nbsp; whale flags <span style="color:#14191B;">{len(whale_rows_all)}</span>
+      </div>
+      <div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:10px;color:#8A9694;padding-top:12px;letter-spacing:.5px;">Leviathan — Prediction-Market Intelligence · For informational purposes only</div>
     </td></tr>
 
   </table>

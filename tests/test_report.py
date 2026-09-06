@@ -459,13 +459,13 @@ def test_weekly_html_heuristic_label_stats_shown_when_provided():
         {"heuristic_label": "PDUFA date", "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90},
     ]
     html = report.render_weekly_html([], _stats(), {}, heuristic_label_stats=heur_stats)
-    assert "Win Rate by Heuristic Label" in html
+    assert "win rate by heuristic label" in html.lower()
     assert "PDUFA date" in html
 
 
 def test_weekly_html_heuristic_label_stats_absent_when_none():
     html = report.render_weekly_html([], _stats(), {}, heuristic_label_stats=None)
-    assert "Win Rate by Heuristic Label" not in html
+    assert "win rate by heuristic label" not in html.lower()
 
 
 def test_weekly_html_flag_and_heuristic_sections_both_render():
@@ -476,8 +476,8 @@ def test_weekly_html_flag_and_heuristic_sections_both_render():
     heur_stats = [{"heuristic_label": "PDUFA date", "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90}]
     html = report.render_weekly_html([], _stats(), {}, flag_path_stats=flag_stats,
                                       heuristic_label_stats=heur_stats)
-    assert "Win Rate by Signal Path" in html
-    assert "Win Rate by Heuristic Label" in html
+    assert "win rate by signal path" in html.lower()
+    assert "win rate by heuristic label" in html.lower()
 
 
 # ─── whale-actionability-scorecard ────────────────────────────────────────
@@ -577,14 +577,14 @@ def test_weekly_digest_whale_stats_omits_group_with_zero_total():
 
 def test_weekly_html_whale_stats_shown_when_provided():
     html = report.render_weekly_html([], _stats(), {}, whale_stats=_whale_stats())
-    assert "Win Rate: Whale-Flagged vs Not" in html
+    assert "win rate: whale-flagged vs not" in html.lower()
     assert "Whale-flagged" in html
     assert "No whale flag" in html
 
 
 def test_weekly_html_whale_stats_absent_when_none():
     html = report.render_weekly_html([], _stats(), {}, whale_stats=None)
-    assert "Win Rate: Whale-Flagged vs Not" not in html
+    assert "win rate: whale-flagged vs not" not in html.lower()
 
 
 def test_compile_report_whale_stats_section():
