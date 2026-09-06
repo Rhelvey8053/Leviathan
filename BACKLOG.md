@@ -1,9 +1,9 @@
 # Leviathan Backlog
-Last updated: 2026-09-05 | Metrics: resolved=33, fills=7
+Last updated: 2026-09-05 | Metrics: resolved=36, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (7)
+## Ready (9)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -13,6 +13,8 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
+| 5 | report-ticker-none-vs-missing-audit | Found and fixed 2026-09-06 while removing the daily report's whale/smart-money sections (daily-report-drop-whale-smart-money): _week_whale_rows(), compile_weekly_digest()'s 'MARKETS FLAGGED THIS… | infra |
+| 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
 
 ## Locked (5)
 | Priority | ID | Gate | Area |
@@ -23,11 +25,10 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (4)
+## Blocked (3)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
-| 6 | auto-calibration-loop | sample-size-gates, brier-tracking | calibration |
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
