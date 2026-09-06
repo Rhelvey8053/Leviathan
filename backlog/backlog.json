@@ -374,7 +374,7 @@
       "title": "Auto-Calibration Loop",
       "area": "calibration",
       "priority": 6,
-      "status": "blocked",
+      "status": "ready",
       "trigger": {
         "all": [
           {

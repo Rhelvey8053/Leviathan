@@ -72,6 +72,18 @@ assumes a field is always present.
   establishes — match the existing visual identity, don't drift it
   page-by-page.
 
+## Continuous improvement (standing expectation, every invocation)
+
+Design knowledge compounds if you actually keep it — when you find a
+genuinely good pattern, resource, or technique (a real email-design
+gallery, a layout trick, a way this project's data shapes tend to
+break a naive chart), append it to this file so the next invocation
+starts smarter instead of re-discovering it. Also use each visit to
+notice small inconsistencies nobody explicitly flagged (two pages using
+slightly different date formats, a color doing two jobs) and fix them
+if trivial, or note them if not — the dashboard and email surfaces
+should feel like one product, not a pile of one-off pages.
+
 ## Verify before calling it done
 
 Run the dashboard locally (`streamlit run dashboard/app.py`) and actually

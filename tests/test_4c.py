@@ -384,6 +384,11 @@ class TestSmartMoneyDriftTitle:
         """Return a fake _parse_sm_snapshot result dict with one position."""
         return {(trader, ticker): val}
 
+    # daily-report-drop-whale-smart-money (2026-09-06): _smart_money_section()
+    # is no longer called from compile_report, so these test it directly
+    # instead of through _full_compile -- see test_report.py's equivalent
+    # note for the full rationale.
+
     def test_drift_title_shown_when_snapshot_exists(self):
         """When yesterday snapshot file is mocked, drift row shows title."""
         trader = "0xtrader000000000000000000000000000000001"
@@ -394,14 +399,14 @@ class TestSmartMoneyDriftTitle:
         fake_prev = {(trader, ticker): 500.0}
         with patch("core.report.os.path.exists", return_value=True), \
              patch("core.report._parse_sm_snapshot", return_value=fake_prev):
-            text = _full_compile(smart_money_result=sm)
+            text = "\n".join(report._smart_money_section(sm))
         assert "Will inflation" in text
 
     def test_drift_no_crash_without_snapshot(self):
         """Without snapshot file, drift section is omitted — no crash, no 'None'."""
         sm = self._sm_with_signal()
         with patch("core.report.os.path.exists", return_value=False):
-            text = _full_compile(smart_money_result=sm)
+            text = "\n".join(report._smart_money_section(sm))
         # Drift section is skipped entirely when no yesterday file exists
         assert "None" not in text
         assert "SMART MONEY WATCHLIST" in text  # section still renders
@@ -422,7 +427,7 @@ class TestSmartMoneyDriftTitle:
         fake_prev = {("0xtrader000000000000000000000000000000002", "KXNO-TITLE"): 200.0}
         with patch("core.report.os.path.exists", return_value=True), \
              patch("core.report._parse_sm_snapshot", return_value=fake_prev):
-            text = _full_compile(smart_money_result=sm)
+            text = "\n".join(report._smart_money_section(sm))
         assert "None" not in text
 
 
@@ -453,7 +458,7 @@ class TestPerTraderCrossRefTitle:
     def test_kalshi_title_shown_in_xref(self):
         """kalshi_title fragment appears in the per-trader table output."""
         sm = self._sm_with_xref(title="Will tech sector rally in Q3?")
-        text = _full_compile(smart_money_result=sm)
+        text = "\n".join(report._smart_money_section(sm))
         assert "Will tech" in text
 
     def test_xref_missing_title_falls_back_gracefully(self):
@@ -473,7 +478,7 @@ class TestPerTraderCrossRefTitle:
             "drift_data": {},
             "watchlist": {},
         }
-        text = _full_compile(smart_money_result=sm)
+        text = "\n".join(report._smart_money_section(sm))
         assert "None" not in text
 
 

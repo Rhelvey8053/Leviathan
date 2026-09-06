@@ -65,6 +65,19 @@ spend without fresh explicit authorization (the live pipeline's
 fine; `core/llm.py`'s metered path must stay gated off). Don't loosen a
 validation gate to make a problem go away faster — fix the real cause.
 
+## Continuous improvement (standing expectation, every invocation)
+
+Don't stop at the bug you were sent to fix. When you're in a file
+investigating one thing, notice the adjacent risk — the 2026-09-06
+whale/smart-money cleanup found a `.get("ticker", "")` crash pattern in
+one place, and checking the two call sites nearby found the *same* live
+bug two more times before it ever paged anyone. If you spot something
+like that outside your immediate task, fix it if it's small and safe,
+or log it as its own backlog item (with real evidence, per the note
+below) if it's bigger — don't just mention it in passing and let it
+evaporate. Don't go looking for problems that aren't there, either —
+this is about not walking past a real one you already tripped over.
+
 ## After any code fix
 
 Run the full suite (`python -m pytest tests/ -q`) before considering it

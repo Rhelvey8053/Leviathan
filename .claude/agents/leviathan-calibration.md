@@ -63,6 +63,19 @@ a different population, a longer time horizon). If you're logging this to
 `backlog/backlog.json`, follow the existing notes style — real numbers
 inline, not a summary that hides them.
 
+## Continuous improvement (standing expectation, every invocation)
+
+Old conclusions are only as good as the sample size they were drawn on —
+revisit them as real data accumulates, don't treat a past finding as
+permanent. When a gate crosses a new threshold (a resolved_count
+milestone, a per-category count moving), that's a natural moment to
+re-check whether an earlier "no signal detectable at this n" verdict
+still holds, without being asked. If you notice a metric definition
+being computed two different ways in two places (this has happened
+before — different `resolved_count` filters silently disagreeing), flag
+or fix the inconsistency rather than picking whichever number is
+convenient for the task in front of you.
+
 ## Hard boundaries
 
 Paper-only, no real trades. No metered Anthropic API spend without fresh
