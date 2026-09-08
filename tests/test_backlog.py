@@ -569,8 +569,18 @@ def test_parses_and_96_items(backlog_data):
     on drift. (3) runbook-liam-section-pruned -- docs/RUNBOOK.md still had
     a full troubleshooting section for the Liam/monday.com integration
     retired 2026-08-30.
+
+    129, not 128: user asked to remove every remaining monday.com/Liam
+    feature and link, not just the runbook section. Deleted 12 files
+    (monday_sync.py, verify_liam_report.py, its scheduler setup, 5 one-off
+    Liam-context/backfill scripts, its test file, 3 docs), removed the
+    config block and stale API token, pruned CLAUDE.md's full section, and
+    fixed 3 dangling references to the deleted files. Left historical
+    narrative (backlog.json's own item text, PROGRESS.md, README's dated
+    mention, this file's own historical docstrings) untouched -- same
+    discipline as the README/METHODOLOGY refresh earlier the same day.
     """
-    assert len(backlog_data["items"]) == 128
+    assert len(backlog_data["items"]) == 129
 
 
 def test_all_ids_unique(backlog_data):

@@ -253,9 +253,8 @@ def execute_action(item: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 def gate_progress_str(item: dict, metrics: dict) -> str:
-    """Live progress toward an item's own trigger, sentinel-aware (mirrors
-    scripts/verify_liam_report.py's ground-truth logic): shows the current
-    live value and MET/not-met per condition, and flags a sentinel metric
+    """Live progress toward an item's own trigger, sentinel-aware: shows the
+    current live value and MET/not-met per condition, and flags a sentinel metric
     (one never computed by compute_metrics -- e.g. api_spend_authorized)
     as requiring a human decision rather than reporting it as simply
     "not met", which would wrongly imply it could clear on its own.

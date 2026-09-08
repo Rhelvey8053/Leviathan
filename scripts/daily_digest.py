@@ -7,8 +7,8 @@ emails on their own triggers exactly as before. This is a second,
 always-sent channel -- a single place to read "what ran and what it
 found" instead of checking ~5 separate log/data files that otherwise
 only get opened once something has visibly already broken. Out of scope
-for this version, deliberately deferred rather than forgotten: monday.com/
-Liam's posts, and folding the existing alert emails into this one.
+for this version, deliberately deferred rather than forgotten: folding
+the existing alert emails into this one.
 
 Sections, each read against files/DB other scripts already write --
 nothing here re-runs a scan or hits a live API:
@@ -334,7 +334,7 @@ def section_backlog(prev_snapshot: dict | None = None) -> tuple[str, dict]:
     and possibly out of sync with the persisted backlog.json state.
 
     Two parts after that: every `ready` item (priority-ordered -- what's
-    actionable right now, without opening the board or monday.com), and
+    actionable right now, without opening backlog.json by hand), and
     what changed since the previous digest (new items, status
     transitions, and notes-only updates) with the purpose pulled from the
     item's own notes/action text rather than re-derived. prev_snapshot is

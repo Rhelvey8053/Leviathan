@@ -63,28 +63,10 @@ no order execution.** See `README.md` for the full 8-step architecture.
 | Current backlog state (Ready/Locked/Blocked/Done) | `BACKLOG.md` — **auto-generated** by `backlog/checker.py`, never hand-edit. Source of truth is `backlog/backlog.json`. |
 | Recent narrative / session log | `docs/PROGRESS.md` — newest entries at the **top**, covers 2026-08-01 onward (trimmed from ~150KB to ~11KB on 2026-08-22; older entries moved to `docs/PROGRESS_ARCHIVE.md`, same top-down convention, grep by date/keyword rather than reading either in full). |
 | Diagnosing a failed/missing scheduled run | `docs/RUNBOOK.md` |
-| Evaluating a monday.com/Liam (PM agent) report before acting on it | `docs/RUNBOOK.md`'s "Triaging Liam" section + `python scripts/verify_liam_report.py` |
-| Running/diagnosing the monday.com sync itself | `docs/monday_sync_runbook.md` |
+| Browsing the backlog | `dashboard/pages/5_Backlog.py` (reads `backlog/backlog.json` live) or `BACKLOG.md` |
 | Plain-language project narrative | `docs/STORY.md` |
 | Human-triaged, never-read-by-an-agent parking lot | `docs/IDEAS.md` — do not treat as direction. |
 | Whether token-reduction changes (this file, MCP registration) are actually working | `docs/token_usage_baseline.md` + `python scripts/token_usage_report.py --since 2026-08-21` — measured from real Claude Code session transcripts, not assumed. |
-
-## monday.com
-
-`backlog/backlog.json` is authoritative; the monday.com board is a **one-way
-mirror** (`scripts/monday_sync.py --phase3 --live`). If they disagree,
-`backlog.json` is right — sync to fix the board, never the reverse.
-
-Liam (monday.com's own native PM agent, posts from `agent.monday.com`) is
-useful for external research (regulatory/competitor news — verify before
-trusting, but it's been right more than once) and **unreliable on internal
-project state**: it repeatedly conflated an item's `depends_on` being
-satisfied with its actual `trigger` metric being met, and has no visibility
-into policy decisions made in conversation. Never act on a "move to Ready"
-recommendation without running `python scripts/verify_liam_report.py` first.
-A context doc for Liam exists at `docs/liam_context_doc.md` (also live on
-the board) but whether Liam's agent settings actually consume it as context
-is unverified — that configuration isn't exposed via the API.
 
 ## MCP tools available — use these instead of ad-hoc scripts
 
@@ -92,10 +74,6 @@ is unverified — that configuration isn't exposed via the API.
   registered via `claude mcp add`): `get_signal_log`, `get_resolved_track_record`,
   `lookup_market` — query the live signal DB conversationally instead of
   writing a fresh `python -c "..."` SQL script every time.
-- **monday.com's native MCP** is connected in this environment. Prefer it
-  for ad-hoc/exploratory monday.com queries. Use `scripts/monday_sync.py`
-  only for the actual deterministic sync — that script's logic (diffing,
-  dry-run, verify_phase2) is real and tested, don't bypass it for writes.
 
 ## Testing & schema conventions
 
@@ -132,7 +110,7 @@ PowerShell for Task Scheduler / Windows-specific commands, Bash (Git Bash)
 works fine for everything else including `python`. Watch for `cp1252`
 console-encoding issues when printing em-dashes/emoji — several scripts
 already wrap `sys.stdout` in a UTF-8 `TextIOWrapper` for this
-(`main.py`, `scripts/position_reconciliation.py`, `scripts/verify_liam_report.py`)
+(`main.py`, `scripts/position_reconciliation.py`)
 — follow that pattern in new scripts that print non-ASCII text.
 
 `dashboard/.venv/` is a full Python virtualenv on disk (~19,000+ files,

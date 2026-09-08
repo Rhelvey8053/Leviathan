@@ -31,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (112)
+## Done (113)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -121,6 +121,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | wire-llm-model-cli-flag | Second, independent lever from the same user request ('expand scope... | infra |
 | 4 | cross-model-corroboration | User pushback ('I don't see how this wouldn't benefit the project and you're rejecting it entirely') on an earlier OmniRoute rejection was correct to push on -- that rejection conflated two different… | calibration |
 | 4 | kalshi-sdk-migration-implementation | Built the adapter, but not the field-by-field typed-model remapping the Ready-item scope note called for. | infra |
+| 4 | monday-com-integration-fully-removed | User (2026-09-08): 'Monday.com is no longer being used please remove any feature or link that use them.' The 2026-08-30 retirement had removed the scheduled sync task and moved backlog browsing to… | infra |
 | 4 | net-edge-fee-depth-model | net_edge_after_fee priced a trade off the top-of-book quote only -- it had no idea whether the visible order book could actually fill unit_size contracts on the side the picked direction needed. | execution |
 | 4 | per-heuristic-scorecard | get_stats_by_heuristic_label() (core/logger.py) already existed -- win rate/P&L/avg_edge grouped by heuristic_label -- and was already wired into a real display in analysis/calibration.py's "BY… | reporting |
 | 4 | position-reconciliation-job | Automate daily reconciliation of open paper signals against the Kalshi position API. | execution |

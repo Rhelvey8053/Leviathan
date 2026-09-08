@@ -1,12 +1,12 @@
 """
 Leviathan dashboard -- Backlog page.
 
-Replaces the monday.com board (trial expired 2026-08-30) as the internal
-place to browse the backlog -- reads backlog/backlog.json directly, live,
-every page load. No sync step, no external service: this file already was
-this project's real source of truth all along (monday.com was always a
-secondary, human-facing mirror of it -- see scripts/monday_sync.py,
-now retired).
+Replaces the monday.com board (trial expired 2026-08-30, integration fully
+retired 2026-09-08) as the internal place to browse the backlog -- reads
+backlog/backlog.json directly, live, every page load. No sync step, no
+external service: this file already was this project's real source of
+truth all along (monday.com was always a secondary, human-facing mirror
+of it).
 
 Live gate metrics come from backlog.checker.compute_metrics() (reads
 data/leviathan.db read-only) -- the same function every gate-unlock

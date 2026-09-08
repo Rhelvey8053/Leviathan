@@ -1800,6 +1800,19 @@
       "depends_on": [],
       "action": "PM workflow audit (2026-09-08): docs/RUNBOOK.md still had a full \"Triaging Liam (monday.com's built-in PM agent) reports\" section (confirmed failure modes, a documented process invoking scripts/verify_liam_report.py) for an integration explicitly retired 2026-08-30 (trial expired). Same staleness class as the README/METHODOLOGY numbers fixed earlier the same day -- a future session following this runbook could waste time on a process for something that no longer exists. Confirmed no Leviathan-MondaySync scheduled task remains registered (cleanly removed at retirement, unlike the docs).",
       "notes": "Removed the full section and its quick-reference row (\"Triage Liam's latest report against real state\"). Added a new RUNBOOK.md section + quick-reference rows for the newly-scheduled verify_pnl.py alert instead, in the same slot. Did NOT touch docs/monday_sync_runbook.md or scripts/verify_liam_report.py/monday_sync.py themselves -- out of scope for this pass, flagged to the user as a further possible cleanup, not acted on unprompted."
+    },
+    {
+      "id": "monday-com-integration-fully-removed",
+      "title": "Removed all remaining monday.com/Liam integration code, docs, config, and dangling references",
+      "area": "infra",
+      "priority": 4,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "User (2026-09-08): 'Monday.com is no longer being used please remove any feature or link that use them.' The 2026-08-30 retirement had removed the scheduled sync task and moved backlog browsing to dashboard/pages/5_Backlog.py, but a full audit found the integration code, docs, config, and credential were all still present -- runbook-liam-section-pruned (earlier the same day) only removed one troubleshooting section, not the underlying feature.",
+      "notes": "Deleted 12 files: scripts/monday_sync.py, scripts/verify_liam_report.py, scripts/setup_monday_sync_scheduler.ps1, scripts/_post_liam_context_doc.py, scripts/_append_liam_context_doc_section9.py, scripts/_append_liam_context_doc_sections78.py, scripts/_backfill_completed_on_dates.py, scripts/_backfill_start_and_timeline.py (both backfill scripts wrote directly to monday board columns), tests/test_monday_sync.py, docs/liam_context_doc.md, docs/monday_sync_discovery.md, docs/monday_sync_runbook.md. Removed the 'monday' config block from config.json/config.example.json (surgical brace-matched text splice, not a full JSON re-dump, to avoid reformatting unrelated compact-array fields -- learned from an earlier same-day mistake on backlog.json). Removed the stale MONDAY_API_TOKEN credential from .env (confirmed .env is gitignored and was never committed, confirmed .env.example never had the key). CLAUDE.md: removed the full '## monday.com' section, two 'Where to look' table rows, and the 'monday.com's native MCP' bullet. Fixed 3 dangling references to now-deleted files: backlog/checker.py's gate_progress_str() docstring, scripts/daily_digest.py's deferred-feature note and board-reference comment, dashboard/pages/5_Backlog.py's docstring. Deliberately left untouched: backlog.json's own historical item action/notes text (including the retirement record itself), docs/PROGRESS.md's dated narrative log, README.md's dated case-study mention, tests/test_backlog.py's historical item-count-change docstrings, and .claude/agents/leviathan-pm.md's one-sentence role-origin context -- all describe real project history rather than an active feature or link, same discipline already applied to README/METHODOLOGY's dated sections earlier this session. Confirmed no Leviathan-MondaySync scheduled task was registered, no code still imports any deleted module, no monday-specific dependency in requirements.txt. Full suite green (2366 passed, 1 skipped -- the 61-test drop is exactly test_monday_sync.py's own suite, confirmed, not a regression)."
     }
   ]
 }
