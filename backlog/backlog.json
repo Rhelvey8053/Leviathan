@@ -394,7 +394,7 @@
         "brier-tracking"
       ],
       "action": "Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates.",
-      "notes": "Requires both sufficient global and per-category sample sizes before automation is safe."
+      "notes": "Requires both sufficient global and per-category sample sizes before automation is safe. UPDATE 2026-09-07: built analysis/auto_calibration_preview.py (shadow mode only -- writes nothing, never touches core/scanner.py or core/sizing.py). Per-heuristic_label multiplier is centered on the Wilson 95% CI bound closer to neutral 50% (clamped so it can never cross to the wrong side of the point estimate), which mutes small-n categories automatically without a hand-tuned damping rule. Real live run today: resolved_count=37, per_category_max=16 (gate technically clear), but only 1 of 7 heuristic_labels (weather, n=16) actually reaches the per-category floor, and its CI [14.1%,55.5%] straddles neutral -- so the honest suggested delta is $0.00. Gate clearing != enough distinguishable categories to safely automate anything yet. Tests: tests/test_auto_calibration_preview.py (13 cases). Going live (writing suggested multipliers into real scoring) remains a separate, distinct, future human decision -- not a side effect of this build. Left status=ready, not done: the action text (\"automatically adjust\") describes live automation, which does not exist yet -- only the preview/analysis capability does."
     },
     {
       "id": "wallet-tracking-dashboard",
