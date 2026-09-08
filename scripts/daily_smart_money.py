@@ -54,8 +54,13 @@ def main():
         print(f"  git add failed: {out}")
         sys.exit(1)
 
-    # Check if there's anything to commit
-    code, staged = git(["diff", "--cached", "--name-only"])
+    # Check if there's anything to commit -- scoped to rel_path specifically,
+    # not the whole index, since other processes sharing this git identity
+    # (e.g. a concurrent agent's own `git add`) can leave unrelated files
+    # staged at the same time (see leviathan-dashboard-ux.md's 2026-09-07
+    # "staged-but-uncommitted change swept into an unrelated automated
+    # commit" lesson -- this is the actual root cause of that incident).
+    code, staged = git(["diff", "--cached", "--name-only", "--", rel_path])
     if not staged.strip():
         print("  No changes to commit (report unchanged).")
         return
@@ -64,7 +69,10 @@ def main():
         f"data: smart money scan {date_str} "
         f"({n_pos} positions, {n_sig} Kalshi signals)"
     )
-    code, out = git(["commit", "-m", msg])
+    # `-- rel_path` commits ONLY this path's staged changes, leaving any
+    # other already-staged files (from a concurrent process) untouched in
+    # the index for their own owner to commit -- not folded in here.
+    code, out = git(["commit", "-m", msg, "--", rel_path])
     if code != 0:
         print(f"  git commit failed: {out}")
         sys.exit(1)

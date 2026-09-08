@@ -1,15 +1,16 @@
 # Leviathan Backlog
-Last updated: 2026-09-07 | Metrics: resolved=37, fills=7
+Last updated: 2026-09-08 | Metrics: resolved=38, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (6)
+## Ready (7)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
+| 4 | entertainment-award-emmy-coverage-gap | The same systematic sweep that produced political-coup-couples-misfire / fda-adcom-broadcom-misfire / nasa-mission-hataoka-partial-fix also flagged "entertainment award" (grammy/oscar/academy… | calibration |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
 
@@ -29,7 +30,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (104)
+## Done (108)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -86,15 +87,19 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
 | 3 | cli-backend-token-telemetry | User asked to research reducing Leviathan's own token footprint (after a separate detour into whether OmniRoute could help -- rejected, since routing Claude Code through it means replacing native… | infra |
 | 3 | daily-operations-digest | Built and verified 2026-08-24. | infra |
+| 3 | daily-smart-money-commit-scope-fix | Found 2026-09-08 while investigating a real incident: a dashboard-ux agent had git-add-staged its own in-progress files (core/logger.py, dashboard/pages/4_Smart_Money.py,… | infra |
 | 3 | dailyrun-logontype-interactive | Found 2026-08-25 while re-registering Leviathan-DailyRun to pick up a RestartCount/RestartInterval change: scripts/schedule_setup.ps1's Principal block uses -LogonType Interactive, unlike every other… | infra |
 | 3 | dailyrun-missed-run-2026-08-30-silent-failure-gaps | Found 2026-08-30: main.py's scheduled 7am run launched a real process (confirmed via Task Scheduler operational event log, PID 20048, ran 21m58s) and Task Scheduler reported clean exit 0, but zero… | infra |
 | 3 | dashboard-caption-accuracy-passthrough | User feedback after the Smart Money redesign (smart-money-winning-whales-panel): a direct question ("so the streak on the table is associated with a wallet correct?") caught a real inaccuracy in my… | reporting |
 | 3 | dependabot-setup | .github/dependabot.yml added 2026-08-24, covering pip (root requirements.txt, used by CI; dashboard/requirements.txt, not CI-checked but a real dependency manifest) and github-actions… | infra |
+| 3 | fda-adcom-broadcom-misfire | Found via a systematic sweep of core.scanner._HEURISTIC_RULES, not reactively -- every prior heuristic recalibration (win-catchall, sports-award, hurricane, down-ballot-election,… | calibration |
 | 3 | gate-unlock-notifier | Email once when a BACKLOG.md gate transitions locked/unknown -> unlocked, reusing the existing report email path. | reporting |
 | 3 | market-price-divergence-tracking | Built and verified 2026-08-23/24. | calibration |
 | 3 | mcp-server-v2-operational-tools | User (as PM, following Liam/monday.com's retirement) asked what new plugins or connectors could streamline the project. | infra |
 | 3 | model-used-field-disconnected-from-cli-override | Found 2026-09-01 while checking the first Opus-trial run's result row: run_meta['model_used'] (main.py:246) read config.scoring.scorer_model -- a static, cosmetic-only field never passed to any… | infra |
 | 3 | monday-com-retired-backlog-dashboard-page | User's monday.com trial expired 2026-08-30. | infra |
+| 3 | nasa-mission-hataoka-partial-fix | Found via a systematic sweep of core.scanner._HEURISTIC_RULES, not reactively -- every prior heuristic recalibration (win-catchall, sports-award, hurricane, down-ballot-election,… | calibration |
+| 3 | political-coup-couples-misfire | Found via a systematic sweep of core.scanner._HEURISTIC_RULES, not reactively -- every prior heuristic recalibration (win-catchall, sports-award, hurricane, down-ballot-election,… | calibration |
 | 3 | replay-instrument-validation | Using the replay corpus at n>=300, verify the measurement apparatus: grading handles early closes, voided markets and multi-outcome events; baseline Brier computes correctly across the full price… | validation |
 | 3 | replay-runner | Drive backtesting/harness.py over the reconstructed corpus and grade each replayed score against the known settled outcome. | backtesting |
 | 3 | replay-runner-crash-on-malformed-cli-response | Found 2026-08-28 running a replay-instrument-validation corpus-build batch: it crashed with 'str' object has no attribute 'keys'. | validation |

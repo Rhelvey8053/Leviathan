@@ -1859,6 +1859,82 @@ def test_executive_order_generic_rule_still_calibrated_at_original_rate():
     assert scanner.get_heuristic_label(m) == "executive order"
 
 
+def test_political_coup_couples_misfire_fixed():
+    """
+    backlog: political-coup-couples-misfire. Bare 'coup' was a substring of
+    'Couples' -- confirmed against the full settled_markets corpus, ALL 89
+    historical "political coup" matches were actually
+    KXLOVEISLANDUSARANK-26AUG31RTOP3 ("Will [Couple] finish in the Top 3
+    Couples in Love Island USA Season 8?"), zero real political-coup
+    markets. Padded to ' coup ' so 'Couples' can no longer match; the title
+    now correctly falls through to the "season N" many-way-field rule
+    instead (a much better fit than a fictional political-coup label).
+    """
+    m = _market(title="Will Kayda and Caleb finish in the Top 3 Couples in Love Island USA Season 8?")
+    assert scanner.get_heuristic_label(m) != "political coup"
+    assert scanner.get_heuristic_label(m) == "competition/award ranking"
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.02)
+
+
+def test_political_coup_genuine_phrasing_still_matches():
+    """
+    Sanity check that the ' coup ' padding fix doesn't break genuine
+    political-coup phrasing (space on both sides in ordinary sentences).
+    """
+    m = _market(title="Will there be a military coup in Venezuela before 2027?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.10)
+    assert scanner.get_heuristic_label(m) == "political coup"
+
+
+def test_fda_adcom_broadcom_misfire_fixed():
+    """
+    backlog: fda-adcom-broadcom-misfire. Bare 'adcom' was a substring of
+    'Broadcom' -- confirmed against the full settled_markets corpus, ALL 13
+    historical "FDA advisory committee" matches were actually "What will
+    Broadcom Inc. say during their next earnings call?", zero real FDA
+    adcom markets. Padded to ' adcom ' so 'Broadcom' can no longer match.
+    """
+    m = _market(title="What will Broadcom Inc. say during their next earnings call?")
+    assert scanner.get_heuristic_label(m) != "FDA advisory committee"
+
+
+def test_nasa_mission_wannasaen_misfire_fixed():
+    """
+    backlog: nasa-mission-hataoka-partial-fix. Bare 'nasa' was a substring
+    of 'Wannasaen' (an LPGA golfer's surname) -- confirmed against the full
+    settled_markets corpus, ALL 6 historical "NASA mission" matches were
+    actually the ISPS Handa Women's Scottish Open leaderboard ticker, zero
+    real NASA-agency markets. Padded to ' nasa ', which removes this
+    mid-word collision.
+    """
+    m = _market(title="Will Chanettee Wannasaen lead at the end of Round 3 in the ISPS Handa Women's Scottish Open?")
+    assert scanner.get_heuristic_label(m) != "NASA mission"
+
+
+def test_nasa_mission_hataoka_homograph_not_fully_fixable():
+    """
+    Documents a residual, structurally-unfixable edge case found during the
+    same audit: golfer Nasa Hataoka's given name is literally "Nasa", a
+    standalone word identical to the acronym -- no word-boundary or padding
+    fix can distinguish them from lowercased title text alone. This test
+    pins down the known-limitation behavior (still misfires) rather than
+    silently leaving it unverified; flagged in the backlog instead of
+    papering over it with a name-specific blocklist hack.
+    """
+    m = _market(title="Will Nasa Hataoka lead at the end of Round 3 in the ISPS Handa Women's Scottish Open?")
+    assert scanner.get_heuristic_label(m) == "NASA mission"
+
+
+def test_nasa_mission_genuine_phrasing_still_matches():
+    """
+    Sanity check that the ' nasa ' padding fix doesn't break genuine NASA
+    phrasing (space on both sides in ordinary sentences).
+    """
+    m = _market(title="Will nasa confirm new funding for its next mission before 2027?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.30)
+    assert scanner.get_heuristic_label(m) == "NASA mission"
+
+
 def test_heuristic_label_on_score_market_result():
     """score_market() passes heuristic_label through to the result dict."""
     m = _market(title="Will Ethereum complete the Pectra network upgrade by Q2 2026?")

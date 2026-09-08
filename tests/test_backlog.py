@@ -470,8 +470,48 @@ def test_parses_and_96_items(backlog_data):
     exists, not propose alternatives), plus a real Gmail-clipping bug
     fix found and fixed along the way (unbounded markets table produced
     ~285KB of HTML against a ~102KB clip threshold).
+
+    122, not 118: leviathan-calibration's first systematic (not reactive)
+    sweep of core.scanner._HEURISTIC_RULES against the full 12,600-row
+    settled_markets corpus (2026-09-07/08). Extracted every bare,
+    unpadded, <=7-char keyword across all ~100 rules and searched the
+    corpus for any real word silently containing one as a substring --
+    found and fixed 3 real, previously-undetected keyword-collision bugs,
+    each logged and tested separately per this backlog's established
+    1-bug-1-entry convention (see win-catchall-two-team-game-misfire):
+    political-coup-couples-misfire ('coup' inside 'Couples' --
+    Love Island USA, 89/89 of the label's historical matches were this
+    bug, zero real political-coup titles anywhere in the corpus even
+    under a strict word-boundary check), fda-adcom-broadcom-misfire
+    ('adcom' inside 'Broadcom' -- earnings-call markets, 13/13 of the
+    label's historical matches), and nasa-mission-hataoka-partial-fix
+    ('nasa' inside 'Wannasaen', a golfer's surname -- partially fixed by
+    padding; a second, genuine homograph collision with golfer Nasa
+    Hataoka's given name is structurally unfixable by substring/word-
+    boundary matching alone and is deliberately left flagged and
+    regression-tested as a known limitation, not silently patched over).
+    All three fixed the same way (space-padding the bare keyword, the
+    same pattern already used for ' win '/' dprk '/' fired ' elsewhere in
+    this table); full-corpus diff confirmed exactly the expected rows
+    changed and nothing else. A fourth finding from the same sweep,
+    entertainment-award-emmy-coverage-gap, was investigated with equal
+    rigor but NOT fixed -- an apparent Kalshi settlement-timing anomaly
+    (91 Emmy-category rows all resolved NO more than two months before
+    the real ceremony date encoded in their own event_ticker) makes the
+    label's aggregate actual rate untrustworthy; logged status "ready"
+    with the real evidence rather than guessing a replacement number,
+    matching down-ballot-election-recalibration's precedent for a
+    population too structurally uncertain to fix blind.
+
+    123, not 122: daily-smart-money-commit-scope-fix -- root-caused the
+    same session's dashboard-ux staged-work-swept-into-an-automated-commit
+    incident to scripts/daily_smart_money.py's final `git commit -m msg`
+    call having no pathspec, so it committed the whole index (anything
+    already staged by a concurrent process) rather than just its own one
+    intended data file. Fixed by scoping both the no-changes check and the
+    commit itself to that one path.
     """
-    assert len(backlog_data["items"]) == 118
+    assert len(backlog_data["items"]) == 123
 
 
 def test_all_ids_unique(backlog_data):

@@ -1,17 +1,17 @@
 # Heuristic Backtest — Leviathan v1
 
-**Generated:** 2026-09-06T15:46:47.384133+00:00  
+**Generated:** 2026-09-08T03:18:25.448352+00:00  
 **Source:** settled_markets (real Kalshi resolutions, no LLM cost)  
 **Total settled markets (binary result):** 12600  
-**Heuristic coverage:** 2154 / 12600 (17.1%)  
+**Heuristic coverage:** 2138 / 12600 (17.0%)  
 
 ## Overall calibration
 
 - Naive baseline (always predict the population YES-rate, 23.3%): Brier = 0.1786
-- Heuristic table (only where a pattern matched): Brier = 0.0792
-- Delta: -0.0994 -> heuristics beat the naive baseline
-- Directional accuracy (excludes exact-0.5 coin-flip predictions, n=2096): 90.1%
-- Expected Calibration Error (10 bins, across the whole table -- not per-label, see note below): 0.0222
+- Heuristic table (only where a pattern matched): Brier = 0.0780
+- Delta: -0.1006 -> heuristics beat the naive baseline
+- Directional accuracy (excludes exact-0.5 coin-flip predictions, n=2093): 90.1%
+- Expected Calibration Error (10 bins, across the whole table -- not per-label, see note below): 0.0184
 
 ## Reliability by predicted-probability bin
 
@@ -19,12 +19,12 @@ Bucketed by predicted probability across ALL labels together, not per-label -- e
 
 | Predicted range | n | Avg predicted | Actual YES rate | Gap |
 |---|---|---|---|---|
-| 0-10% | 1530 | 5.1% | 5.0% | +0.001 |
-| 10-20% | 90 | 10.1% | 3.3% | +0.067 |
-| 20-30% | 338 | 21.7% | 16.0% | +0.057 |
+| 0-10% | 1619 | 4.9% | 4.9% | +0.000 |
+| 10-20% | 1 | 15.0% | 0.0% | +0.150 |
+| 20-30% | 335 | 21.6% | 16.1% | +0.055 |
 | 30-40% | 82 | 35.0% | 51.2% | -0.162 |
 | 40-50% | 26 | 40.0% | 57.7% | -0.177 |
-| 50-60% | 83 | 50.8% | 49.4% | +0.014 |
+| 50-60% | 70 | 50.9% | 50.0% | +0.009 |
 | 60-70% | 2 | 65.0% | 0.0% | +0.650 |
 | 70-80% | 3 | 75.0% | 66.7% | +0.083 |
 
@@ -33,10 +33,9 @@ Bucketed by predicted probability across ALL labels together, not per-label -- e
 | Label | n | Avg predicted | Actual YES rate | Calibration gap | Brier |
 |---|---|---|---|---|---|
 | competition win | 734 | 8.0% | 8.2% | -0.002 | 0.0751 |
-| competition/award ranking | 637 | 2.0% | 1.7% | +0.003 | 0.0170 |
+| competition/award ranking | 726 | 2.0% | 1.9% | +0.001 | 0.0189 |
 | entertainment award | 236 | 20.0% | 10.6% | +0.094 | 0.1036 |
 | sports award | 107 | 4.0% | 3.7% | +0.003 | 0.0360 |
-| political coup | 89 | 10.0% | 3.4% | +0.066 | 0.0370 |
 | AI model release | 34 | 25.0% | 11.8% | +0.132 | 0.1213 |
 | legislative passage | 33 | 35.0% | 42.4% | -0.074 | 0.2498 |
 | supreme court ruling | 24 | 50.0% | 37.5% | +0.125 | 0.2500 |
@@ -46,7 +45,6 @@ Bucketed by predicted probability across ALL labels together, not per-label -- e
 | SpaceX launch | 15 | 40.0% | 40.0% | +0.000 | 0.2400 |
 | executive order (periodic count) | 14 | 20.0% | 21.4% | -0.014 | 0.1686 |
 | IPO announcement | 13 | 25.0% | 0.0% | +0.250 | 0.0625 |
-| FDA advisory committee | 13 | 50.0% | 46.2% | +0.038 | 0.2500 |
 | sports debut | 12 | 35.0% | 58.3% | -0.233 | 0.2975 |
 | sports transaction | 12 | 30.0% | 100.0% | -0.700 | 0.4900 |
 | sports qualification | 11 | 35.0% | 54.5% | -0.195 | 0.2861 |
@@ -55,7 +53,6 @@ Bucketed by predicted probability across ALL labels together, not per-label -- e
 | media/entertainment release | 6 | 25.0% | 50.0% | -0.250 | 0.3125 |
 | presidential clemency | 6 | 35.0% | 16.7% | +0.183 | 0.1725 |
 | crypto price level | 6 | 50.0% | 50.0% | +0.000 | 0.2500 |
-| NASA mission | 6 | 30.0% | 0.0% | +0.300 | 0.0900 |
 | CPI/inflation data | 5 | 50.0% | 100.0% | -0.500 | 0.2500 |
 | company valuation | 5 | 35.0% | 100.0% | -0.650 | 0.4225 |
 | labor strike | 5 | 30.0% | 0.0% | +0.300 | 0.0900 |
@@ -65,6 +62,7 @@ Bucketed by predicted probability across ALL labels together, not per-label -- e
 | athlete retirement | 3 | 30.0% | 100.0% | -0.700 | 0.4900 |
 | social media post | 3 | 75.0% | 66.7% | +0.083 | 0.2292 |
 | budget/spending legislation | 3 | 40.0% | 100.0% | -0.600 | 0.3600 |
+| NASA mission | 3 | 30.0% | 0.0% | +0.300 | 0.0900 |
 | cabinet departure | 2 | 65.0% | 0.0% | +0.650 | 0.4225 |
 | exchange rate | 2 | 40.0% | 100.0% | -0.600 | 0.3600 |
 | nuclear deal | 2 | 20.0% | 0.0% | +0.200 | 0.0400 |

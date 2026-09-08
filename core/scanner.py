@@ -374,7 +374,20 @@ _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['pdufa', 'pdufa date', 'pdufa target date'], 0.85, 'PDUFA date'),
     (['clinical hold', 'clinical hold lifted', 'fda clinical hold', 'partial clinical hold'], 0.1, 'FDA clinical hold'),
     (['complete response letter', 'crl issued', 'received a crl', 'resubmission', 'resubmitted to the fda', 'respond to the crl', 'address the crl'], 0.6, 'FDA complete response letter'),
-    (['advisory committee', 'fda advisory', 'adcom', 'fda panel', 'fda panel vote', 'fda panel meeting', 'advisory panel', 'fda advisory committee'], 0.5, 'FDA advisory committee'),
+    # backlog: fda-adcom-broadcom-misfire (systematic audit, 2026-09-07).
+    # Bare 'adcom' is a substring of 'Broadcom' -- confirmed against the
+    # full 12,600-row settled_markets corpus: ALL 13 historical "FDA
+    # advisory committee" matches (100%) were actually one recurring
+    # ticker family, "What will Broadcom Inc. say during their next
+    # earnings call?", zero real FDA adcom markets. Padded to ' adcom '
+    # (same fix pattern as ' coup '/' win '/' dprk ' elsewhere in this
+    # table) so 'Broadcom' can no longer match. The rest of the rule's
+    # keywords ('advisory committee', 'fda advisory', 'fda panel', etc.)
+    # have zero historical matches of their own, so after this fix the
+    # label has zero real matches corpus-wide -- unverified but not
+    # contradicted, same status as 'executive order' pre-split. Rate
+    # left unchanged at 0.5.
+    (['advisory committee', 'fda advisory', ' adcom ', 'fda panel', 'fda panel vote', 'fda panel meeting', 'advisory panel', 'fda advisory committee'], 0.5, 'FDA advisory committee'),
     (['fda approve', 'fda approval', 'fda approves', 'fda cleared', 'fda authorization', 'fda authorize', 'fda clears'], 0.4, 'FDA approval'),
     (['sec approve', 'sec approves', 'sec approval', 'fcc approve', 'fcc approves', 'fcc approval', 'ferc approve', 'ferc approves', 'ferc approval', 'regulatory approval', 'regulatory clearance', 'cfpb approve', 'ftc approve', 'epa approve'], 0.4, 'regulatory approval'),
     (['network upgrade', 'protocol upgrade', 'hard fork', 'soft fork', 'mainnet upgrade', 'consensus upgrade', 'ethereum upgrade', 'eth upgrade', 'bitcoin upgrade', 'taproot upgrade', 'blockchain upgrade', 'chain upgrade', 'protocol migration', 'pectra', 'shapella', 'eip-', 'bip-', 'scheduled upgrade'], 0.65, 'crypto protocol upgrade'),
@@ -439,7 +452,20 @@ _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['troop withdrawal', 'withdraw troops', 'pull out troops', 'military withdrawal', 'military drawdown', 'drawdown of troops', 'troops leave', 'forces leave', 'exit afghanistan', 'end the mission', 'end combat operations', 'remove troops from', 'troops return home'], 0.3, 'military withdrawal'),
     (['civil war', 'armed conflict', 'armed uprising', 'insurgency', 'rebel forces', 'sectarian conflict', 'internal conflict', 'internal war', 'militias', 'warlord'], 0.25, 'civil conflict'),
     (['declare war', 'invade', 'military strike', 'launch attack'], 0.15, 'military conflict'),
-    (['coup', 'overthrow', 'regime change'], 0.1, 'political coup'),
+    # backlog: political-coup-couples-misfire (systematic audit, 2026-09-07).
+    # Bare 'coup' is a substring of 'Couples' -- confirmed against the full
+    # 12,600-row settled_markets corpus: ALL 89 historical "political coup"
+    # matches (100%) were actually one ticker, KXLOVEISLANDUSARANK-26AUG31RTOP3
+    # ("Will [Couple] finish in the Top 3 Couples in Love Island USA Season
+    # 8?"), zero real political-coup markets. With a word-boundary regex
+    # check (\bcoup\b) across the same corpus, real political-coup matches =
+    # 0 -- this heuristic has never once fired on genuine data. Padded to
+    # ' coup ' (same fix pattern as the existing ' win '/' dprk '/' fired '
+    # entries elsewhere in this table) so 'Couples' can no longer match
+    # (no internal space around the substring), while genuine phrasing like
+    # "a coup in Venezuela" still matches cleanly. Rate left unchanged at
+    # 0.10 (unverified but not contradicted -- zero real matches either way).
+    ([' coup ', 'overthrow', 'regime change'], 0.1, 'political coup'),
     (['legalize cannabis', 'legalize marijuana', 'legalize recreational', 'marijuana legalization', 'cannabis legalization', 'legalize gambling', 'legalize sports gambling', 'sports gambling', 'gambling legalization', 'gambling legislation', 'legalize drugs', 'drug legalization', 'decriminalize marijuana', 'decriminalize cannabis', 'pass cannabis legislation', 'recreational marijuana bill', 'recreational cannabis bill', 'gambling bill', 'sports betting', 'online gambling', 'legal gambling', 'legal cannabis', 'legal marijuana', 'gambling'], 0.3, 'legalization'),
     (['be cancelled', 'be canceled', 'be postponed', 'gets cancelled', 'gets canceled', 'gets postponed', 'cancel the event', 'postpone the event', 'cancel the summit', 'cancel the conference', 'cancel the olympics', 'cancel the world cup', 'cancel the games', 'call off the', 'called off'], 0.1, 'event cancellation'),
     (['break the record', 'breaks the record', 'set a new record', 'sets a new record', 'beat the record', 'shatter the record', 'world record', 'all-time record in', 'record-breaking performance', 'olympic record', 'personal record'], 0.3, 'athletic record'),
@@ -468,7 +494,24 @@ _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     # 3rd place"). Measured actual YES rate: 1.73% across 637 settled markets.
     (['season 2', 'season 3', 'season 4', 'season 5', 'season 6', 'season 7', 'season 8', 'season 9', 'movie', 'film'], 0.02, 'competition/award ranking'),
     (['starship', 'falcon heavy', 'falcon 9', 'spacex launch', 'rocket launch'], 0.4, 'SpaceX launch'),
-    (['nasa', 'moon landing', 'lunar gateway', 'artemis', 'space station', ' iss ', 'james webb', 'land on the moon', 'land astronauts on the moon', 'crewed lunar', 'lunar lander', 'lunar module'], 0.3, 'NASA mission'),
+    # backlog: nasa-mission-hataoka-partial-fix (systematic audit,
+    # 2026-09-07). Bare 'nasa' is a substring of both a mid-word collision
+    # ('Wannasaen', an LPGA golfer's surname) and a genuine homograph
+    # (golfer Nasa Hataoka's given name is literally "Nasa") -- confirmed
+    # against the full 12,600-row settled_markets corpus: ALL 6 historical
+    # "NASA mission" matches (100%) were the "ISPS Handa Women's Scottish
+    # Open" leaderboard ticker, zero real NASA-agency markets. Padded to
+    # ' nasa ' (same fix pattern as ' coup '/' adcom ' above), which
+    # removes the 'Wannasaen' mid-word collision (3 of the 6 rows), but
+    # NOT the 'Nasa Hataoka' collision (the other 3): her given name is a
+    # standalone word identical to the acronym, so no word-boundary or
+    # padding fix can distinguish them from lowercased title text alone --
+    # flagged as a residual, structurally-unfixable edge case rather than
+    # papering over it with a name-specific blocklist hack. Rate left
+    # unchanged at 0.3 (unverified but not contradicted -- zero real
+    # NASA-mission matches either way; 'artemis'/'moon landing'/etc. in
+    # this same rule remain the reliable path to a real match).
+    ([' nasa ', 'moon landing', 'lunar gateway', 'artemis', 'space station', ' iss ', 'james webb', 'land on the moon', 'land astronauts on the moon', 'crewed lunar', 'lunar lander', 'lunar module'], 0.3, 'NASA mission'),
     (['phase 3', 'clinical trial', 'phase 2', 'drug trial', 'clinical study'], 0.35, 'clinical trial'),
     (['pandemic', 'epidemic', 'outbreak', 'public health emergency'], 0.25, 'pandemic/epidemic'),
     (['variant of concern', 'covid variant', 'new variant', 'sars-cov', 'covid strain', 'virus variant', 'declare a public health emergency', 'mpox', 'monkeypox'], 0.3, 'COVID variant'),
