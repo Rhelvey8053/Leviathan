@@ -1,5 +1,5 @@
 {
-  "last_sent": "2026-09-03",
+  "last_sent": "2026-09-07",
   "backlog_snapshot": {
     "trade-reconciliation": {
       "status": "done",
@@ -42,8 +42,8 @@
       "notes_len": 98
     },
     "edge-decay-analysis": {
-      "status": "locked",
-      "notes_len": 73
+      "status": "done",
+      "notes_len": 2569
     },
     "per-wallet-track-record": {
       "status": "locked",
@@ -90,7 +90,7 @@
       "notes_len": 619
     },
     "auto-calibration-loop": {
-      "status": "blocked",
+      "status": "ready",
       "notes_len": 88
     },
     "wallet-tracking-dashboard": {
@@ -154,8 +154,8 @@
       "notes_len": 2614
     },
     "replay-instrument-validation": {
-      "status": "ready",
-      "notes_len": 6010
+      "status": "done",
+      "notes_len": 16037
     },
     "price-blind-arm": {
       "status": "done",
@@ -166,8 +166,8 @@
       "notes_len": 2229
     },
     "methodology-writeup": {
-      "status": "blocked",
-      "notes_len": 192
+      "status": "ready",
+      "notes_len": 1166
     },
     "multi-sample-scoring": {
       "status": "done",
@@ -226,8 +226,8 @@
       "notes_len": 0
     },
     "cross-venue-expansion": {
-      "status": "blocked",
-      "notes_len": 0
+      "status": "ready",
+      "notes_len": 7068
     },
     "ci-kalshi-auth-env-2026-08": {
       "status": "done",
@@ -359,7 +359,7 @@
     },
     "task-scheduler-manual-trigger-stuck-queued": {
       "status": "ready",
-      "notes_len": 4658
+      "notes_len": 5947
     },
     "smart-money-fills-table-missing": {
       "status": "done",
@@ -399,7 +399,7 @@
     },
     "windows-defender-cpu-contention-2026-08-30": {
       "status": "ready",
-      "notes_len": 617
+      "notes_len": 1192
     },
     "monday-com-retired-backlog-dashboard-page": {
       "status": "done",
@@ -418,8 +418,8 @@
       "notes_len": 1266
     },
     "trial-stronger-model-main-scoring": {
-      "status": "ready",
-      "notes_len": 4583
+      "status": "done",
+      "notes_len": 9094
     },
     "smart-money-winning-whales-panel": {
       "status": "done",
@@ -448,6 +448,30 @@
     "cli-backend-token-telemetry": {
       "status": "done",
       "notes_len": 1955
+    },
+    "cross-model-corroboration": {
+      "status": "done",
+      "notes_len": 2529
+    },
+    "kalshi-event-recency-window-misses-new-markets": {
+      "status": "done",
+      "notes_len": 3219
+    },
+    "win-catchall-two-team-game-misfire": {
+      "status": "done",
+      "notes_len": 2185
+    },
+    "ai-workflow-research-findings-2026-09": {
+      "status": "ready",
+      "notes_len": 2150
+    },
+    "report-ticker-none-vs-missing-audit": {
+      "status": "ready",
+      "notes_len": 0
+    },
+    "weekly-digest-reskin-and-clip-fix": {
+      "status": "done",
+      "notes_len": 3344
     }
   }
 }
