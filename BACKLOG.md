@@ -3,12 +3,11 @@ Last updated: 2026-09-07 | Metrics: resolved=37, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (7)
+## Ready (6)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
-| 3 | windows-defender-cpu-contention-2026-08-30 | Found 2026-08-30 while investigating a garbled weekly_code_audit.py run and a main.py catch-up run that appeared stuck on one step for a long stretch (both eventually completed -- confirmed slow, not… | infra |
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
@@ -30,7 +29,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (103)
+## Done (104)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -110,6 +109,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | weekly-code-audit-exit-code-not-proof-of-report | Found 2026-08-30 while investigating that day's missed DailyRun (see dailyrun-missed-run-2026-08-30-silent-failure-gaps): Leviathan-CodeAudit's Sunday run showed LastTaskResult=0 in Task Scheduler,… | infra |
 | 3 | weekly-digest-reskin-and-clip-fix | render_weekly_html rendered a completely different dark theme (IBM Plex Mono, #070a12 background) from render_html's real style -- its own docstring claimed the two matched, but that description was… | reporting |
 | 3 | win-catchall-two-team-game-misfire | win-catchall-recalibration (done, 2026-08-01) correctly dropped the generic ' win ' heuristic from 0.52 to the measured 0.08, explicitly declining to split the pattern by entrant count 'since that… | calibration |
+| 3 | windows-defender-cpu-contention-2026-08-30 | Found 2026-08-30 while investigating a garbled weekly_code_audit.py run and a main.py catch-up run that appeared stuck on one step for a long stretch (both eventually completed -- confirmed slow, not… | infra |
 | 3 | wire-llm-model-cli-flag | Second, independent lever from the same user request ('expand scope... | infra |
 | 4 | cross-model-corroboration | User pushback ('I don't see how this wouldn't benefit the project and you're rejecting it entirely') on an earlier OmniRoute rejection was correct to push on -- that rejection conflated two different… | calibration |
 | 4 | kalshi-sdk-migration-implementation | Built the adapter, but not the field-by-field typed-model remapping the Ready-item scope note called for. | infra |
