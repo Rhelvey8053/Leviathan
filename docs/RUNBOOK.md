@@ -61,6 +61,123 @@ The `runs` table is completely empty. Either:
 
 ---
 
+## "Leviathan ALERT — automation health: N problem(s) found" (from scripts/automation_health_check.py)
+
+Unlike the heartbeat above (which watches only `main.py`'s own completion),
+this checks the *other* scheduled tasks (gate notifier, position
+reconciliation, weekly audit, etc.) plus Litestream's continuous DB
+backup. The email body lists each specific problem; the two shapes are:
+
+1. **A scheduled task listed with "no run in Xh"** — Task Scheduler's
+   `LastRunTime` for that task is older than its expected cadence. Check
+   its actual state:
+   ```powershell
+   Get-ScheduledTaskInfo -TaskName <TaskName>
+   ```
+   If `State` is `Disabled`, re-enable it. If the task is missing
+   entirely (alert says "not found in Task Scheduler"), it was deleted or
+   never registered — re-run the matching `scripts/setup_*.ps1` for it.
+   A common root cause for a task that's `Ready` but still stale: a prior
+   run left a zombie process alive, and `MultipleInstances: IgnoreNew`
+   (the default in this project's task setup scripts) silently skips every
+   relaunch attempt rather than erroring — check for a leftover process
+   with the task's own executable name and kill it before restarting the
+   task.
+
+2. **A task listed with "result code N"** — its last run exited non-zero
+   (and N isn't 267014, the one code seen often enough without a
+   corroborating failure that it's allowlisted as benign — see
+   `BENIGN_RESULT_CODES` in the script). Decode any other code:
+   ```powershell
+   [System.ComponentModel.Win32Exception]::new(<N>).Message
+   ```
+
+3. **"Litestream replica: replica is Xh behind the live DB"** — the
+   continuous backup has stopped keeping up with `data/leviathan.db`. This
+   is exactly the 2026-08-23 incident: a zombie `litestream.exe` blocked
+   by `MultipleInstances: IgnoreNew` from ever relaunching after a
+   restart. Check for a stray process, kill it, then restart the task:
+   ```powershell
+   Get-Process litestream
+   Stop-Process -Id <PID> -Force   # only the stale one, if more than one shows up
+   Start-ScheduledTask -TaskName Leviathan-Litestream
+   ```
+   Verify the fix actually replicates, don't just trust the process is
+   alive — restore and compare row counts against the live DB:
+   ```powershell
+   tools\litestream.exe restore -config tools\litestream.yml -o <output.db> data\leviathan.db
+   ```
+
+**To resolve:** unlike the heartbeat above, this alert has no
+automatically-detectable "resolved" signal, so it re-alerts once per UTC
+day for as long as the underlying problem is still present on the next
+check — fixing the task/process is what stops it, not any manual state
+reset.
+
+---
+
+## `weekly_code_audit.py` timed out / raw traceback in logs/weekly_code_audit.log
+
+The Sunday 11am `claude --print` audit run ran out of its time budget
+(`TIMEOUT_SECONDS` in scripts/weekly_code_audit.py, currently 3600s) and
+no report landed in `reports/code_audits/`. Two ways this surfaces:
+
+- `automation_health_check.py`'s task-health section flags
+  `Leviathan-CodeAudit` with a non-zero/non-benign result code (it's one
+  of the 7 tasks that script monitors).
+- `daily_digest.py`'s weekly-audit-log-tail section shows the failure
+  the next day it's included (log modified within the last ~20h).
+
+Both can fire for the same underlying event — that's expected, not a
+double-count bug.
+
+**Known root cause (2026-08-23, fixed 2026-08-24):** the first-ever run
+had no prior report in `reports/code_audits/` to diff against, and
+`weekly_code_audit_prompt.md`'s "real read every diff since the last
+audit" instruction had no fallback bound for that case (unlike the
+diff `--stat` step just above it, which already fell back to `HEAD~10`)
+— so it was effectively unbounded against the project's full history
+(412 commits at the time). Fixed by bounding that instruction to the
+last 10 commits on a from-scratch run, and by raising the timeout from
+1800s to 3600s for real margin on top of that. The subprocess call also
+used to crash with a raw Python traceback on timeout instead of a clean
+failure message — fixed too (`run_audit()` now catches
+`subprocess.TimeoutExpired` and logs a clean one-line failure instead).
+
+**If this recurs anyway:** check `reports/code_audits/` for the most
+recent report's date — if one exists, the from-scratch-run bound above
+doesn't apply and the timeout is being hit on a normal, already-bounded
+week's worth of work. That would mean something else is slow or
+genuinely stuck: check whether the full `py -m pytest tests/ -q` step
+alone is taking unexpectedly long, or whether a specific `PowerShell`/
+`git` call in the checklist might be hanging (e.g. a `Get-WinEvent`
+query with no filter narrow enough to return quickly).
+
+**To resolve:** the next Sunday run either succeeds cleanly or fails
+with a clear one-line timeout message instead of a crash — no manual
+state to reset either way.
+
+**Second, separate bug found by this fix's own live verification run
+(2026-08-24/25, fixed same day):** the run completed within the new
+3600s budget — exit code 0, no timeout, no crash — and *still* wrote no
+report to `reports/code_audits/`. Root cause was in the run's own
+stderr: `Write(reports/code_audits/*.md)` in `ALLOWED_TOOLS` is not
+matched by the permission system's file-write checks at all (only
+`Edit(path)` rules are — per the CLI's own error message, "Edit rules
+cover all file-editing tools," Write included). The audit's one Write
+call to create its report file was silently denied for the entire life
+of this script, and exit 0 gave no hint anything was wrong. Fixed by
+expressing the same path scope as `Edit(reports/code_audits/*.md)`
+instead, and by dropping the blanket `Edit` that used to sit in
+`DISALLOWED_TOOLS` (it would have shadowed the new scoped allow — a
+disallow wins over an allow on the same tool name). **If a Sunday run
+ever again produces exit 0 with no new file in `reports/code_audits/`,
+check `logs/weekly_code_audit.log` for a similar
+"is not matched by file permission checks" stderr line before assuming
+the audit is just quiet that week.**
+
+---
+
 ## "API shape anomaly detected, run aborted" (from main.py step 2)
 
 More than `config.markets.shape_anomaly_threshold` (default 50%) of the
@@ -88,7 +205,7 @@ own alert if this keeps happening.
    field names Kalshi used to return.
 3. If Kalshi genuinely renamed/removed a field, the fix is in
    `core/kalshi.py` (the fetch functions) — this codebase has already hit
-   this exact failure mode more than once (see `docs/PROGRESS.md`,
+   this exact failure mode more than once (see `docs/PROGRESS_ARCHIVE.md`,
    2026-07-25 bug sweep: `fetch_orderbook`/`fetch_trades` both assumed a
    response shape that turned out not to exist). Verify the real shape
    with a live request before changing code, the same way those fixes
@@ -144,6 +261,79 @@ waste one run's worth of Kalshi/Claude calls.
 
 ---
 
+## Triaging Liam (monday.com's built-in PM agent) reports
+
+For running/diagnosing the sync tool itself (`scripts/monday_sync.py`),
+see `docs/monday_sync_runbook.md` instead -- this section is about
+evaluating Liam's judgment, a separate concern from the sync mechanism.
+
+Liam posts a "Daily + Weekly Report" update to the "Leviathan Sync Log"
+item on the monday board on its own cadence, independent of anything in
+this repo. It's a genuine second source of *external* research (regulatory
+news, competitor platform changes) that nothing in this codebase gathers
+on a standing basis. It is NOT reliable on *internal* project state, and
+its "stale block" / "move to Ready" recommendations must never be acted
+on directly — verify first.
+
+**Confirmed failure modes** (observed 2026-08-18 and again 2026-08-19,
+same mistake both times):
+
+- **Conflates `depends_on` with the real trigger.** Liam checks whether an
+  item's listed dependencies are Done and calls the block "stale" if so —
+  it does not evaluate the item's actual `trigger.all` metric conditions
+  at all. `auto-calibration-loop` has been flagged as a stale block in
+  both reports despite `resolved_count` sitting at 13 against a required
+  30 — the dependencies (`sample-size-gates`, `brier-tracking`) are done,
+  but that's a different, weaker condition than the trigger being met.
+- **No visibility into policy decisions made in conversation.** Liam
+  recommended unblocking `replay-instrument-validation` in both reports
+  because its dependencies are done — it has no way to know the user
+  explicitly decided the bot may never spend real metered Anthropic API
+  money, which is why that item is deliberately re-gated behind a
+  sentinel trigger metric (`api_spend_authorized`) that never clears on
+  its own. Any item gated by a sentinel metric (see
+  `backlog.json`'s `metrics_glossary` for which ones — currently
+  `api_spend_authorized`, `graphify_corpus_shape_changed`) requires a
+  fresh human decision, and Liam will keep recommending it every report
+  until that changes.
+- **Inconsistent live DB access.** The 2026-08-18 report showed real
+  `resolved_count` numbers; the 2026-08-19 report said "no gate metrics
+  are available in this run (no live DB access)" for the exact same
+  section. Don't assume any given report actually queried live data.
+- **"Automated Actions Taken" may just be narrating existing state.**
+  Liam's 2026-08-19 report claimed credit for stamping `Completed On`
+  dates on 3 items — those were the exact dates Claude had already
+  written the day before via `scripts/_backfill_completed_on_dates.py`.
+  Treat this section as "what changed since I last looked", not
+  necessarily "what I personally did."
+
+**What Liam is genuinely good for**: the "Weekly Intelligence Brief"
+section (regulatory changes, competitor API/venue news, package-security
+findings on evaluated tools) is real research worth reading and folding
+into the relevant backlog item's `action` text when it changes something
+material — see `cross-venue-expansion`'s 2026-08-19 update (Kalshi's WA
+geofencing injunction) for the pattern: read it, verify it's real and
+material, fold the specific finding into the item, cite the source
+("via Liam/monday.com PM agent's weekly intelligence brief, verified
+before incorporating").
+
+**Process — run this before acting on anything Liam recommends:**
+```
+python scripts/verify_liam_report.py
+```
+This fetches Liam's latest post and, independently, computes real ground
+truth for every `locked`/`blocked` backlog item straight from
+`backlog.checker.compute_metrics()` and `backlog.json`'s own
+`trigger`/`depends_on` fields — showing exactly which metric is or isn't
+met, which dependency is or isn't done, and flagging sentinel-gated items
+explicitly. Only an item the script marks
+`*** REALLY UNLOCKABLE NOW ***` actually qualifies for a status change;
+everything else in Liam's recommendations should be treated as either
+external research (evaluate on its own merits) or noise (a repeat of an
+already-known false claim).
+
+---
+
 ## Quick reference
 
 | Task | Command |
@@ -153,9 +343,12 @@ waste one run's worth of Kalshi/Claude calls.
 | Check scheduled task status | `Get-ScheduledTaskInfo -TaskName Leviathan-DailyRun` |
 | Re-register the daily run scheduler | `powershell -ExecutionPolicy Bypass -File scripts\schedule_setup.ps1` |
 | Re-register the heartbeat scheduler | `powershell -ExecutionPolicy Bypass -File scripts\setup_heartbeat_scheduler.ps1` |
+| Check scheduled-task drift + Litestream lag without waiting | `python scripts\automation_health_check.py --dry-run` |
+| Re-register the automation health scheduler | `powershell -ExecutionPolicy Bypass -File scripts\setup_automation_health_scheduler.ps1` |
 | Check today's LLM daily spend (metered API only) | `python -c "from core.llm import get_daily_cost_usd; print(get_daily_cost_usd())"` |
 | Check DB location | `python -c "from core import logger; print(logger.DB_PATH)"` |
 | Full test suite | `python -m pytest -q` |
+| Triage Liam's (monday.com PM agent) latest report against real state | `python scripts/verify_liam_report.py` |
 | Check Task Scheduler event log is enabled | `Get-WinEvent -ListLog "Microsoft-Windows-TaskScheduler/Operational" \| Select IsEnabled` |
 | Enable it if not (requires Administrator) | `wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true` — from Git Bash, prefix with `MSYS_NO_PATHCONV=1` or its automatic POSIX-path conversion mangles the `/e:true` argument |
 | View recent scheduled-task activity | `Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" -MaxEvents 50` |

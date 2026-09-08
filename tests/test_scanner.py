@@ -1009,6 +1009,10 @@ def test_base_rate_expanded_heuristics(title, expected_not_none):
     ("Will Biden veto the tax reform bill?", 0.20),
     # Executive / appointments
     ("Will Trump sign an executive order on immigration?", 0.45),
+    # backlog: heuristic-sunsetting -- laddered weekly EO-count markets
+    # intercept before the generic 'executive order' rule above.
+    ("Will Mamdani sign above 0 executive orders between Jul 19, 2026 and Jul 25, 2026?", 0.20),
+    ("Will the President sign more than 1 Executive Orders between Jul 12, 2026 and Jul 18, 2026?", 0.20),
     ("Will the new Treasury Secretary be confirmed by the Senate?", 0.55),
     ("Will the Fed chair resign before 2027?", 0.20),
     ("Will Trump pardon Roger Stone?", 0.35),
@@ -1674,6 +1678,49 @@ def test_generic_win_catchall_rate():
     assert scanner.estimate_base_rate(m) == pytest.approx(0.08)
 
 
+def test_two_way_matchup_phrasing_gets_sports_game_rate_not_catchall():
+    """
+    backlog: win-catchall-two-team-game-misfire. Kalshi's verbose
+    game-market title template puts team names between "win the" and
+    "vs" ("Will Notre Dame win the Rice vs Notre Dame college football
+    game?"), so it never matches the "sports game" rule's own literal
+    'win the game' keyword and previously fell through to the generic
+    ' win ' catch-all (0.08) -- live-verified 2026-09-04 against 17 of
+    500 real open KXNCAAFGAME markets, all showing base_rate=0.08
+    regardless of matchup. A fair two-team game's naive prior is ~50%,
+    not a many-way-tournament rate.
+    """
+    m = _market(title="Will Notre Dame win the Rice vs Notre Dame college football game?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.52)
+    assert scanner.get_heuristic_label(m) == "sports game"
+
+
+def test_two_way_matchup_phrasing_requires_both_vs_and_win():
+    """
+    ' vs ' alone must NOT trigger the two-way-matchup rate -- it also
+    appears in structurally unrelated many-way "announcer mention" props
+    ("What will the announcers say during Wings vs Fire...?", confirmed
+    against 443 real historical settled_markets titles) that never
+    mention winning and have nothing to do with who wins the game.
+    """
+    m = _market(title="What will the announcers say during Wings vs Fire Women's Professional Basketball Game?")
+    assert scanner.estimate_base_rate(m) is None
+    assert scanner.get_heuristic_label(m) is None
+
+
+def test_two_way_matchup_phrasing_short_form_title_unaffected():
+    """
+    Kalshi's newer, terser title format ("Team Name wins", no 'vs') for
+    the same KXNFLGAME/KXNCAAFGAME series never matches ' win ' (no
+    trailing space after 'win' in 'wins') and is untouched by this fix --
+    confirmed live 2026-09-04 that these already fall through to no
+    heuristic (Claude scores them directly) or DRIFT, never HEURISTIC.
+    """
+    m = _market(title="Kansas City wins")
+    assert scanner.estimate_base_rate(m) is None
+    assert scanner.get_heuristic_label(m) is None
+
+
 def test_show_renewal_recalibration():
     """
     backlog: show-renewal-recalibration. Was 0.25 labeled "show renewal"
@@ -1782,6 +1829,34 @@ def test_down_ballot_election_two_way_race_still_calibrated_at_original_rate():
     m = _market(title="Will Democratic win the House race for CA-37?")
     assert scanner.estimate_base_rate(m) == pytest.approx(0.52)
     assert scanner.get_heuristic_label(m) == "down-ballot election"
+
+
+def test_executive_order_periodic_count_intercepted_before_generic_rule():
+    """
+    backlog: heuristic-sunsetting. All 14 settled matches for the generic
+    'executive order' rule (0.45) turned out to be Kalshi's newer laddered
+    "more than N executive orders between <date> and <date>" weekly-count
+    markets, not the genuine one-off "sign an EO on topic X" markets 0.45
+    was calibrated for -- actual rate 21.4% (heuristic Brier 0.2239 vs a
+    naive population-rate baseline of 0.1686 for this specific group, i.e.
+    actively worse than just guessing the population rate). Split out via
+    the "executive order(s) between" phrasing, which never appears in a
+    genuine one-off topic market.
+    """
+    m = _market(title="Will Mamdani sign above 0 executive orders between Jul 19, 2026 and Jul 25, 2026?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.20)
+    assert scanner.get_heuristic_label(m) == "executive order (periodic count)"
+
+
+def test_executive_order_generic_rule_still_calibrated_at_original_rate():
+    """
+    Sanity check that the periodic-count sub-rule doesn't swallow genuine
+    one-off substantive EO markets, which have zero settled examples yet
+    and are left at the original, unverified-but-uncontradicted 0.45.
+    """
+    m = _market(title="Will Trump sign an executive order on immigration?")
+    assert scanner.estimate_base_rate(m) == pytest.approx(0.45)
+    assert scanner.get_heuristic_label(m) == "executive order"
 
 
 def test_heuristic_label_on_score_market_result():
@@ -2478,3 +2553,46 @@ def test_compute_orderbook_signal_falls_back_to_yes_key_shape():
     result = scanner.compute_orderbook_signal(orderbook)
     assert result["ob_bid_depth"] == 100.0
     assert result["ob_ask_depth"] == 50.0
+
+
+# ── check_liquidity (backlog: net-edge-fee-depth-model) ─────────────────────
+
+def test_check_liquidity_yes_direction_uses_ask_depth():
+    # Buying YES fills against the ask book -- thin ask depth flags it
+    # even though bid depth is plenty.
+    result = scanner.check_liquidity("YES", ob_bid_depth=500, ob_ask_depth=3, unit_size=10)
+    assert result == {"liquidity_checked": True, "liquidity_thin": True}
+
+
+def test_check_liquidity_no_direction_uses_bid_depth():
+    result = scanner.check_liquidity("NO", ob_bid_depth=3, ob_ask_depth=500, unit_size=10)
+    assert result == {"liquidity_checked": True, "liquidity_thin": True}
+
+
+def test_check_liquidity_sufficient_depth_not_thin():
+    result = scanner.check_liquidity("YES", ob_bid_depth=5, ob_ask_depth=10, unit_size=10)
+    assert result == {"liquidity_checked": True, "liquidity_thin": False}
+
+
+def test_check_liquidity_exact_depth_not_thin():
+    # depth == unit_size can fully fill the stake -- not thin.
+    result = scanner.check_liquidity("YES", ob_bid_depth=0, ob_ask_depth=10, unit_size=10)
+    assert result["liquidity_thin"] is False
+
+
+def test_check_liquidity_pass_direction_not_checked():
+    result = scanner.check_liquidity("PASS", ob_bid_depth=1, ob_ask_depth=1, unit_size=10)
+    assert result == {"liquidity_checked": False, "liquidity_thin": False}
+
+
+def test_check_liquidity_missing_depth_not_checked():
+    # No order book was fetched for this market (fetch failed / not flagged) --
+    # absence of data must not be treated as "book is empty" (which would
+    # falsely thin-flag every market lacking an orderbook fetch).
+    result = scanner.check_liquidity("YES", ob_bid_depth=None, ob_ask_depth=None, unit_size=10)
+    assert result == {"liquidity_checked": False, "liquidity_thin": False}
+
+
+def test_check_liquidity_zero_unit_size_not_checked():
+    result = scanner.check_liquidity("YES", ob_bid_depth=5, ob_ask_depth=5, unit_size=0)
+    assert result == {"liquidity_checked": False, "liquidity_thin": False}

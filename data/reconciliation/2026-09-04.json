@@ -1,0 +1,98 @@
+{
+  "run_at": "2026-09-04T14:15:04.332259+00:00",
+  "paper_open": 22,
+  "positions_fetched": 0,
+  "aligned": [],
+  "misaligned": [],
+  "unplaced": [
+    {
+      "ticker": "KXALBUMRELEASEDATEBEY-NEW-JAN01-27",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXARTISTCOLLABTHUGANDGUNNA-30-2027",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXFDAAPPROVE-MDMA-27JAN01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXIPOCANVA-DATE-26OCT01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXIPOOURA-26OCT01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXMEDIARELEASEPRISONBREAK-30JAN01-27JAN01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXMLBDEBUT-FARIAS-26NOV01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXMLBDEBUT-JMADE-26NOV01",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-ATL",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-AUS",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-BOS",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-DAL",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-DC",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-DEN",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-EWR",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-HOU",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-PHIL",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-PHX",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXRAIN-26SEP04-SEA",
+      "direction": "YES"
+    },
+    {
+      "ticker": "KXSPCELAUNCH-COMM-27JAN01",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXTVSEASONRELEASETHELASTOFUS-26-OCT",
+      "direction": "NO"
+    },
+    {
+      "ticker": "KXUSDJPY-26SEP0410-T155.000",
+      "direction": "NO"
+    }
+  ],
+  "unexpected": []
+}

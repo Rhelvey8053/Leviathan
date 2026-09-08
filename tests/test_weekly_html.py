@@ -113,13 +113,19 @@ def test_week_whale_rows_sorted_by_position_descending():
 # ─── render_weekly_html ────────────────────────────────────────────────────
 
 def test_render_weekly_html_basic_structure():
+    """
+    daily-report-weekly-reskin (2026-09-06): render_weekly_html now uses
+    render_html's light 'field instrument' visual system (Leviathan in
+    title case, sentence-case section labels) instead of the old
+    all-caps dark theme -- see render_weekly_html's own docstring for why.
+    """
     html = report.render_weekly_html([], _stats(), {})
     assert html.startswith("<!DOCTYPE html>")
-    assert "LEVIATHAN" in html
+    assert "Leviathan" in html
     assert "Weekly&nbsp;Digest" in html
-    assert "Whale Activity This Week" in html
-    assert "Markets Flagged This Week" in html
-    assert "Track Record" in html
+    assert "whale activity" in html.lower()
+    assert "markets flagged" in html.lower()
+    assert "track record" in html.lower()
 
 
 def test_render_weekly_html_empty_whale_section_message():
@@ -151,13 +157,13 @@ def test_render_weekly_html_no_signals_no_crash():
 def test_render_weekly_html_flag_path_section_present_when_data_given():
     flag_stats = [{"flag_path": "EDGE", "total": 5, "wins": 3, "win_rate": 60.0, "total_pnl": 1.25}]
     html = report.render_weekly_html([], _stats(), {}, flag_path_stats=flag_stats)
-    assert "Win Rate by Signal Path" in html
+    assert "win rate by signal path" in html.lower()
     assert "EDGE" in html
 
 
 def test_render_weekly_html_flag_path_section_absent_when_no_data():
     html = report.render_weekly_html([], _stats(), {}, flag_path_stats=None)
-    assert "Win Rate by Signal Path" not in html
+    assert "win rate by signal path" not in html.lower()
 
 
 def test_render_weekly_html_brier_score_rendered():

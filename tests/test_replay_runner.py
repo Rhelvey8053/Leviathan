@@ -169,9 +169,40 @@ def test_row_from_scored_pass_direction_has_no_hit():
     assert row["hit"] is None
 
 
+def test_row_from_scored_persists_market_price_and_our_estimate():
+    """
+    backlog: replay-instrument-validation. edge/direction alone can't
+    reconstruct a baseline (market-price-as-forecast) Brier score --
+    both fields already exist in `cs` (Claude's own scored dict) at this
+    point, just weren't being carried into the persisted row.
+    """
+    enriched = _enriched("T1")
+    cs = {"direction": "yes", "confidence": "high", "edge": 0.2, "reasoning": "r",
+          "market_price": 0.35, "our_estimate": 0.55}
+    row = rr._row_from_scored(enriched, cs, "YES", datetime(2026, 5, 1, tzinfo=timezone.utc))
+    assert row["market_price"] == 0.35
+    assert row["our_estimate"] == 0.55
+
+
+def test_row_from_scored_market_price_none_when_absent():
+    """Never fabricates a price the scored dict doesn't have."""
+    enriched = _enriched("T1")
+    cs = {"direction": "yes", "confidence": "high", "edge": 0.2, "reasoning": "r"}
+    row = rr._row_from_scored(enriched, cs, "YES", datetime(2026, 5, 1, tzinfo=timezone.utc))
+    assert row["market_price"] is None
+    assert row["our_estimate"] is None
+
+
 # ─── run_replay integration ─────────────────────────────────────────────────
 
-def test_run_replay_forces_api_backend(tmp_db, monkeypatch):
+def test_run_replay_forces_cli_backend(tmp_db, monkeypatch):
+    """
+    2026-08-26: was test_run_replay_forces_api_backend, asserting "api".
+    Switched to "cli" (Claude Pro subscription, no metered spend) at the
+    user's explicit request -- the API requirement was only ever a side
+    effect of core.llm's $-based cost ceiling, which the validation task
+    itself never needed; see replay_runner.py's module docstring.
+    """
     _insert_settled(tmp_db, "T1")
     monkeypatch.setattr(rr, "_find_reconstructable_as_of",
                         lambda *a, **k: _enriched("T1"))
@@ -184,7 +215,7 @@ def test_run_replay_forces_api_backend(tmp_db, monkeypatch):
 
     monkeypatch.setattr(rr.scorer, "score_markets", _fake_score_markets)
     rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
-    assert seen_config["backend"] == "api"
+    assert seen_config["backend"] == "cli"
 
 
 def test_run_replay_persists_scored_rows(tmp_db, monkeypatch):
@@ -193,7 +224,8 @@ def test_run_replay_persists_scored_rows(tmp_db, monkeypatch):
                         lambda *a, **k: _enriched("T1"))
     monkeypatch.setattr(rr.scorer, "score_markets",
                         lambda markets, config, now=None: (
-                            [{"ticker": "T1", "direction": "YES", "confidence": "HIGH", "edge": 0.2, "reasoning": "r"}], {}
+                            [{"ticker": "T1", "direction": "YES", "confidence": "HIGH", "edge": 0.2,
+                              "reasoning": "r", "market_price": 0.35, "our_estimate": 0.55}], {}
                         ))
     summary = rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
     assert summary["scored"] == 1
@@ -203,6 +235,11 @@ def test_run_replay_persists_scored_rows(tmp_db, monkeypatch):
     assert row is not None
     assert row["direction"] == "YES"
     assert row["hit"] == 1
+    # backlog: replay-instrument-validation -- needed to compute a baseline
+    # (market-price-as-forecast) Brier score, which edge/direction alone
+    # can't reconstruct.
+    assert row["market_price"] == 0.35
+    assert row["our_estimate"] == 0.55
 
 
 def test_run_replay_stops_on_cost_ceiling(tmp_db, monkeypatch):
@@ -257,6 +294,59 @@ def test_run_replay_preserves_already_scored_rows_when_ceiling_hits_later(tmp_db
     assert row["direction"] == "YES"
     t2_row = conn.execute("SELECT * FROM replay_signals WHERE ticker='T2'").fetchone()
     assert t2_row is None
+
+
+def test_run_replay_survives_one_markets_scoring_error(tmp_db, monkeypatch):
+    """
+    Regression guard, found live 2026-08-28: a malformed CLI response for
+    one market (see core.scorer._score_via_cli's non-list-response fix,
+    same date) used to raise an uncaught exception that crashed this
+    entire batch -- every other candidate this run would have scored was
+    lost. A single market's scoring failure must be counted and skipped,
+    not take down every remaining candidate in the batch.
+    """
+    _insert_settled(tmp_db, "T1")
+    _insert_settled(tmp_db, "T2")
+    monkeypatch.setattr(rr, "_candidate_tickers",
+                        lambda db_path, limit: [
+                            {"ticker": "T1", "series_ticker": "SER", "close_time": "2026-06-01T00:00:00Z", "result": "YES"},
+                            {"ticker": "T2", "series_ticker": "SER", "close_time": "2026-06-01T00:00:00Z", "result": "YES"},
+                        ])
+    monkeypatch.setattr(rr, "_find_reconstructable_as_of",
+                        lambda config, ticker, close_time, db_path: _enriched(ticker))
+
+    def _raise_then_score(markets, config, now=None):
+        ticker = markets[0]["ticker"]
+        if ticker == "T1":
+            raise RuntimeError("scorer.py: expected a JSON list of score objects, got str")
+        return [{"ticker": "T2", "direction": "YES", "confidence": "HIGH", "edge": 0.2, "reasoning": "r"}], {}
+
+    monkeypatch.setattr(rr.scorer, "score_markets", _raise_then_score)
+    summary = rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
+    assert summary["scoring_errors"] == 1
+    assert summary["scored"] == 1
+
+    conn = sqlite3.connect(tmp_db)
+    conn.row_factory = sqlite3.Row
+    assert conn.execute("SELECT * FROM replay_signals WHERE ticker='T1'").fetchone() is None
+    assert conn.execute("SELECT * FROM replay_signals WHERE ticker='T2'").fetchone() is not None
+
+
+def test_run_replay_still_stops_on_cost_ceiling_not_swallowed_as_scoring_error(tmp_db, monkeypatch):
+    """The new broad `except Exception` for scoring errors must not shadow
+    the more specific LLMCostCeilingExceeded handling above it -- a ceiling
+    hit still stops the run, it isn't miscounted as a per-market error."""
+    _insert_settled(tmp_db, "T1")
+    monkeypatch.setattr(rr, "_find_reconstructable_as_of",
+                        lambda config, ticker, close_time, db_path: _enriched(ticker))
+
+    def _raise_ceiling(markets, config, now=None):
+        raise LLMCostCeilingExceeded("ceiling hit")
+
+    monkeypatch.setattr(rr.scorer, "score_markets", _raise_ceiling)
+    summary = rr.run_replay(CONFIG, max_markets=5, db_path=tmp_db)
+    assert summary["ceiling_stopped"] is True
+    assert summary["scoring_errors"] == 0
 
 
 def test_run_replay_skips_when_no_reconstructable_state(tmp_db, monkeypatch):

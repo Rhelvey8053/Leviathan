@@ -88,7 +88,7 @@ def test_rescore_dataset_dispatches_to_cli_backend(tmp_db):
     cli_config = {"llm": {"backend": "cli"}}
     fake_scores = [{"ticker": "KXRESCORECLI", "our_estimate": 0.55, "direction": "YES"}]
 
-    with patch.object(eval_rescore, "_score_via_cli", return_value=fake_scores) as mock_cli, \
+    with patch.object(eval_rescore, "_score_via_cli", return_value=(fake_scores, {})) as mock_cli, \
          patch.object(eval_rescore.llm, "score_via_api") as mock_api:
         result = eval_rescore.rescore_dataset(dataset, config=cli_config)
 

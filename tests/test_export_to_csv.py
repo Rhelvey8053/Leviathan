@@ -204,12 +204,12 @@ class TestNullHandling(unittest.TestCase):
 class TestMissingDB(unittest.TestCase):
 
     def test_missing_db_returns_zeros(self):
-        """A missing DB path returns {"signals": 0, "runs": 0} without raising."""
+        """A missing DB path returns {"signals": 0, "scan_log": 0, "runs": 0} without raising."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db  = os.path.join(tmpdir, "does_not_exist.db")
             out = os.path.join(tmpdir, "export")
             result = export_csvs(db_path=db, export_dir=out)
-            self.assertEqual(result, {"signals": 0, "runs": 0})
+            self.assertEqual(result, {"signals": 0, "scan_log": 0, "runs": 0})
 
     def test_missing_db_does_not_raise(self):
         """export_csvs() never raises even when DB is absent."""
@@ -944,6 +944,247 @@ class TestTier23Columns(unittest.TestCase):
         self.assertEqual(blank_row["ob_direction"], "")
         self.assertEqual(blank_row["consensus_dir"], "")
         self.assertEqual(blank_row["smart_money_dir"], "")
+
+
+def _make_strategy_review_db(path: str) -> None:
+    """
+    DB covering the 2026-08-16 strategy-review additions: volume/
+    open_interest (raw passthrough), event_ticker/series_ticker ->
+    kalshi_url (computed), and timestamp/resolved_at -> days_to_resolution
+    (computed).
+    """
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, outcome TEXT, result TEXT,
+            volume REAL, open_interest REAL,
+            event_ticker TEXT, series_ticker TEXT, resolved_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.executemany(
+        "INSERT INTO signals (call_id,timestamp,ticker,title,market_price,"
+        "our_estimate,edge,direction,confidence,outcome,result,volume,"
+        "open_interest,event_ticker,series_ticker,resolved_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            # Fully populated: resolved 3 days after signal creation,
+            # both tickers present -> kalshi_url + days_to_resolution both compute.
+            ("sr_full", "2026-08-01T10:00:00+00:00", "KX-FULL", "Full market",
+             0.30, 0.55, 0.25, "YES", "MED", "YES", "WIN",
+             1250.0, 340.0, "KXFULLEVENT-26AUG10", "KXFULLSERIES",
+             "2026-08-04T10:00:00+00:00"),
+            # No event_ticker/series_ticker -> kalshi_url blank, never a guessed URL.
+            ("sr_nourl", "2026-08-01T10:00:00+00:00", "KX-NOURL", "No url market",
+             0.30, 0.55, 0.25, "YES", "MED", "", "",
+             500.0, 100.0, "", "", ""),
+            # Unresolved (no resolved_at) -> days_to_resolution blank.
+            ("sr_open", "2026-08-01T10:00:00+00:00", "KX-OPEN", "Open market",
+             0.30, 0.55, 0.25, "YES", "MED", None, None,
+             800.0, 200.0, "KXOPENEVENT-26AUG20", "KXOPENSERIES", None),
+            # volume/open_interest NULL -> blank, not 0. Also a legacy-row
+            # stand-in: resolved (result=WIN) but resolved_at=NULL, as any
+            # row logged before that column existed would be.
+            ("sr_novol", "2026-08-01T10:00:00+00:00", "KX-NOVOL", "No volume market",
+             0.30, 0.55, 0.25, "YES", "MED", "YES", "WIN",
+             None, None, "", "", None),
+        ]
+    )
+    conn.execute(
+        "INSERT INTO runs VALUES ('r1','2026-08-01T10:00:00Z',50,4,'claude-sonnet-4-6')"
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestStrategyReviewColumns(unittest.TestCase):
+    """
+    2026-08-16 strategy-review additions: volume/open_interest were already
+    fetched for filtering/scoring but never persisted; event_ticker/
+    series_ticker were in the DB but excluded from export; resolved_at is a
+    new column stamped by resolve_outcomes(). kalshi_url and
+    days_to_resolution are computed at export time from these.
+    """
+
+    def _rows(self, tmpdir):
+        import csv
+        db  = os.path.join(tmpdir, "strategy_review.db")
+        out = os.path.join(tmpdir, "export")
+        _make_strategy_review_db(db)
+        export_csvs(db_path=db, export_dir=out)
+        with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+            return {r["call_id"]: r for r in csv.DictReader(f)}
+
+    def test_volume_and_open_interest_passthrough(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_full"]["volume"], "1250.0")
+        self.assertEqual(rows["sr_full"]["open_interest"], "340.0")
+
+    def test_volume_and_open_interest_blank_not_zero_when_null(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_novol"]["volume"], "")
+        self.assertEqual(rows["sr_novol"]["open_interest"], "")
+
+    def test_event_and_series_ticker_no_longer_excluded(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_full"]["event_ticker"], "KXFULLEVENT-26AUG10")
+        self.assertEqual(rows["sr_full"]["series_ticker"], "KXFULLSERIES")
+
+    def test_kalshi_url_computed_when_both_tickers_present(self):
+        """Same core.kalshi.kalshi_market_url() the email report uses --
+        lowercased series/event ticker path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(
+            rows["sr_full"]["kalshi_url"],
+            "https://kalshi.com/markets/kxfullseries/kxfullevent-26aug10",
+        )
+
+    def test_kalshi_url_blank_not_guessed_when_tickers_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_nourl"]["kalshi_url"], "")
+
+    def test_resolved_at_passthrough(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_full"]["resolved_at"], "2026-08-04T10:00:00+00:00")
+
+    def test_resolved_at_blank_when_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_open"]["resolved_at"], "")
+
+    def test_days_to_resolution_computed_correctly(self):
+        """2026-08-01T10:00 -> 2026-08-04T10:00 is exactly 3.0 days."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_full"]["days_to_resolution"], "3.0")
+
+    def test_days_to_resolution_blank_when_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_open"]["days_to_resolution"], "")
+
+    def test_days_to_resolution_blank_when_resolved_at_predates_column(self):
+        """A row resolved before resolved_at existed has resolved_at=NULL
+        even though result/outcome are populated -- days_to_resolution must
+        stay blank, not silently compute against some other timestamp."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["sr_novol"]["days_to_resolution"], "")
+
+
+def _make_scan_log_db(path: str) -> None:
+    """
+    Three rows exercising the signals/scan_log split and pre_scoring_era:
+    a scored real bet, a legacy real bet with no leviathan_score (pre-scoring
+    era), and a PASS row with no leviathan_score (unrelated to legacy --
+    pre_scoring_era must stay 0 for it, scope is real bets only).
+    """
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, outcome TEXT, result TEXT, leviathan_score INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.execute("""
+        INSERT INTO signals VALUES
+        ('scored1','2026-08-10T00:00:00Z','KXTEST-001','Scored bet',
+         0.55,0.70,0.15,'YES','HIGH',NULL,NULL,72)
+    """)
+    conn.execute("""
+        INSERT INTO signals VALUES
+        ('legacy1','2026-05-01T00:00:00Z','KXTEST-002','Legacy bet',
+         0.40,NULL,NULL,'NO','MED',NULL,NULL,NULL)
+    """)
+    conn.execute("""
+        INSERT INTO signals VALUES
+        ('pass1','2026-08-10T00:00:00Z','KXTEST-003','Passed market',
+         0.50,NULL,NULL,'PASS',NULL,NULL,NULL,NULL)
+    """)
+    conn.execute("""
+        INSERT INTO runs VALUES ('run1','2026-08-10T00:00:00Z',100,2,'claude-sonnet-4-6')
+    """)
+    conn.commit()
+    conn.close()
+
+
+class TestSignalScanLogSplit(unittest.TestCase):
+    """
+    2026-08-16 cleanup: signals.csv used to be ~85% PASS rows (scanned, no
+    signal), burying the real bets. signals.csv now holds only real bets
+    (direction YES/NO); scan_log.csv holds every row including PASS.
+    """
+
+    def _export(self, tmpdir):
+        import csv
+        db  = os.path.join(tmpdir, "scan_log.db")
+        out = os.path.join(tmpdir, "export")
+        _make_scan_log_db(db)
+        export_csvs(db_path=db, export_dir=out)
+        with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+            signals = {r["call_id"]: r for r in csv.DictReader(f)}
+        with open(os.path.join(out, "scan_log.csv"), newline="", encoding="utf-8") as f:
+            scan_log = {r["call_id"]: r for r in csv.DictReader(f)}
+        return signals, scan_log
+
+    def test_pass_row_excluded_from_signals_csv(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signals, _ = self._export(tmpdir)
+        self.assertNotIn("pass1", signals)
+
+    def test_pass_row_present_in_scan_log_csv(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, scan_log = self._export(tmpdir)
+        self.assertIn("pass1", scan_log)
+
+    def test_real_bets_present_in_both_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signals, scan_log = self._export(tmpdir)
+        for call_id in ("scored1", "legacy1"):
+            self.assertIn(call_id, signals)
+            self.assertIn(call_id, scan_log)
+
+    def test_export_csvs_returns_scan_log_count(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db  = os.path.join(tmpdir, "scan_log.db")
+            out = os.path.join(tmpdir, "export")
+            _make_scan_log_db(db)
+            result = export_csvs(db_path=db, export_dir=out)
+        self.assertEqual(result["signals"], 2)
+        self.assertEqual(result["scan_log"], 3)
+
+    def test_pre_scoring_era_true_for_legacy_bet_missing_score(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signals, _ = self._export(tmpdir)
+        self.assertEqual(signals["legacy1"]["pre_scoring_era"], "1")
+
+    def test_pre_scoring_era_false_for_scored_bet(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signals, _ = self._export(tmpdir)
+        self.assertEqual(signals["scored1"]["pre_scoring_era"], "0")
+
+    def test_pre_scoring_era_false_for_pass_row_missing_score(self):
+        """PASS rows missing a score are a different, unrelated gap --
+        pre_scoring_era must not mislabel them as legacy data."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, scan_log = self._export(tmpdir)
+        self.assertEqual(scan_log["pass1"]["pre_scoring_era"], "0")
 
 
 if __name__ == "__main__":

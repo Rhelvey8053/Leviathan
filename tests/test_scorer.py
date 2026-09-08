@@ -205,6 +205,42 @@ def test_flag_reason_cross_market_lower():
     assert "lower" in prompt
 
 
+def test_flag_reason_cross_market_no_fee_adjusted_line_when_absent():
+    """Existing poly dicts without net_price_gap (pre-cross-venue-expansion) render unchanged."""
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": 0.18, "poly_price": 0.68, "poly_question": "Will X happen?", "match_score": 0.72},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FEE-ADJUSTED GAP" not in prompt
+
+
+def test_flag_reason_cross_market_fee_adjusted_gap_shown_still_real():
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": 0.18, "net_price_gap": 0.15, "poly_price": 0.68,
+              "poly_question": "Will X happen?", "match_score": 0.72},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FEE-ADJUSTED GAP" in prompt
+    assert "15.0pp" in prompt
+    assert "still a real gap after modeled fees" in prompt
+
+
+def test_flag_reason_cross_market_fee_adjusted_gap_shown_mostly_noise():
+    m = _base_market(
+        flag_path="CROSS_MARKET",
+        poly={"price_gap": 0.03, "net_price_gap": 0.004, "poly_price": 0.53,
+              "poly_question": "Will X happen?", "match_score": 0.72},
+        mid_price=0.50,
+    )
+    prompt = scorer.build_prompt([m])
+    assert "FEE-ADJUSTED GAP" in prompt
+    assert "mostly or entirely fee noise" in prompt
+
+
 def test_flag_reason_absent_when_no_path():
     m = _base_market(flag_path=None)
     prompt = scorer.build_prompt([m])
@@ -259,6 +295,26 @@ def test_empty_markets_returns_empty_prompt():
 
 
 # ─── Calibration rules in system prompt ──────────────────────────────────────
+
+def test_system_prompt_has_research_diligence_instruction():
+    """
+    Added 2026-09-01 at the user's request ("don't want to pass without
+    additional research"): requires actual search effort before PASS,
+    without lowering the evidence bar the numbered rules set -- a
+    genuine no-catalyst-found PASS still passes, an under-researched
+    one no longer should.
+    """
+    sp = scorer.SYSTEM_PROMPT
+    assert "RESEARCH DILIGENCE" in sp
+    assert "does NOT lower the evidence bar" in sp
+    assert "CROSS-MARKET" in sp.split("RESEARCH DILIGENCE")[1][:600]
+
+
+def test_research_diligence_precedes_calibration_rules():
+    """The diligence instruction must be read before Rule 1, not after."""
+    sp = scorer.SYSTEM_PROMPT
+    assert sp.index("RESEARCH DILIGENCE") < sp.index("CALIBRATION RULES")
+
 
 def test_system_prompt_has_ipo_rule():
     assert "IPO ANNOUNCEMENT" in scorer.SYSTEM_PROMPT
@@ -1273,6 +1329,23 @@ def test_pre_claude_lv_gate_returns_empty_when_all_markets_too_weak():
     assert token_info == {}
 
 
+def test_pre_claude_lv_gate_whale_detected_clears_previously_failing_market():
+    """whale-flag-lv-guarantee (2026-08-04): a market that fails the gate on
+    its own (LV 19, see _weak_market) now clears it once whale_detected is
+    added (+4 -> LV 23), instead of silently dropping out before ever
+    reaching Claude -- previously whale_detected only added anything when
+    ob_flag was also set, so a whale-only flag on a weak market got zero
+    benefit from the flag at all."""
+    from unittest.mock import patch
+    m = _weak_market(whale_data={"whale_detected": True})
+    lv = __import__("core.report", fromlist=["compute_leviathan_score"]).compute_leviathan_score(m)
+    assert lv >= 20, f"pre-condition: whale_detected should raise LV to >=20, got {lv}"
+    config = {"scoring": {"min_pre_claude_lv": 20, "max_markets_per_run": 10}}
+    with patch("core.scorer._score_via_cli", return_value=([], {})) as mock_cli:
+        scorer.score_markets([m], config)
+    mock_cli.assert_called_once()  # gate passed -- reached the CLI batch step
+
+
 def test_pre_claude_lv_gate_disabled_when_zero():
     """When min_pre_claude_lv=0, gate is bypassed and all markets reach the batch step."""
     m = _weak_market()
@@ -1317,11 +1390,23 @@ def test_pre_claude_lv_gate_passes_strong_market_to_batch():
 
 # ─── _score_via_cli: response validation ─────────────────────────────────────
 
-def _mock_cli_result(stdout, returncode=0):
+def _mock_cli_result(model_text, returncode=0, usage=None, total_cost_usd=0.0):
+    """
+    2026-09-02: _score_via_cli switched --output-format from "text" to
+    "json" to capture real usage/cache telemetry (see core/scorer.py's
+    docstring). model_text is what used to be the bare stdout -- now
+    wrapped in the envelope the real CLI emits, so every existing test
+    call site (`_mock_cli_result(good_response)`) keeps working unchanged.
+    """
     from unittest.mock import MagicMock
+    import json as _json
     result = MagicMock()
     result.returncode = returncode
-    result.stdout = stdout
+    result.stdout = _json.dumps({
+        "result": model_text,
+        "usage": usage or {},
+        "total_cost_usd": total_cost_usd,
+    })
     result.stderr = ""
     return result
 
@@ -1362,6 +1447,27 @@ def test_score_via_cli_raises_on_bad_direction_enum(monkeypatch):
             scorer._score_via_cli("sys", "user")
 
 
+def test_score_via_cli_raises_clear_error_on_non_list_response(monkeypatch):
+    """
+    Regression guard, found live 2026-08-28 (crashed backtesting.replay_runner's
+    entire corpus-build batch on one market): when the CLI's raw response has
+    no top-level [...] array at all, the find("[")/rfind("]") fallback returns
+    -1/-1 and silently uses the ENTIRE raw text as raw_json. If that text
+    happens to itself be valid JSON -- e.g. a bare quoted string, as if Claude
+    replied in plain prose for one market instead of the expected JSON array --
+    json.loads() succeeds with the wrong type, and _validate_scores' `for s in
+    scores: s.keys()` then iterates the string character-by-character,
+    crashing with a confusing "'str' object has no attribute 'keys'" instead
+    of a clear, catchable parsing error.
+    """
+    from unittest.mock import patch
+    plain_text_reply = '"No suitable market data available for scoring."'
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(plain_text_reply)):
+        with pytest.raises(RuntimeError, match="expected a JSON list"):
+            scorer._score_via_cli("sys", "user")
+
+
 def test_score_via_cli_accepts_valid_response(monkeypatch):
     import json as _json
     from unittest.mock import patch
@@ -1372,8 +1478,50 @@ def test_score_via_cli_accepts_valid_response(monkeypatch):
     }])
     with patch("core.scorer._find_claude", return_value="claude"), \
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
+
+
+def test_score_via_cli_omits_model_flag_when_no_override(monkeypatch):
+    """
+    backlog: wire-llm-model-cli-flag. No config, or a config with no
+    llm.cli_model_override set, must omit --model entirely -- this IS the
+    "no behavior change" claim the fix depends on (whatever the bare CLI's
+    own current default resolves to keeps being used, unchanged).
+    """
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)) as mock_run:
+        scorer._score_via_cli("sys", "user")  # no config arg at all
+        scorer._score_via_cli("sys", "user", {"llm": {}})  # config present, key absent
+        scorer._score_via_cli("sys", "user", {"llm": {"cli_model_override": None}})  # explicit None
+    for call in mock_run.call_args_list:
+        args = call[0][0]
+        assert "--model" not in args
+
+
+def test_score_via_cli_passes_model_flag_when_override_set(monkeypatch):
+    """When llm.cli_model_override is set, --model must be appended with
+    that exact value."""
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)) as mock_run:
+        scorer._score_via_cli("sys", "user", {"llm": {"cli_model_override": "opus"}})
+    args = mock_run.call_args[0][0]
+    assert "--model" in args
+    assert args[args.index("--model") + 1] == "opus"
 
 
 def test_score_via_cli_normalizes_sources_checked_to_sources(monkeypatch):
@@ -1396,7 +1544,7 @@ def test_score_via_cli_normalizes_sources_checked_to_sources(monkeypatch):
     }])
     with patch("core.scorer._find_claude", return_value="claude"), \
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["sources"] == [
         {"url": "Reuters: headline text", "title": "Reuters: headline text"},
         {"url": "https://example.com/article", "title": "https://example.com/article"},
@@ -1417,7 +1565,7 @@ def test_score_via_cli_empty_sources_checked_leaves_sources_unset(monkeypatch):
     }])
     with patch("core.scorer._find_claude", return_value="claude"), \
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert "sources" not in scores[0]
 
 
@@ -1444,7 +1592,7 @@ def test_score_via_cli_retries_after_timeout_then_succeeds(monkeypatch):
              _mock_cli_result(good_response),
          ]) as mock_run, \
          patch("time.sleep"):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
     assert mock_run.call_count == 2
 
@@ -1481,7 +1629,7 @@ def test_score_via_cli_recovers_from_mixed_timeout_and_nonzero_exit():
              _mock_cli_result(good_response),
          ]) as mock_run, \
          patch("time.sleep"):
-        scores = scorer._score_via_cli("sys", "user")
+        scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
     assert mock_run.call_count == 3
 
@@ -1637,7 +1785,7 @@ def test_score_markets_default_multi_sample_n_calls_backend_once(monkeypatch):
     from unittest.mock import patch
     m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
     config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10}}
-    with patch("core.scorer._score_via_cli", return_value=[_sample()]) as mock_cli:
+    with patch("core.scorer._score_via_cli", return_value=([_sample()], {})) as mock_cli:
         result, token_info = scorer.score_markets([m], config)
     assert mock_cli.call_count == 1
     assert token_info == {}
@@ -1649,11 +1797,17 @@ def test_score_markets_multi_sample_n_calls_cli_backend_n_times(monkeypatch):
     m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
     config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10,
                           "multi_sample_n": 5}}
-    responses = [[_sample(our_estimate=0.50 + i * 0.01)] for i in range(5)]
+    responses = [([_sample(our_estimate=0.50 + i * 0.01)], {}) for i in range(5)]
     with patch("core.scorer._score_via_cli", side_effect=responses) as mock_cli:
         result, token_info = scorer.score_markets([m], config)
     assert mock_cli.call_count == 5
-    assert token_info == {}
+    # CLI branch now feeds combined_token_info too (mocked _score_via_cli returns {}
+    # per call, so every key sums to its zero default -- no longer a bare {}).
+    assert token_info == {
+        "input_tokens": 0, "output_tokens": 0,
+        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+    }
     assert len(result) == 1
     assert result[0]["n_samples"] == 5
 
@@ -1681,7 +1835,7 @@ def test_score_markets_multi_sample_n_one_explicit_same_as_default(monkeypatch):
     m = _base_market(net_edge=0.10, prior_appearances=2, direction_consistent=True)
     config = {"scoring": {"min_pre_claude_lv": 0, "max_markets_per_run": 10,
                           "multi_sample_n": 1}}
-    with patch("core.scorer._score_via_cli", return_value=[_sample()]) as mock_cli:
+    with patch("core.scorer._score_via_cli", return_value=([_sample()], {})) as mock_cli:
         result, token_info = scorer.score_markets([m], config)
     assert mock_cli.call_count == 1
     assert token_info == {}
@@ -1777,7 +1931,48 @@ def test_rescore_single_market_cli_backend():
         "reasoning": "x", "sources_checked": [],
     }
     config = {"llm": {"backend": "cli"}}
-    with patch("core.scorer._score_via_cli", return_value=[score]):
+    with patch("core.scorer._score_via_cli", return_value=([score], {})):
         result, info = scorer.rescore_single_market(market, config)
     assert result == score
     assert info == {}
+
+
+# ─── Repeat-story context (rolled-market-repeat-detection) ────────────────────
+
+def test_repeat_story_shown_when_family_present():
+    m = _base_market(repeat_family=[
+        {"ticker": "KXCABLEAVE-26MAY22-26JUN", "timestamp": "2026-05-29T00:00:00Z",
+         "our_estimate": 0.15, "market_price": 0.045, "outcome": "NO"},
+        {"ticker": "KXCABLEAVE-26MAY22-26JUL", "timestamp": "2026-06-19T00:00:00Z",
+         "our_estimate": 0.65, "market_price": 0.105, "outcome": "NO"},
+    ])
+    prompt = scorer.build_prompt([m])
+    assert "REPEAT STORY" in prompt
+    assert "asked 2 time(s) before" in prompt
+    assert "KXCABLEAVE-26MAY22-26JUN" in prompt
+    assert "you estimated 65%" in prompt
+    assert "outcome: NO" in prompt
+
+
+def test_repeat_story_not_shown_when_no_family():
+    m = _base_market(repeat_family=[])
+    prompt = scorer.build_prompt([m])
+    assert "REPEAT STORY" not in prompt
+
+
+def test_repeat_story_not_shown_when_field_absent():
+    """Markets that never went through main.py's repeat_family attach step
+    (e.g. any other caller of build_prompt) must not crash or show a
+    bogus empty section -- m.get("repeat_family") defaults to falsy."""
+    m = _base_market()
+    prompt = scorer.build_prompt([m])
+    assert "REPEAT STORY" not in prompt
+
+
+def test_repeat_story_handles_unresolved_sibling():
+    m = _base_market(repeat_family=[
+        {"ticker": "KXCABLEAVE-26MAY22-26SEP", "timestamp": "2026-07-25T00:00:00Z",
+         "our_estimate": 0.40, "market_price": 0.235, "outcome": ""},
+    ])
+    prompt = scorer.build_prompt([m])
+    assert "outcome: unresolved" in prompt

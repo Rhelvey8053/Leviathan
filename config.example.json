@@ -68,10 +68,10 @@
     ],
     "categories": [],
     "near_dated_max_days": 14,
-    "near_dated_target_count": 200,
-    "near_dated_max_pages": 30,
+    "near_dated_target_count": 300,
+    "near_dated_max_pages": 40,
     "near_dated_exclude_prefixes": ["KXMVE"],
-    "_near_dated_notes": "Supplements the events-catalog fetch (fetch_events -- which structurally never surfaces near-dated markets, confirmed 2026-08-01) with a direct /markets?max_close_ts=... fetch, filtered to exclude the KXMVE parlay flood. Feeds both the main scanner's short-horizon buckets and resolve_first.py's near-dated selector, which was previously starved (1 row logged in its whole history).",
+    "_near_dated_notes": "Supplements the events-catalog fetch (fetch_events -- which structurally never surfaces near-dated markets, confirmed 2026-08-01) with a direct /markets?max_close_ts=... fetch, filtered to exclude the KXMVE parlay flood. Feeds both the main scanner's short-horizon buckets and resolve_first.py's near-dated selector, which was previously starved (1 row logged in its whole history). backlog: near-dated-fetch-headroom-increase (2026-08-31, Step A). Raised 200->300 (max_pages 30->40 for headroom) after near-dated-window-chunking's own notes confirmed 200 was 'target hit,' not real scarcity -- live-verified the same day: a direct fetch_near_dated_markets(target_count=300, max_pages=40) call returned the full 300 in 1.6s, far under Leviathan-ResolveFirst's 10-minute ExecutionTimeLimit. A further bump (e.g. 300->400, Step B) is deliberately deferred pending a few real scheduled runs' worth of observed page/timing data, not set in advance.",
     "prop_market_exclude_prefixes": ["KXMLBMENTION"],
     "_prop_market_exclude_notes": "backlog: prop-market-skill-filter. Ticker-prefix exclusion in core.scanner.filter_markets(), same mechanism as near_dated_exclude_prefixes/KXMVE. KXMLBMENTION ('what will the announcer say') markets have no real predictive skill ceiling the way a price/outcome market does, but are liquid enough to clear every other filter -- confirmed 2026-08-01: 10/36 near-dated markets sampled were this category and survived volume/OI/price/close-time filters cleanly. Conservative default (only the one category with concrete zero-skill-ceiling evidence); extend the list if other gimmick categories turn up."
   },
@@ -94,7 +94,11 @@
     "max_pass_before_suppress": 5,
     "resolve_first_max_days": 14,
     "resolve_first_dedup_days": 7,
-    "multi_sample_n": 1
+    "resolve_first_picks_per_bucket": 1,
+    "_resolve_first_picks_per_bucket_notes": "backlog: resolve-first-top-n-per-bucket (2026-08-31). analysis/resolve_first.py's select_near_dated() picks this many highest-volume markets per (price_band, flag_path) bucket instead of just the single best one -- 4 bands x however many flag_path values are reachable under the live flag_mode is the real daily ceiling (only DRIFT/HEURISTIC/None under flag_mode=strict_with_heuristic, not the full 5-value set), so raising this is the direct lever for accelerating resolved_count. Default 1 preserves the exact pre-2026-08-31 behavior -- every pre-existing caller/test relies on this. Real yield is bounded by actual per-bucket inventory (see the printed band_counts table), not fabricated -- a thin bucket still only returns what's really there. Does NOT touch resolve_first_dedup_days (still enforced after selection) or add any new heuristic/scoring logic -- this file's own HARD FREEZE holds.",
+    "multi_sample_n": 1,
+    "repeat_dedup_days": 30,
+    "_repeat_dedup_notes": "How long a ticker stays suppressed as a repeat (main.py's is_repeat tagging, core.logger.get_recent_tickers) before a fresh flag logs as a brand-new signal row. Widened 7 -> 30 (2026-08-20) after finding a genuine same-market direction flip (KXMLBDEBUT-KANDERSON-26NOV01: NO on 2026-06-29, YES on 2026-07-06, 8 days apart -- just outside the old 7-day window) that will resolve as one win and one loss for the same underlying event by construction, and a separate ticker with 3 resolved rows all agreeing -- both inflate resolved_count (every locked backlog item's gate) with non-independent samples. 30 days doesn't eliminate re-flagging on long-dated markets, just meaningfully reduces near-term whipsaws like the 8-day case. Distinct from resolve_first_dedup_days, an unrelated analysis/resolve_first.py setting."
   },
   "accounts": {
     "enabled": true,
@@ -117,17 +121,6 @@
     "manifold_results_per_query": 8,
     "metaculus_enabled": true,
     "metaculus_results_per_query": 6,
-    "odds_api_enabled": true,
-    "odds_api_sports": [
-      "americanfootball_nfl",
-      "americanfootball_ncaaf",
-      "basketball_nba",
-      "basketball_ncaab",
-      "baseball_mlb",
-      "icehockey_nhl",
-      "soccer_epl",
-      "soccer_usa_mls"
-    ],
     "min_match_score": 0.45,
     "min_price_gap": 0.0
   },
@@ -157,15 +150,46 @@
     "email_to": "your@email.com",
     "email_from": "",
     "smtp_host": "smtp.gmail.com",
-    "smtp_port": 587,
-    "base_url": "",
-    "_base_url_notes": "GOAL_phase2-6_decisions.md Decision 3: the single hosting switch for every cross-page link the subscriber digest emits (currently just the Track Record link). Empty string (default) keeps the current relative-path behavior for local preview (harness writes both HTML files to the same folder). Once real hosting/email delivery exists, set this to that host's base URL (e.g. \"https://leviathan.example.com\") and every such link becomes absolute -- one config change, no code change."
+    "smtp_port": 587
   },
   "llm": {
     "backend": "cli",
     "model": "claude-sonnet-4-6",
+    "cli_model_override": null,
     "max_web_searches": 8,
     "daily_cost_ceiling_usd": 20.0,
-    "_llm_notes": "daily_cost_ceiling_usd (goal llm-cost-ceiling) only applies to real metered spend via score_via_api/probe_via_api (core/llm.py) -- the main scan runs backend=cli against the Pro subscription with no per-token bill, so this ceiling protects research probes, eval re-scoring, and the future replay-runner, which will call the API path at volume. $20/day is a starting guess, not a measured figure; revisit once replay-runner exists and real per-market API cost is observed."
+    "api_spend_authorized": false,
+    "_llm_notes": "daily_cost_ceiling_usd (goal llm-cost-ceiling) only applies to real metered spend via score_via_api/probe_via_api (core/llm.py) -- the main scan runs backend=cli against the Pro subscription with no per-token bill, so this ceiling protects research probes, eval re-scoring, and the future replay-runner, which will call the API path at volume. $20/day is a starting guess, not a measured figure; revisit once replay-runner exists and real per-market API cost is observed. api_spend_authorized is a hard runtime gate on every core.llm metered function -- leave false; only flip true for a specific, time-boxed, explicitly-authorized session, then flip back.",
+    "_cli_model_override_notes": "backlog: wire-llm-model-cli-flag (2026-08-31). `model` above is DEAD for the live pipeline -- core.scorer._score_via_cli() (the function backend='cli' actually calls) never read it and never passed --model to the claude subprocess; `model` only ever fed the disabled backend='api' path. cli_model_override is a deliberately SEPARATE new key (default null = omit --model entirely, i.e. today's exact behavior, whatever the bare CLI's own current default resolves to). Do NOT set this to the value of `model` above -- that string ('claude-sonnet-4-6') was live-verified 2026-08-31 to be STALER than the bare CLI's own current default (claude-sonnet-5), so copying it through would be a silent downgrade. Set to an explicit alias ('opus', 'sonnet') or full model id only for a deliberate, bounded, monitored trial (backlog: trial-stronger-model-main-scoring) -- a heavier model is slower and consumes more of the flat-rate Pro-plan usage budget per call, which can reduce how many markets are scorable per day even if per-call quality improves."
+  },
+  "cross_model": {
+    "enabled": false,
+    "base_url": "http://localhost:20128/v1",
+    "model": "auto",
+    "timeout_s": 90,
+    "_cross_model_notes": "backlog: cross-model-corroboration (2026-09-02). Independent second opinion from a DIFFERENT model family (never Claude) via a local OmniRoute gateway (github.com/diegosouzapw/OmniRoute; npm i -g omniroute, then run `omniroute` -- not a Leviathan dependency, this is off by default and the pipeline runs exactly as before if it's never installed). Only called for the small shortlisted-pick set (main.py's _rescore_shortlist_for_clean_sources, same place ground_citations runs), never the full scan. Purely auxiliary -- persisted to its own signals.cross_model_opinion column, never blended into direction/confidence/edge, never read by any win-rate/Brier calculation. Default model='auto' is OmniRoute's keyless free route (zero API key, zero signup, live-verified 2026-09-02 to resolve to a real reasoning-capable backend) -- deliberately NOT wired to reroute Claude Code's own calls through OmniRoute (that requires OmniRoute to hold its own session against your Anthropic account, real credential handling, and fights core.scorer._score_via_cli's own ANTHROPIC_API_KEY-stripping safeguard; this module only ever makes an unrelated, independent HTTP call). timeout_s=90 because the free backend is a genuine reasoning model, not a trivial completion -- 20s and even 60s both timed out on a real forecasting question that succeeded at 120s in live testing; 90s is a middle ground, not a hard-measured floor. A failed/timed-out/malformed call is non-fatal by design (core.cross_model.get_opinion's own contract) and never costs a pick anything."
+  },
+  "monday": {
+    "enabled": true,
+    "api_token_env": "MONDAY_API_TOKEN",
+    "board_id": 18426940027,
+    "workspace_id": 17049665,
+    "dry_run_default": true,
+    "groups": {
+      "ready": "group_mm6an4ta",
+      "locked": "group_mm6att3n",
+      "blocked": "group_mm6a2f",
+      "done": "new_group43041"
+    },
+    "columns": {
+      "priority": "numeric_mm6ap21r",
+      "area": "text_mm6awm6b",
+      "detail": "long_text_mm6a113q",
+      "status": "project_status",
+      "backlog_id": "text_mm6b470y",
+      "completed_date": "date_mm6b6w9a"
+    },
+    "log_item_id": "<fill in Phase 3>",
+    "_monday_notes": "scripts/monday_sync.py, Phases 0-4 (docs/monday_sync_discovery.md, docs/monday_sync_runbook.md). backlog.json stays the source of truth; monday is a view + progress log, one-way push in v1. MONDAY_API_TOKEN lives in .env only, never here. These ids are resolved live at runtime (get_board_schema()) and re-written into the real config.json on every --phase1/--phase2/--phase3 run -- values here are just the last-known-good snapshot for reference. board_id/workspace_id/group ids/column ids are not secrets (only the API token is); if the board is ever recreated these will need re-resolving, which --phase1 does automatically. dry_run_default (actually read by the script, not just documented) governs a BARE invocation with neither --dry-run nor --live -- the scheduled task always passes --live explicitly and never depends on this value, so changing it only affects manual ad-hoc runs at a clean prompt."
   }
 }

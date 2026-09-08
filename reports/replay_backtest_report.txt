@@ -1,0 +1,25 @@
+============================================================
+LEVIATHAN BACKTEST REPORT
+============================================================
+
+Signals loaded:   312
+Matched:          312
+Hit rate:         47.4%
+Avg edge:         0.0883
+
+By Confidence:
+  HIGH    n=153  hits=130  rate=85.0%
+  MED     n= 44  hits= 17  rate=38.6%
+  LOW     n=115  hits=  1  rate=0.9%
+
+By Signal Path:
+  DRIFT         n=107  hits= 52  rate=48.6%
+  HEURISTIC     n= 30  hits= 24  rate=80.0%
+  UNKNOWN       n=175  hits= 72  rate=41.1%
+
+By Horizon:
+  Weekly        n=133  hits= 39  rate=29.3%
+  Quarterly     n= 81  hits= 54  rate=66.7%
+  Long-Term     n= 98  hits= 55  rate=56.1%
+
+============================================================

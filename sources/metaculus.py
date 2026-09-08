@@ -6,6 +6,30 @@ from a vetted pool of superforecasters.
 
 Requires a free API token: https://www.metaculus.com/api/
 Add METACULUS_API_TOKEN to your .env file.
+
+2026-08-25: KNOWN DEAD END, verified live with a real token, not just
+theorized. Auth works (200s, real question metadata comes back), but
+_extract_probability()'s target field (`community_prediction`) no
+longer exists in the current API response shape at all -- Metaculus has
+since restructured to a nested `question.aggregations.{method}.latest/
+history` object. Worse: even after tracing through to that new shape,
+`aggregations.unweighted.latest` came back null on every question
+tested (50 random open ones, several sort orders) -- not a timing
+fluke, systematic. A third-party API marketplace listing independently
+confirms current public endpoints "do not expose numerical probability
+distributions or individual forecast values," consistent with
+Metaculus's own Terms of Use language that API access is "primarily for
+research partners." Conclusion: the actual community-probability data
+this module needs is very likely gated behind a higher access tier than
+the free personal token grants -- not something fixable by pointing
+_extract_probability() at the new field name, since that field is null
+regardless of the token. Deliberately NOT patched to the new field name
+-- that would just swap one silent-empty-results failure for another
+that looks wired up but still returns nothing. Left as-is (config/token
+present, metaculus_enabled=true in config.json) so this reactivates for
+free the moment Metaculus's access model changes, without code
+archaeology repeating. See backlog.json's metaculus-community-prediction-
+inaccessible item for the decision record.
 """
 
 import os

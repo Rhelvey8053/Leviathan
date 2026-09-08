@@ -86,6 +86,20 @@ def test_heuristic_signal_absent_when_base_rate_none():
     assert "Heuristic Base Rate" not in full
 
 
+def test_signal_block_none_title_does_not_crash():
+    """
+    report-ticker-none-vs-missing-audit (2026-09-07): title can be a
+    present key with an explicit None value, not just missing --
+    s.get("title", "") only substitutes the default for a MISSING key.
+    _wrap() (used to word-wrap the title line) crashes on None the same
+    way _trunc(None, ...) crashes elsewhere in this file for the
+    identical reason (2026-08-05 whale_direction, 2026-09-06 ticker).
+    """
+    s = _signal(title=None)
+    lines = report._signal_block(s, index=1)
+    assert lines  # must not raise
+
+
 # ─── Second-pass label ────────────────────────────────────────────────────────
 
 def test_second_pass_label_shown():
@@ -415,6 +429,191 @@ def test_weekly_digest_flag_path_stats_absent_when_none():
     assert "Win Rate by Signal Path" not in digest
 
 
+def test_weekly_digest_heuristic_label_stats_shown_when_provided():
+    """per-heuristic-scorecard: the finer-grained breakdown flag_path buckets
+    together (many named heuristic rules share one flag_path)."""
+    heur_stats = [
+        {"heuristic_label": "PDUFA date",   "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90},
+        {"heuristic_label": "win-catchall", "total": 1, "wins": 0, "win_rate": 0.0,  "total_pnl": -1.00},
+    ]
+    digest = report.compile_weekly_digest([], _stats(), {}, heuristic_label_stats=heur_stats)
+    assert "Win Rate by Heuristic Label" in digest
+    assert "PDUFA date"   in digest
+    assert "win-catchall" in digest
+
+
+def test_weekly_digest_heuristic_label_stats_absent_when_none():
+    digest = report.compile_weekly_digest([], _stats(), {}, heuristic_label_stats=None)
+    assert "Win Rate by Heuristic Label" not in digest
+
+
+def test_weekly_digest_heuristic_label_stats_excludes_zero_total_rows():
+    """Rows with total=0 (a label with no resolved data yet) are filtered
+    out, matching flag_path_stats' identical convention."""
+    heur_stats = [{"heuristic_label": "untested rule", "total": 0, "wins": 0,
+                   "win_rate": None, "total_pnl": None}]
+    digest = report.compile_weekly_digest([], _stats(), {}, heuristic_label_stats=heur_stats)
+    assert "Win Rate by Heuristic Label" not in digest
+
+
+# ─── render_weekly_html (no prior test coverage for this function at all) ───
+
+def test_weekly_html_renders_without_crashing():
+    """Smoke test: render_weekly_html has no prior test coverage in this
+    codebase -- minimally confirm it produces well-formed-looking HTML
+    with default (all-None) optional args, since a typo in an f-string
+    section wouldn't be caught any other way."""
+    html = report.render_weekly_html([], _stats(), {})
+    assert html.startswith("<!DOCTYPE html>")
+    assert "</html>" in html
+
+
+def test_weekly_html_heuristic_label_stats_shown_when_provided():
+    heur_stats = [
+        {"heuristic_label": "PDUFA date", "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90},
+    ]
+    html = report.render_weekly_html([], _stats(), {}, heuristic_label_stats=heur_stats)
+    assert "win rate by heuristic label" in html.lower()
+    assert "PDUFA date" in html
+
+
+def test_weekly_html_heuristic_label_stats_absent_when_none():
+    html = report.render_weekly_html([], _stats(), {}, heuristic_label_stats=None)
+    assert "win rate by heuristic label" not in html.lower()
+
+
+def test_weekly_html_flag_and_heuristic_sections_both_render():
+    """Regression guard: the two sections sit back-to-back in the template
+    (`{flag_section_html}\\n{heuristic_section_html}`) -- confirm adding the
+    second didn't break the first."""
+    flag_stats = [{"flag_path": "EDGE", "total": 4, "wins": 3, "win_rate": 75.0, "total_pnl": 1.20}]
+    heur_stats = [{"heuristic_label": "PDUFA date", "total": 3, "wins": 2, "win_rate": 66.7, "total_pnl": 0.90}]
+    html = report.render_weekly_html([], _stats(), {}, flag_path_stats=flag_stats,
+                                      heuristic_label_stats=heur_stats)
+    assert "win rate by signal path" in html.lower()
+    assert "win rate by heuristic label" in html.lower()
+
+
+# ─── whale-actionability-scorecard ────────────────────────────────────────
+
+def _whale_stats(w_total=3, w_wins=2, w_wr=66.7, w_pnl=1.20, w_edge=0.10,
+                  nw_total=5, nw_wins=1, nw_wr=20.0, nw_pnl=-0.85, nw_edge=0.05):
+    return {
+        "whale":    {"total": w_total, "wins": w_wins, "win_rate": w_wr,
+                     "total_pnl": w_pnl, "avg_edge": w_edge},
+        "no_whale": {"total": nw_total, "wins": nw_wins, "win_rate": nw_wr,
+                     "total_pnl": nw_pnl, "avg_edge": nw_edge},
+    }
+
+
+def test_week_whale_rows_none_direction_does_not_crash():
+    """
+    Regression guard (real crash, 2026-08-05 live run; relocated here
+    2026-09-06 when the equivalent per-run whale table was removed from
+    the daily report -- see test_compile_report_no_whale_or_smart_money_
+    section -- since this weekly-aggregation path is where the same risk
+    still lives). core.whales sets whale_direction=None (not absent)
+    whenever whale_detected fires from volume/block-trade activity with
+    no clear directional lean -- row.get("whale_direction", "?") only
+    substitutes the default for a MISSING key, not a present key whose
+    value is None, so this used to reach the table renderer as None and
+    crash on len(None). _week_whale_rows guards this with `or "?"`.
+    """
+    signals = [{
+        "ticker": "KXWHALE", "title": "Whale Market", "whale_detected": True,
+        "whale_direction": None, "whale_max_trade_size": 3000,
+        "direction": "YES", "confidence": "MED", "timestamp": "2026-09-01T00:00:00Z",
+    }]
+    rows = report._week_whale_rows(signals)
+    assert rows[0]["whale_dir"] == "?"
+    # Must also render through the plain-text and HTML weekly paths without
+    # crashing -- the original bug crashed at render time, not row-build time.
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "KXWHALE" in digest
+    html = report.render_weekly_html(signals, _stats(), {})
+    assert "KXWHALE" in html
+
+
+def test_week_whale_rows_none_ticker_and_title_do_not_crash():
+    """Same None-vs-missing gotcha, guarded for ticker/title -- both
+    plausibly None upstream, same as whale_direction above."""
+    signals = [{
+        "ticker": None, "title": None, "whale_detected": True,
+        "whale_direction": "YES", "whale_max_trade_size": 3000,
+        "direction": "YES", "confidence": "MED", "timestamp": "2026-09-01T00:00:00Z",
+    }]
+    rows = report._week_whale_rows(signals)
+    assert rows[0]["ticker"] == ""
+    assert rows[0]["title"] == ""
+    digest = report.compile_weekly_digest(signals, _stats(), {})
+    assert "WHALE ACTIVITY THIS WEEK" in digest
+    html = report.render_weekly_html(signals, _stats(), {})
+    assert html  # must not raise
+
+
+def test_weekly_digest_whale_stats_shown_when_provided():
+    """whale-actionability-scorecard: answers whether following whale
+    activity has actually predicted wins, not just listed sightings."""
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=_whale_stats())
+    assert "Win Rate: Whale-Flagged vs Not" in digest
+    assert "Whale-flagged" in digest
+    assert "No whale flag" in digest
+
+
+def test_weekly_digest_whale_stats_absent_when_none():
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=None)
+    assert "Win Rate: Whale-Flagged vs Not" not in digest
+
+
+def test_weekly_digest_whale_stats_absent_when_both_groups_empty():
+    empty = {"whale": {"total": 0}, "no_whale": {"total": 0}}
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=empty)
+    assert "Win Rate: Whale-Flagged vs Not" not in digest
+
+
+def test_weekly_digest_whale_stats_verdict_delta_shown():
+    """Both groups resolved -> the win-rate delta verdict line prints."""
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=_whale_stats())
+    assert "Whale vs no-whale win-rate delta:" in digest
+
+
+def test_weekly_digest_whale_stats_omits_group_with_zero_total():
+    """Only whale-flagged has data -- the no_whale row is skipped, not
+    printed as a bogus 0-total line."""
+    stats = {"whale": {"total": 2, "wins": 1, "win_rate": 50.0,
+                        "total_pnl": 0.10, "avg_edge": 0.05},
+             "no_whale": {"total": 0, "wins": 0, "win_rate": None,
+                           "total_pnl": None, "avg_edge": None}}
+    digest = report.compile_weekly_digest([], _stats(), {}, whale_stats=stats)
+    assert "Whale-flagged" in digest
+    assert "No whale flag" not in digest
+
+
+def test_weekly_html_whale_stats_shown_when_provided():
+    html = report.render_weekly_html([], _stats(), {}, whale_stats=_whale_stats())
+    assert "win rate: whale-flagged vs not" in html.lower()
+    assert "Whale-flagged" in html
+    assert "No whale flag" in html
+
+
+def test_weekly_html_whale_stats_absent_when_none():
+    html = report.render_weekly_html([], _stats(), {}, whale_stats=None)
+    assert "win rate: whale-flagged vs not" not in html.lower()
+
+
+def test_compile_report_whale_stats_section():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  whale_stats=_whale_stats())
+    assert "Win Rate: Whale-Flagged vs Not" in body
+    assert "Whale-flagged" in body
+
+
+def test_compile_report_whale_stats_absent_when_none():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  whale_stats=None)
+    assert "Win Rate: Whale-Flagged vs Not" not in body
+
+
 def test_weekly_digest_ticker_appears_in_markets_table():
     signals = [_week_row("KXUNIQUE-TEST")]
     digest = report.compile_weekly_digest(signals, _stats(), {})
@@ -531,20 +730,34 @@ def test_compile_report_repeat_signals_section():
     assert "KXREPEAT-01" in body
 
 
-def test_compile_report_whale_activity_empty():
-    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG)
-    assert "WHALE ACTIVITY" in body
-    assert "No unusual whale activity" in body
-
-
-def test_compile_report_whale_activity_listed():
+def test_compile_report_no_whale_or_smart_money_section():
+    """
+    daily-report-drop-whale-smart-money (2026-09-06): both sections were
+    intentionally removed from the daily per-run report (user feedback --
+    neither carried real insight in the actual email, near-always "no
+    unusual activity"/"no smart money data available this run"). This is
+    a regression guard against silently reintroducing either section into
+    compile_report -- the weekly digest (see test_weekly_digest_* below)
+    intentionally keeps its own whale section, which aggregates a real
+    win-rate-by-bucket scorecard rather than per-run sightings; only the
+    daily report's sightings-only version was removed.
+    """
     whale = {
         "ticker": "KXWHALE", "title": "Whale Market",
         "whale_direction": "YES", "max_trade_size": 3000, "avg_trade_size": 600.0,
     }
-    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG)
-    assert "KXWHALE" in body
-    assert "YES" in body
+    smart_money_result = _sm_result(kalshi_signals=[{
+        "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
+        "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
+        "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
+    }])
+    body = report.compile_report([], [whale], _EMPTY_STATS, _run_meta(), _CFG,
+                                  smart_money_result=smart_money_result)
+    assert "WHALE ACTIVITY" not in body
+    assert "Whale Flags:" not in body
+    assert "SMART MONEY WATCHLIST" not in body
+    assert "Smart Money:" not in body
+    assert "Per-Trader Cross-References" not in body
 
 
 def test_compile_report_track_record_section():
@@ -592,6 +805,23 @@ def test_compile_report_flag_path_stats_section():
                                   flag_path_stats=fp_stats)
     assert "Win Rate by Signal Path" in body
     assert "EDGE" in body
+
+
+def test_compile_report_heuristic_label_stats_section():
+    """per-heuristic-scorecard: same section, daily report."""
+    heur_stats = [
+        {"heuristic_label": "PDUFA date", "total": 4, "wins": 3, "win_rate": 75.0, "total_pnl": 1.20},
+    ]
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  heuristic_label_stats=heur_stats)
+    assert "Win Rate by Heuristic Label" in body
+    assert "PDUFA date" in body
+
+
+def test_compile_report_heuristic_label_stats_absent_when_none():
+    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
+                                  heuristic_label_stats=None)
+    assert "Win Rate by Heuristic Label" not in body
 
 
 def test_compile_report_short_term_watchlist_section():
@@ -1125,6 +1355,33 @@ def test_leviathan_score_persistence_2_adds_2():
     assert report.compute_leviathan_score(s) == 42
 
 
+def test_leviathan_score_whale_detected_adds_4():
+    """whale_detected alone (no ob_flag) adds +4 -- whale-flag-lv-guarantee,
+    2026-08-04: previously required ob_flag too (+3), so a whale-only flag
+    got no LV bonus at all and could silently drop below
+    core.scorer's min_pre_claude_lv gate before ever reaching Claude."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", whale_data={"whale_detected": True})
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base) + 4
+
+
+def test_leviathan_score_whale_detected_false_no_bonus():
+    """whale_data present but whale_detected=False adds nothing."""
+    base = _signal(confidence="LOW")
+    spec = _signal(confidence="LOW", whale_data={"whale_detected": False})
+    assert report.compute_leviathan_score(spec) == report.compute_leviathan_score(base)
+
+
+def test_leviathan_score_whale_without_ob_flag_still_gets_bonus():
+    """Regression guard: the bonus no longer requires ob_flag=True alongside
+    whale_detected (that combined-only gate was the actual bug)."""
+    base = _signal(confidence="LOW")
+    whale_only = _signal(confidence="LOW", whale_data={"whale_detected": True}, ob_flag=False)
+    whale_and_ob = _signal(confidence="LOW", whale_data={"whale_detected": True}, ob_flag=True)
+    assert report.compute_leviathan_score(whale_only) == report.compute_leviathan_score(base) + 4
+    assert report.compute_leviathan_score(whale_and_ob) == report.compute_leviathan_score(base) + 4
+
+
 def test_leviathan_score_clamps_to_100():
     """Score never exceeds 100."""
     s = _signal(
@@ -1540,52 +1797,40 @@ def test_smart_money_largest_positions_capped_at_8():
     assert count <= 8, f"Expected at most 8 rows, got {count}"
 
 
-# ─── show-detail-fix: show_detail decoupled from scanner qualifying count ────
+# ─── _smart_money_section direct coverage ────────────────────────────────────
+# daily-report-drop-whale-smart-money (2026-09-06): _smart_money_section() is
+# no longer called from compile_report (see
+# test_compile_report_no_whale_or_smart_money_section) -- it has no current
+# caller anywhere in the codebase, kept only in case a future report variant
+# wants it. These test the function's own contract directly rather than
+# through compile_report, which is what they used to do before the daily
+# report stopped wiring it in.
 
-def test_compile_report_shows_smart_money_detail_with_zero_qualifying_signals():
-    """
-    Regression: previously show_detail=len(qualifying) > 0, so a scanner dry
-    spell (no signals passed to compile_report at all -> qualifying=0) hid
-    smart-money trader detail even when the smart-money scan itself found
-    real cross-references. Detail must now appear based on kalshi_signals.
-    """
+def test_smart_money_section_show_detail_true_includes_cross_references():
     smart_money_signals = [{
         "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
         "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
         "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
     }]
-    smart_money_result = _sm_result(kalshi_signals=smart_money_signals)
-
-    body = report.compile_report(
-        [], [],  # zero scanner signals this run -> qualifying would be 0
-        _EMPTY_STATS, _run_meta(), _CFG,
-        smart_money_result=smart_money_result,
-    )
-    assert "Per-Trader Cross-References" in body
+    result = _sm_result(kalshi_signals=smart_money_signals)
+    out = "\n".join(report._smart_money_section(result, show_detail=True))
+    assert "Per-Trader Cross-References" in out
 
 
-def test_compile_report_hides_smart_money_detail_with_no_kalshi_signals():
-    """
-    The converse: even with scanner signals present this run, trader detail
-    must stay hidden when the smart-money scan itself has no kalshi_signals
-    — show_detail is about smart-money data, not the scanner.
-    """
-    s = _sig(ticker="KXQUALIFYING-01", confidence="HIGH")
-    smart_money_result = _sm_result(kalshi_signals=[])
-
-    body = report.compile_report(
-        [s], [],
-        _EMPTY_STATS, _run_meta(), _CFG,
-        new_signals=[s], repeat_signals=[],
-        smart_money_result=smart_money_result,
-    )
-    assert "Per-Trader Cross-References" not in body
+def test_smart_money_section_show_detail_false_hides_cross_references():
+    smart_money_signals = [{
+        "trader": "traderX", "poly_outcome": "Yes", "position_val": 10000,
+        "poly_price": 0.60, "match_score": 0.80, "kalshi_ticker": "KXTEST-26",
+        "poly_title": "Will X happen?", "kalshi_title": "Will X happen by 2026?",
+    }]
+    result = _sm_result(kalshi_signals=smart_money_signals)
+    out = "\n".join(report._smart_money_section(result, show_detail=False))
+    assert "Per-Trader Cross-References" not in out
 
 
-def test_compile_report_smart_money_result_none_does_not_crash():
-    body = report.compile_report([], [], _EMPTY_STATS, _run_meta(), _CFG,
-                                  smart_money_result=None)
-    assert "No smart money data available this run." in body
+def test_smart_money_section_result_none_does_not_crash():
+    out = "\n".join(report._smart_money_section(None))
+    assert "No smart money data available this run." in out
 
 
 # ─── Goal 3e: logger resolution helpers ──────────────────────────────────────

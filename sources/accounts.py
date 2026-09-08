@@ -18,12 +18,31 @@ CACHE_FILE = os.path.join(_ROOT, "data", "winning_accounts.json")
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 
+# Polymarket's Data API caps /positions at 150 req/10s (15/sec, IP-based --
+# docs.polymarket.com/api-reference/rate-limits, confirmed live 2026-08-23),
+# with over-limit requests throttled/queued rather than rejected outright.
+# discover_winners() and analysis/smart_money_scan.py's watchlist scan both
+# call fetch_user_positions() back-to-back for every wallet with no pacing
+# at all -- easily exceeds 15/sec, and a request queued past this function's
+# own timeout raises a timeout exception that used to be silently swallowed
+# and reported as "no positions returned," indistinguishable from a wallet
+# that genuinely has zero. 0.1s keeps sustained usage safely under 15/sec
+# even across a long back-to-back loop.
+_MIN_REQUEST_INTERVAL_S = 0.1
+
+
 def _get(path: str, params: dict = None, timeout: int = 12) -> list | dict | None:
+    time.sleep(_MIN_REQUEST_INTERVAL_S)
     try:
         resp = requests.get(f"{DATA_API}/{path}", params=params, timeout=timeout)
         resp.raise_for_status()
         return resp.json()
-    except Exception:
+    except Exception as e:
+        # A real failure (timeout, connection error, non-2xx) now prints,
+        # so it's visibly distinct in logs from a genuinely empty 200
+        # response -- callers still get None/[] either way (unchanged
+        # contract), this only adds the visibility that was missing.
+        print(f"  [accounts] Data API request to {path!r} failed: {e}")
         return None
 
 
@@ -467,6 +486,24 @@ def load_winners(config: dict) -> list[dict]:
     _save_cache(winners)
     print(f"  [accounts] Discovered {len(winners)} winning wallets — cache updated")
     return winners
+
+
+def read_cached_winners() -> tuple[list[dict], float | None]:
+    """
+    Read-only peek at data/winning_accounts.json -- NEVER triggers a live
+    discover_winners() fetch, unlike load_winners() (which falls back to a
+    live multi-minute Polymarket crawl when the cache is stale). Built for
+    the Smart Money dashboard's Winning Whales panel, where opening a tab
+    must never block on a live crawl -- the live daily pipeline (main.py)
+    is what actually keeps this cache warm. Returns (winners, updated_at
+    unix timestamp or None if the cache file doesn't exist/is unreadable).
+    """
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("winners", []), data.get("updated_at")
+    except Exception:
+        return [], None
 
 
 # ── Smart money scan ──────────────────────────────────────────────────────────

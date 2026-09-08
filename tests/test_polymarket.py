@@ -5,6 +5,7 @@ All tests are offline: no network calls.
 import pytest
 from unittest.mock import patch
 
+from core import fees
 from sources import polymarket
 
 
@@ -196,6 +197,58 @@ def test_match_markets_min_match_score_override():
     # At 0.10 threshold it should match; at 0.80 it should not
     assert "KXTEST" not in result_strict
     assert "KXTEST" in result_loose
+
+
+# ── net_price_gap (backlog: cross-venue-expansion) ──────────────────────────────
+
+def test_match_markets_net_price_gap_matches_manual_fee_calc():
+    """net_price_gap == raw gap shrunk by both venues' modeled taker fees, never flipped in sign."""
+    idx = _idx("Will X happen?")
+    # poly=0.70, kalshi=0.55 -> raw price_gap=0.15
+    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.55)]
+    result = polymarket.match_markets(markets, idx, _CFG)
+    k_fee = fees.kalshi_fee(0.55, 10)
+    p_fee = fees.polymarket_fee(0.70, 10, None)
+    expected = round(0.15 - (k_fee + p_fee) / 10, 4)
+    assert result["KXTEST"]["net_price_gap"] == pytest.approx(expected, abs=1e-4)
+    assert result["KXTEST"]["net_price_gap"] < result["KXTEST"]["price_gap"]
+
+
+def test_match_markets_net_price_gap_never_flips_sign():
+    """A negative raw gap (Kalshi pricier than Poly) stays negative after fee shrinkage."""
+    idx = _idx("Will X happen?")
+    # poly=0.70, kalshi=0.90 -> raw price_gap = -0.20
+    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.90)]
+    result = polymarket.match_markets(markets, idx, _CFG)
+    assert result["KXTEST"]["price_gap"] < 0
+    assert result["KXTEST"]["net_price_gap"] <= 0
+
+
+def test_match_markets_net_price_gap_never_more_extreme_than_raw():
+    """Fees can only shrink the gap toward zero, never widen it."""
+    idx = _idx("Will X happen?")
+    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.60)]
+    result = polymarket.match_markets(markets, idx, _CFG)
+    assert abs(result["KXTEST"]["net_price_gap"]) <= abs(result["KXTEST"]["price_gap"])
+
+
+def test_match_markets_net_price_gap_none_when_no_mid_price():
+    idx = _idx("Will X happen?")
+    markets = [{"ticker": "KXTEST", "title": "Will X happen?", "mid_price": None}]
+    result = polymarket.match_markets(markets, idx, _CFG)
+    assert result["KXTEST"]["net_price_gap"] is None
+
+
+def test_match_markets_net_price_gap_uses_kalshi_category_for_polymarket_rate():
+    """A crypto-category market should shrink more (higher Polymarket fee rate) than an uncategorized one."""
+    idx = _idx("Will X happen?")
+    crypto_market = _kalshi("KXTEST", "Will X happen?", mid_price=0.55)
+    crypto_market["category"] = "Crypto"
+    plain_market = _kalshi("KXTEST2", "Will X happen?", mid_price=0.55)
+
+    result = polymarket.match_markets([crypto_market, plain_market], idx, _CFG)
+    # Same raw gap on both, but crypto's higher Polymarket fee rate shrinks it further
+    assert abs(result["KXTEST"]["net_price_gap"]) < abs(result["KXTEST2"]["net_price_gap"])
 
 
 # ── fetch_and_build_index ─────────────────────────────────────────────────────

@@ -56,11 +56,25 @@ def get_last_run() -> dict | None:
     return dict(row) if row else None
 
 
-def hours_since(timestamp_iso: str) -> float:
+def hours_since(timestamp_iso: str, now: datetime | None = None) -> float:
+    """
+    2026-08-25: now accepts an optional `now` -- previously always used
+    real datetime.now(), even when called from daily_digest.py's
+    section_task_health(now=...) and catchup_missed_tasks.py's
+    find_stale_tasks(now=...), both of which already thread a `now`
+    through to check_scheduled_tasks() but had no way to give this
+    function the same frozen time. Found because tests/test_daily_digest.py
+    and tests/test_catchup_missed_tasks.py hardcode a fixed NOW constant
+    and started failing as real wall-clock time passed it by more than
+    DEFAULT_MAX_SILENCE_HOURS -- a ticking-time-bomb test bug, not
+    anything actually wrong with either script's live behavior. Defaults
+    to real time so every existing real caller is unaffected.
+    """
+    now = now or datetime.now(timezone.utc)
     ts = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - ts).total_seconds() / 3600.0
+    return (now - ts).total_seconds() / 3600.0
 
 
 def load_state(path: Path) -> dict:

@@ -32,6 +32,7 @@ from backlog.checker import (
     evaluate_triggers,
     execute_action,
     format_email_block,
+    gate_progress_str,
     generate_markdown,
 )
 
@@ -47,21 +48,36 @@ def tmp_db(tmp_path):
     conn = sqlite3.connect(db)
     conn.execute("""
         CREATE TABLE signals (
-            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT
+            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT,
+            direction TEXT, heuristic_label TEXT
         )
     """)
-    # 4 resolved signals across two flag_paths
+    # 4 resolved (non-PASS, source=paper) signals across two flag_paths but
+    # THREE distinct heuristic_labels (scotus x2, conflict x1, NULL x1) --
+    # deliberately different from the flag_path grouping so the two could
+    # never be confused for one another (resolved-count-per-category-max-
+    # wrong-column: flag_path and heuristic_label are different columns
+    # with different granularity; a fixture where they happened to produce
+    # the same max would have hidden that bug rather than caught it), plus
+    # rows resolved-count-metric-desync must exclude: a resolved PASS row
+    # (PASS resolves LOSS by construction, not a real call), a resolved
+    # real_fill row (real trade fills are tracked separately from paper
+    # signals by design), and a resolved research_probe row (a different
+    # experiment population, not paper signals either).
     conn.executemany(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
-            ("a1", "TICKER1", "WIN",  "EDGE",      "paper"),
-            ("a2", "TICKER2", "LOSS", "EDGE",      "paper"),
-            ("a3", "TICKER3", "WIN",  "HEURISTIC", "paper"),
-            ("a4", "TICKER4", "WIN",  "HEURISTIC", "paper"),
-            ("a5", "TICKER5", "",     "EDGE",      "paper"),       # pending
-            ("a6", "TICKER6", None,   "EDGE",      "paper"),       # pending
-            ("f1", "TICKER7", "",     None,         "real_fill"),  # fill, no result
-            ("f2", "TICKER8", "",     None,         "real_fill"),  # fill, no result
+            ("a1", "TICKER1",  "WIN",  "EDGE",      "paper",          "YES", "scotus"),
+            ("a2", "TICKER2",  "LOSS", "EDGE",      "paper",          "NO",  "scotus"),
+            ("a3", "TICKER3",  "WIN",  "HEURISTIC", "paper",          "YES", "conflict"),
+            ("a4", "TICKER4",  "WIN",  "HEURISTIC", "paper",          "NO",  None),
+            ("a5", "TICKER5",  "",     "EDGE",      "paper",          "YES", "scotus"),  # pending
+            ("a6", "TICKER6",  None,   "EDGE",      "paper",          "NO",  "scotus"),  # pending
+            ("a7", "TICKER9",  "LOSS", "DRIFT",     "paper",          "PASS", "scotus"), # resolved PASS -- excluded
+            ("f1", "TICKER7",  "",     None,        "real_fill",      "",    None),      # fill, no result
+            ("f2", "TICKER8",  "",     None,        "real_fill",      "",    None),      # fill, no result
+            ("f3", "TICKER10", "WIN",  None,        "real_fill",      "YES", "scotus"),  # resolved real_fill -- excluded
+            ("p1", "TICKER11", "WIN",  None,        "research_probe", "YES", "scotus"),  # resolved research_probe -- excluded
         ]
     )
     conn.commit()
@@ -82,15 +98,16 @@ def tmp_db_with_smf(tmp_path):
     conn = sqlite3.connect(db)
     conn.execute("""
         CREATE TABLE signals (
-            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT
+            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT,
+            direction TEXT, heuristic_label TEXT
         )
     """)
     conn.execute("""
         CREATE TABLE smart_money_fills (wallet TEXT, resolved INTEGER)
     """)
     conn.executemany(
-        "INSERT INTO signals VALUES (?, ?, ?, ?, ?)",
-        [("s1", "T1", "WIN", "EDGE", "paper")] * 30
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [("s1", "T1", "WIN", "EDGE", "paper", "YES", "scotus")] * 30
     )
     conn.executemany(
         "INSERT INTO smart_money_fills VALUES (?, ?)",
@@ -119,9 +136,55 @@ def tmp_backlog(tmp_path):
 
 def test_compute_metrics_correct_counts(tmp_db):
     m = compute_metrics(tmp_db)
-    assert m["resolved_count"] == 4              # WIN/LOSS only
-    assert m["resolved_count_per_category_max"] == 2  # HEURISTIC has 2
-    assert m["fills_count"] == 2
+    assert m["resolved_count"] == 4              # paper, WIN/LOSS, non-PASS only
+    assert m["resolved_count_per_category_max"] == 2  # heuristic_label: scotus=2 (a1,a2), conflict=1 (a3); a4 excluded (NULL label)
+    assert m["fills_count"] == 3
+
+
+def test_compute_metrics_resolved_count_excludes_pass_and_non_paper_sources(tmp_db):
+    """
+    resolved-count-metric-desync (2026-08-16): resolved_count's SQL had two
+    gaps vs. core.logger.get_stats()['resolved'] (the number
+    scripts/gate_notifier.py's actual gate-unlock emails use) -- no
+    direction filter (a7, a resolved PASS row, would have counted; PASS
+    resolves LOSS by construction, not a real call) and no source filter
+    (f3/p1, resolved real_fill/research_probe rows, would have counted;
+    both are tracked as separate populations from paper signals by
+    design). Before this fix tmp_db's resolved_count would have been 7,
+    not 4.
+    """
+    m = compute_metrics(tmp_db)
+    assert m["resolved_count"] == 4
+
+
+def test_compute_metrics_missing_heuristic_label_column_does_not_zero_later_metrics(tmp_path):
+    """
+    Regression for a real bug hit 2026-08-27: the heuristic_label query for
+    resolved_count_per_category_max originally had no try/except of its
+    own, so an OperationalError there (e.g. a schema missing the column)
+    fell through to compute_metrics()'s bare outer `except Exception: pass`
+    -- silently zeroing out resolved_count_per_wallet_max and fills_count
+    too, not just the one metric that actually failed. Isolated the same
+    way as the smart_money_fills query so one query's failure can't mask
+    the metrics computed after it.
+    """
+    db = tmp_path / "no_heuristic_label.db"
+    conn = sqlite3.connect(db)
+    conn.execute("""
+        CREATE TABLE signals (
+            call_id TEXT, ticker TEXT, result TEXT, flag_path TEXT, source TEXT, direction TEXT
+        )
+    """)
+    conn.executemany(
+        "INSERT INTO signals VALUES (?, ?, ?, ?, ?, ?)",
+        [("a1", "T1", "WIN", "EDGE", "paper", "YES"), ("a2", "T2", "WIN", "EDGE", "paper", "YES")]
+    )
+    conn.commit()
+    conn.close()
+    m = compute_metrics(db)
+    assert m["resolved_count"] == 2  # computed BEFORE the failing query -- must survive
+    assert m["resolved_count_per_category_max"] == 0
+    assert "resolved_count_per_category_max" in m["_data_gaps"]
 
 
 def test_compute_metrics_missing_smf_returns_zero(tmp_db_no_smf):
@@ -129,9 +192,47 @@ def test_compute_metrics_missing_smf_returns_zero(tmp_db_no_smf):
     assert m["resolved_count_per_wallet_max"] == 0   # no table, no error
 
 
+def test_compute_metrics_missing_smf_flags_data_gap(tmp_db_no_smf):
+    """
+    2026-08-26: a missing smart_money_fills table used to be indistinguishable
+    from a genuine "0 resolved fills across every wallet" -- backlog:
+    smart-money-fills-table-missing. _data_gaps makes the difference visible.
+    """
+    m = compute_metrics(tmp_db_no_smf)
+    assert "resolved_count_per_wallet_max" in m["_data_gaps"]
+
+
 def test_compute_metrics_with_smf(tmp_db_with_smf):
     m = compute_metrics(tmp_db_with_smf)
     assert m["resolved_count_per_wallet_max"] == 12  # walletA
+
+
+def test_compute_metrics_with_smf_no_data_gap(tmp_db_with_smf):
+    """A real, present smart_money_fills table must never be flagged as a data gap."""
+    m = compute_metrics(tmp_db_with_smf)
+    assert "resolved_count_per_wallet_max" not in m["_data_gaps"]
+
+
+def test_gate_progress_str_annotates_data_gap():
+    """
+    gate_progress_str() must distinguish a metric that's genuinely 0 from
+    one whose backing table doesn't exist yet -- a bare "not met" would
+    wrongly read as "this data was checked and there just isn't any yet."
+    """
+    item = {"trigger": {"all": [{"metric": "resolved_count_per_wallet_max", "op": ">=", "value": 10}]}}
+    metrics = {"resolved_count_per_wallet_max": 0, "_data_gaps": ["resolved_count_per_wallet_max"]}
+    result = gate_progress_str(item, metrics)
+    assert "not met" in result
+    assert "smart-money-fills-table-missing" in result
+
+
+def test_gate_progress_str_no_annotation_without_gap():
+    """A metric with real backing data (even if 0) gets no data-gap annotation."""
+    item = {"trigger": {"all": [{"metric": "resolved_count_per_wallet_max", "op": ">=", "value": 10}]}}
+    metrics = {"resolved_count_per_wallet_max": 0, "_data_gaps": []}
+    result = gate_progress_str(item, metrics)
+    assert "not met" in result
+    assert "data not tracked" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -160,11 +261,35 @@ def test_evaluate_triggers_two_conditions_both_required(backlog_data):
     results = evaluate_triggers(backlog_data, metrics_partial)
     assert results["auto-calibration-loop"] is False
 
+
+def test_evaluate_triggers_stays_locked_with_undone_dependency():
+    """
+    Both trigger conditions can be met and the item must still stay locked
+    if any depends_on id isn't "done" -- a synthetic backlog, not the
+    backlog_data fixture (real backlog.json), since real items' done/not-done
+    status legitimately changes over time (kalshi-sdk-migration-implementation,
+    2026-08-04: reconciling backlog.json's stale done-status for
+    brier-tracking/confluence-detection/multi-sample-scoring broke this
+    test's prior version, which had relied on auto-calibration-loop's real
+    dependency brier-tracking staying perpetually not-done as fixture data).
+    """
+    backlog = {
+        "items": [
+            {"id": "dep-a", "status": "done", "trigger": {"all": []}, "depends_on": []},
+            {"id": "dep-b", "status": "locked",
+             "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 999}]},
+             "depends_on": []},
+            {"id": "gated-item", "status": "blocked",
+             "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 30},
+                                  {"metric": "resolved_count_per_category_max", "op": ">=", "value": 15}]},
+             "depends_on": ["dep-a", "dep-b"]},
+        ]
+    }
     metrics_full = {"resolved_count": 30, "resolved_count_per_category_max": 15,
                     "resolved_count_per_wallet_max": 0, "fills_count": 0}
-    results = evaluate_triggers(backlog_data, metrics_full)
-    # Still False because depends_on [sample-size-gates, brier-tracking] are not "done"
-    assert results["auto-calibration-loop"] is False
+    results = evaluate_triggers(backlog, metrics_full)
+    # Own trigger conditions are both met, but dep-b is still locked (not done).
+    assert results["gated-item"] is False
 
 
 def test_evaluate_triggers_blocked_stays_locked_even_if_trigger_passes(backlog_data):
@@ -195,6 +320,51 @@ def test_compare_statuses_returns_newly_unlocked():
     assert backlog["items"][0]["status"] == "ready"
     assert backlog["items"][1]["status"] == "locked"   # unchanged
     assert backlog["items"][2]["status"] == "ready"    # was already ready, unchanged
+
+
+def test_manually_set_blocked_with_empty_trigger_does_not_hold():
+    """
+    Documents a real footgun hit 2026-08-27 (empirical-base-rates-poly):
+    manually setting status="blocked" with an empty trigger and empty
+    depends_on is NOT a stable state. evaluate_triggers() treats an empty
+    trigger.all as vacuously satisfied (no conditions to fail), so the
+    very next `python -m backlog.checker` run flips it straight back to
+    "ready" via compare_statuses() and reports it as newly unlocked --
+    silently, since nothing about this looks wrong from the trigger
+    evaluator's point of view. A real "wait for more data" gate MUST use
+    a sentinel trigger metric that compute_metrics() deliberately never
+    populates (see api_spend_authorized, graphify_corpus_shape_changed,
+    sufficient_per_heuristic_label_resolved_data in metrics_glossary) --
+    see test_sentinel_trigger_metric_never_auto_unlocks below for the
+    stable alternative.
+    """
+    backlog = {"items": [
+        {"id": "fake-blocked", "status": "blocked", "trigger": {"all": []}, "depends_on": []},
+    ]}
+    trigger_results = evaluate_triggers(backlog, metrics={})
+    assert trigger_results["fake-blocked"] is True
+    newly = compare_statuses(backlog, trigger_results)
+    assert newly == ["fake-blocked"]
+    assert backlog["items"][0]["status"] == "ready"
+
+
+def test_sentinel_trigger_metric_never_auto_unlocks():
+    """A trigger metric absent from METRICS_KEYS (and thus never in the
+    real metrics dict) reads as 0 via metrics.get(metric, 0) and can never
+    satisfy a `== 1` condition on its own -- the stable way to gate an
+    item on a condition compute_metrics() doesn't (or shouldn't yet)
+    compute, as opposed to a bare empty trigger (see the test above)."""
+    backlog = {"items": [
+        {"id": "sentinel-gated", "status": "locked",
+         "trigger": {"all": [{"metric": "sufficient_per_heuristic_label_resolved_data", "op": "==", "value": 1}]},
+         "depends_on": []},
+    ]}
+    # Even a metrics dict with lots of real signal never contains the sentinel key.
+    trigger_results = evaluate_triggers(backlog, metrics={"resolved_count": 999999})
+    assert trigger_results["sentinel-gated"] is False
+    newly = compare_statuses(backlog, trigger_results)
+    assert newly == []
+    assert backlog["items"][0]["status"] == "locked"
 
 
 # ---------------------------------------------------------------------------

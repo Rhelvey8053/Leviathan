@@ -2,9 +2,13 @@
 
 # LEVIATHAN // PREDICTION MARKET INTELLIGENCE
 
-Leviathan is an automated signal detection system for [Kalshi](https://kalshi.com), a regulated US exchange where traders buy and sell contracts on the probability of real-world events — elections, economic reports, sports outcomes, and more. Each day it scans thousands of open contracts, cross-references the same events on five external platforms, tracks the open positions of the highest-PnL traders in the space, and scores candidate markets using a combination of heuristics and LLM-based probability estimation. The output is a structured daily email report and a persistent record of every signal — market price at the time of the call, our probability estimate, and eventual outcome — with the long-term goal of determining whether systematic edge is real, where it comes from, and whether it holds under live conditions.
+Leviathan is an automated signal detection system for [Kalshi](https://kalshi.com), a regulated US exchange where traders buy and sell contracts on the probability of real-world events — elections, economic reports, sports outcomes, and more. Each day it scans thousands of open contracts, cross-references the same events on four external platforms, tracks the open positions of the highest-PnL traders in the space, and scores candidate markets using a combination of heuristics and LLM-based probability estimation. The output is a structured daily email report and a persistent record of every signal — market price at the time of the call, our probability estimate, and eventual outcome — with the long-term goal of determining whether systematic edge is real, where it comes from, and whether it holds under live conditions.
 
 **Not a developer?** [`docs/STORY.md`](docs/STORY.md) tells the same project as a plain-language narrative — no code required.
+
+**Want to poke holes in it?** [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) covers the market-price anchoring problem this project found in itself, the baseline comparison it built to catch it, and the pre-registered kill criterion it's holding itself to — written for outside review, current numbers included, unflattering ones not omitted.
+
+**Working here with Claude Code?** Read [`CLAUDE.md`](CLAUDE.md) first — orientation, hard policy constraints (Pro-subscription-only, confirm before running `main.py`), and where to look instead of re-deriving things that are already documented.
 
 ---
 
@@ -30,7 +34,7 @@ Each daily run executes an 8-step pipeline:
 | 1 | Auth | Connects to Kalshi and resolves any markets that have settled since the last run |
 | 2 | Fetch | Downloads 2,400+ open markets across 400 active events |
 | 3 | Filter | Drops liquid, efficiently-priced, and structurally uninteresting markets; deduplicates by event; tags any market where a tracked smart-money trader holds a position |
-| 4 | Cross-reference | Finds the same question on Polymarket, Manifold, PredictIt, Metaculus, and The Odds API — price gaps between platforms are a primary signal input |
+| 4 | Cross-reference | Finds the same question on Polymarket, Manifold, PredictIt, and Metaculus — price gaps between platforms are a primary signal input |
 | 5 | Whale detection | Flags unusually large individual trades and order-book imbalances that may indicate informed positioning |
 | 6 | Score | Scores flagged markets using Claude with live web search, anchored by 47 calibration rules that ground estimates in category base rates and cross-market evidence |
 | 7 | Log + Smart money | Persists signals to SQLite; runs the watchlist scan (fetches open positions for 20 tracked traders, cross-references to Kalshi markets by title similarity) |
@@ -42,11 +46,13 @@ Each daily run executes an 8-step pipeline:
 
 **Price-blind shadow arm:** `core/blind_scorer.py` can score a sampled subset of markets with no market price shown and none of the price-anchoring calibration rules, as a counterfactual for whether the anchored scorer's use of price adds real signal over the price itself. Off by default (`config.blind_arm.enabled`) since every run it fires spends real metered API cost, unlike the main scan's CLI/Pro-subscription path.
 
+**Cross-model corroboration:** `core/cross_model.py` can get an independent second opinion from a *different* model family (never Claude) via a local [OmniRoute](https://github.com/diegosouzapw/OmniRoute) gateway, for the small shortlisted-pick set only — same call site as citations grounding. Purely auxiliary: persisted to its own `signals.cross_model_opinion` column, never blended into direction/confidence/edge, never read by any win-rate/Brier calculation. Off by default (`config.cross_model.enabled`). Uses OmniRoute's keyless `auto` route by default — zero API key, zero signup — so unlike the price-blind arm above, turning it on costs nothing in metered spend; the real cost is needing OmniRoute running locally (`npm i -g omniroute`, then `omniroute` in its own terminal — not a hard Leviathan dependency, the pipeline runs unchanged if it's never running) and a real, live-verified ~90s round-trip latency, since the free backend is a genuine reasoning model, not a trivial completion.
+
 ---
 
 ## What This Demonstrates
 
-Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across six external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,850-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
+Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across five external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,850-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
 
 The design reflects a deliberate choice to build measurement infrastructure before claiming results. The calibration script (`analysis/calibration.py`) computes Brier scores and win rates broken down by flag path, time horizon, confidence tier, and cross-market alignment. The backlog is explicitly structured around data conditions: several planned features are blocked until the resolved-signal count clears n=20, because prior to that threshold any accuracy metric is too noisy to act on. This is an easy discipline to skip when you're the only one checking.
 
@@ -61,15 +67,16 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | Folder | Purpose |
 |---|---|
 | `core/` | The pipeline engine — auth, scanning, scoring, logging, reporting. Everything `main.py` orchestrates lives here. |
-| `sources/` | External market API clients — Polymarket, Manifold/PredictIt/Metaculus/OddsAPI, and winning-wallet discovery. |
+| `sources/` | External market API clients — Polymarket, Manifold/PredictIt/Metaculus, and winning-wallet discovery. |
 | `analysis/` | Read-only diagnostic and calibration scripts that run against `data/leviathan.db`. Nothing here is part of the daily pipeline. |
 | `backtesting/` | Offline, CSV-based backtest harness (including walk-forward validation), the empirical base-rate scaffold, and the settled-market replay pipeline (`settled_fetcher.py` pulls Kalshi's historical settled markets, `asof_reconstruction.py` rebuilds a market's state as of a past date from snapshots/candlesticks, `replay_runner.py` scores the reconstruction and grades it against the now-known outcome). Doesn't touch the live DB. |
 | `backlog/` | The backlog engine (`engine.py`) and weekly gate checker (`checker.py`) that maintain `backlog/backlog.json` and regenerate `BACKLOG.md`. |
 | `mcp_server/` | MCP server exposing the signal log, resolved track record, and market-data lookup as tools — reads `data/leviathan.db` directly, live. |
+| `dashboard/` | Local Streamlit dashboard (Overview / Signal Breakdown / Signal Log) reading `data/powerbi_export/`'s CSV export — the project's only dashboard as of 2026-08-19; a prior Power BI `.pbix` was retired (Pro-subscription-only cost policy, and Streamlit already covered the same ground for free). |
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, gate-unlock and no-run-completed alerting, Task Scheduler registration. |
 | `tests/` | The full offline test suite (1,850 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
-| `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), PowerBI exports, market snapshots, smart-money/whale caches, and the dashboard `.pbix`. |
-| `docs/` | Progress log (`PROGRESS.md`), a plain-language project narrative for non-technical readers (`STORY.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
+| `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), the CSV export directory (`data/powerbi_export/` — name predates the Power BI retirement, kept as-is since renaming touches `core/export_to_csv.py`, `dashboard/data.py`, and tests for no functional gain), market snapshots, and smart-money/whale caches. |
+| `docs/` | Progress log (`PROGRESS.md`, 2026-08-01 onward; older entries in `PROGRESS_ARCHIVE.md`), a plain-language project narrative for non-technical readers (`STORY.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
 
 ---
@@ -89,14 +96,12 @@ The codebase is structured as a modular pipeline — each layer is independently
 | `core/llm.py` | Anthropic Messages API client — forced tool_choice structured output, server-side web search, prompt caching, daily cost ceiling shared by the main scorer, replay-runner, and the blind arm |
 | `core/logger.py` | SQLite persistence — signals, runs, fills, probes |
 | `core/report.py` | Report compiler and email sender |
-| `core/subscribers.py` | Newsletter subscriber management |
 | `core/export_to_csv.py` | Exports `data/leviathan.db` tables to `data/powerbi_export/` |
-| `core/fees.py` | Kalshi fee schedule and net-of-fee edge math |
+| `core/fees.py` | Kalshi + Polymarket fee schedules, net-of-fee edge math, and the fee-adjusted cross-venue gap calculation |
 | `core/sizing.py` | Confidence-weighted hypothetical stake sizing — self-gated on live resolved-signal counts, fully inert until the same threshold as `auto-calibration-loop` clears |
 | `sources/polymarket.py` | Polymarket Gamma API price cross-reference |
-| `sources/external_markets.py` | Manifold + PredictIt + Metaculus + OddsAPI aggregator |
+| `sources/external_markets.py` | Manifold + PredictIt + Metaculus aggregator |
 | `sources/metaculus.py` | Metaculus question search and probability fetch |
-| `sources/odds_api.py` | The Odds API bookmaker lines |
 | `sources/accounts.py` | Winning Polymarket wallet discovery and per-market scan |
 | `config.json` | All thresholds, model settings, watchlist |
 | `analysis/smart_money_scan.py` | Watchlist position fetch and Kalshi cross-reference |
@@ -138,7 +143,6 @@ The codebase is structured as a modular pipeline — each layer is independently
 | Manifold | Community forecaster prices |
 | PredictIt | Regulated US political market prices |
 | Metaculus | Superforecaster consensus (requires free token) |
-| The Odds API | Sharp bookmaker lines for sports markets (requires free key) |
 
 ---
 
@@ -163,7 +167,6 @@ Fill in `.env`:
 | `KALSHI_KEY_ID` | kalshi.com → Settings → API |
 | `KALSHI_PRIVATE_KEY` | Same — RSA private key (PEM format) |
 | `GMAIL_APP_PASSWORD` | Google account → Security → App Passwords |
-| `ODDS_API_KEY` | [the-odds-api.com](https://the-odds-api.com) (free tier: 500 req/month) |
 | `METACULUS_API_TOKEN` | [metaculus.com/api](https://www.metaculus.com/api/) (free) |
 
 ### 3. Configure settings
@@ -237,13 +240,19 @@ The heartbeat check is deliberately scheduled independently of the main run rath
 
 ## MCP Server
 
-`mcp_server/server.py` exposes the signal log as MCP tools so the resolved track record can be interrogated conversationally instead of by opening files or writing one-off queries. v1 is stdio transport, tools only — reads `data/leviathan.db` directly (the same database the pipeline writes), never a copy or snapshot.
+`mcp_server/server.py` exposes Leviathan's data and operational status as MCP tools so they can be interrogated conversationally instead of by opening files or writing one-off queries. v1 is stdio transport, tools only — reads `data/leviathan.db` and `backlog/backlog.json` directly (the same files the pipeline writes), never a copy or snapshot.
 
 | Tool | What it does |
 |---|---|
 | `get_signal_log` | Most recent scored paper signals (PASS excluded), newest first. Optional `limit`, `resolved_only`, `ticker` filters. |
 | `get_resolved_track_record` | The full resolved track record — every settled signal with its probability estimate and actual outcome. Same filter as the README's headline stats. |
 | `lookup_market` | Scored market data for a given `ticker` (partial match) or signal `date` (`YYYY-MM-DD`). |
+| `get_run_history` | Recent pipeline runs (markets_scanned, signals_generated, whale_flags, runtime_ms, model_used, Brier stats) — for comparing a config trial against its baseline. |
+| `get_category_breakdown` | Signal counts grouped by (category, flag_path) — surfaces capture-path bugs like a whole flag_path landing blank. |
+| `get_backlog_status` | Full backlog snapshot: counts by status, live gate-unlock metrics, and per-item detail (locked items show real-time gate progress, blocked items show what they're waiting on). |
+| `get_pipeline_health` | Live Task Scheduler health for every daily/weekly task — the same check `Leviathan-AutomationHealthCheck` runs. |
+
+Added 2026-09-01, prompted by the user (as PM, following Liam/monday.com's retirement) asking what plugins/connectors could streamline the project. Third-party Kalshi/Polymarket MCP connectors exist but were rejected — nearly all are trade-execution-capable, which conflicts directly with Leviathan's paper-only discipline, and would mean handing a real Kalshi API key to an unverified third party. Expanding this already-first-party, already-trusted, read-only server was the safer, more valuable move.
 
 ### Try it in the Inspector
 
@@ -293,18 +302,6 @@ python analysis/eval_rescore.py --check    # separate: proves re-score reproduci
 ```
 
 **Live determinism check (2026-07-14, `backend="cli"`, the current config default):** re-scored the 8 frozen markets twice — **not identical**, as caveated above, since the CLI backend has no temperature control. Estimates shifted by a few points on most markets (e.g. 0.06 → 0.05), but one market swung sharply: the Cabinet-departure signal (original at-signal-time estimate 0.65, resolved NO) came back at 0.92 and 0.97 on re-score — *more* confidently wrong than the original call, not less. This is exactly the contamination risk documented above (re-scoring an already-resolved, publicly-known market) compounded by `backend="cli"`'s lack of reproducibility guarantees; it is not evidence about the scorer's quality and isn't used as one. Proving true reproducibility requires `backend="api"` with `temperature=0` (supported in code — `core/llm.py score_via_api(..., temperature=...)` — but untested live here due to an invalid `ANTHROPIC_API_KEY` in this environment).
-
----
-
-## Managing Subscribers
-
-```bash
-python core/subscribers.py add someone@example.com
-python core/subscribers.py list
-python core/subscribers.py remove <token>
-```
-
-Each subscriber receives the report with a unique unsubscribe token in the footer.
 
 ---
 

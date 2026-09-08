@@ -5,7 +5,7 @@ tests/test_blind_scorer.py — Offline tests for core/blind_scorer.py
 No live API calls: score_blind() is tested against a patched
 core.blind_scorer._score_blind_via_api. The real API path (core.llm.
 score_blind_via_api) can't be exercised end-to-end without a working
-Anthropic API key -- see docs/PROGRESS.md 2026-07-26.
+Anthropic API key -- see docs/PROGRESS_ARCHIVE.md 2026-07-26.
 """
 
 import sys

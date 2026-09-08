@@ -4,7 +4,7 @@ tests/test_kalshi_url.py — Tests for core.kalshi.kalshi_market_url.
 CONFIRMED PATTERN (2026-07-23, superseding the 2026-07-22 "no pattern
 confirmed" finding): kalshi_market_url(series_ticker, event_ticker) builds
 https://kalshi.com/markets/{series_ticker}/{event_ticker} (lowercased).
-See core/kalshi.py's docstring and docs/PROGRESS.md for the full
+See core/kalshi.py's docstring and docs/PROGRESS_ARCHIVE.md for the full
 evidence trail (Kalshi's own AGENTS.md, sitemap-markets.xml, and a
 genuine server-side 308 redirect chain from /events/{ticker} that
 resolves real tickers into this exact shape but does NOT resolve fake

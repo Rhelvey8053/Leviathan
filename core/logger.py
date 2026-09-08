@@ -7,6 +7,7 @@ Auto-migrates calls.csv / runs.csv to the database on first import.
 import csv
 import json
 import os
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -88,9 +89,30 @@ def _init_db() -> None:
                 market_price_at_score REAL,
                 cost_usd            REAL
             );
+            CREATE TABLE IF NOT EXISTS smart_money_fills (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet            TEXT NOT NULL,
+                trader_name       TEXT,
+                poly_slug         TEXT NOT NULL,
+                outcome           TEXT NOT NULL,
+                poly_title        TEXT,
+                kalshi_ticker     TEXT,
+                entry_price       REAL,
+                position_val      REAL,
+                first_seen_at     TEXT NOT NULL,
+                last_seen_at      TEXT NOT NULL,
+                resolved          INTEGER NOT NULL DEFAULT 0,
+                hit               INTEGER,
+                resolved_pct_pnl  REAL,
+                resolved_cash_pnl REAL,
+                resolved_at       TEXT,
+                UNIQUE(wallet, poly_slug, outcome)
+            );
             CREATE INDEX IF NOT EXISTS idx_signals_ts     ON signals(timestamp);
             CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
             CREATE INDEX IF NOT EXISTS idx_blind_scores_ticker ON blind_scores(ticker);
+            CREATE INDEX IF NOT EXISTS idx_smf_wallet   ON smart_money_fills(wallet);
+            CREATE INDEX IF NOT EXISTS idx_smf_resolved ON smart_money_fills(resolved);
         """)
         # Additive schema migration — non-destructive, safe to run repeatedly.
         for col in [
@@ -161,6 +183,13 @@ def _init_db() -> None:
             # predict outcomes" can never be answered even retroactively.
             "poly_price            REAL",
             "poly_price_gap        REAL",
+            # Fee-adjusted version of poly_price_gap (backlog:
+            # cross-venue-expansion) -- core.fees-modeled Kalshi+Polymarket
+            # taker fees shrink the raw gap toward zero (never flip its
+            # sign). Purely auxiliary/informational: never blended into
+            # direction/confidence/edge, never read by any win-rate/Brier
+            # calculation, same discipline as cross_model_opinion.
+            "poly_net_price_gap    REAL",
             "consensus_gap         REAL",
             "consensus_dir         TEXT",
             "smart_money_count     INTEGER DEFAULT 0",
@@ -191,6 +220,64 @@ def _init_db() -> None:
             # calls. Signed toward the flagged direction: positive means
             # the market moved our way. See get_market_drift_stats().
             "market_drift_pp       REAL",
+            # signal-time market microstructure context (already fetched
+            # onto the market dict for filtering/scoring in main.py --
+            # volume_fp/open_interest_fp -- but never copied onto the
+            # logged signal, so "did edge cluster in illiquid markets"
+            # could never be answered from historical data). Column named
+            # without the _fp suffix since Power BI/CSV consumers read the
+            # already-dollar/contract-scaled value, matching category/
+            # whale_max_trade_size's naming convention above, not the raw
+            # Kalshi field name.
+            "volume                REAL",
+            "open_interest         REAL",
+            # When a signal actually resolved, distinct from `timestamp`
+            # (signal creation) and `close_time` (the market's SCHEDULED
+            # close, which settlement can lag) -- without this, time-to-
+            # resolution could only ever be approximated, never measured.
+            # Set once, in resolve_outcomes(), the same call that fills
+            # outcome/result/pnl_if_traded. NULL for every row logged
+            # before this existed and for anything still pending.
+            "resolved_at           TEXT",
+            # backlog: net-edge-fee-depth-model. ob_bid_depth/ob_ask_depth are
+            # already computed by compute_orderbook_signal() but were never
+            # persisted (only the derived ob_imbalance/ob_flag/ob_direction
+            # were) -- without the raw depth, "did edge cluster in markets
+            # too thin to fill unit_size" can't be answered after the fact.
+            # liquidity_thin is the check itself: depth on the side this
+            # signal's direction needs was below the configured unit_size at
+            # scan time. Own column (not folded into confidence_downgraded)
+            # for the same reason second_pass/confidence_downgraded are
+            # separate -- one flag per distinct methodology reason, so later
+            # calibration analysis can tell them apart.
+            "ob_bid_depth          REAL",
+            "ob_ask_depth          REAL",
+            "liquidity_checked     INTEGER DEFAULT 0",
+            "liquidity_thin        INTEGER DEFAULT 0",
+            # backlog: citations-provenance-grounding. core.llm.ground_
+            # citations_via_api's structured [{"url","title","cited_text",
+            # "start_char_index","end_char_index"}, ...] output, JSON-
+            # encoded like the existing `sources` column above -- readers
+            # must go through the same json.loads-or-[] pattern, never
+            # assume it's already a list. NULL for every row logged before
+            # this existed, and for any row whose shortlist re-score wasn't
+            # reached or found no citations (see _rescore_shortlist_for_
+            # clean_sources's non-fatal try/except in main.py).
+            "citations             TEXT",
+            # backlog: cross-model-corroboration. An independent second
+            # opinion from a different, unrelated model (via a local
+            # OmniRoute gateway, keyless free routing -- never Claude, never
+            # blended into direction/confidence/edge). JSON-encoded like
+            # `sources`/`citations` above: {"model", "direction",
+            # "estimate", "reasoning"} or NULL. Only ever populated for the
+            # small shortlisted-pick set (see core.cross_model.get_opinion,
+            # called from main.py's shortlist re-score step, same place
+            # ground_citations runs) -- never for the full scan. Off by
+            # default (config.cross_model.enabled=false); a corroboration
+            # call failing (gateway not running, backend timeout) is
+            # non-fatal and never costs the pick anything, same discipline
+            # as ground_citations's own try/except.
+            "cross_model_opinion   TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -317,12 +404,15 @@ def log_signal(signal: dict) -> None:
                  net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker,
                  whale_max_trade_size,category,
                  ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
+                 volume,open_interest,
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
-                 poly_price,poly_price_gap,consensus_gap,consensus_dir,
-                 smart_money_count,smart_money_dir,reasoning,sources)
+                 poly_price,poly_price_gap,poly_net_price_gap,consensus_gap,consensus_dir,
+                 smart_money_count,smart_money_dir,reasoning,sources,
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
+                 cross_model_opinion)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -363,6 +453,8 @@ def log_signal(signal: dict) -> None:
                 signal.get("ob_direction"),
                 1 if signal.get("spread_wide") else 0,
                 _to_float(signal.get("spread_pct")),
+                _to_float(signal.get("volume")),
+                _to_float(signal.get("open_interest")),
                 1 if signal.get("confidence_downgraded") else 0,
                 1 if signal.get("second_pass") else 0,
                 _to_float(signal.get("ext_estimate")),
@@ -372,12 +464,19 @@ def log_signal(signal: dict) -> None:
                 _to_int(signal.get("confluence_count")),
                 _to_float(signal.get("poly_price")),
                 _to_float(signal.get("poly_price_gap")),
+                _to_float(signal.get("poly_net_price_gap")),
                 _to_float(signal.get("consensus_gap")),
                 signal.get("consensus_dir"),
                 _to_int(signal.get("smart_money_count")) or 0,
                 signal.get("smart_money_dir"),
                 signal.get("reasoning") or "",
                 json.dumps(signal.get("sources") or []),
+                _to_float(signal.get("ob_bid_depth")),
+                _to_float(signal.get("ob_ask_depth")),
+                1 if signal.get("liquidity_checked") else 0,
+                1 if signal.get("liquidity_thin") else 0,
+                json.dumps(signal.get("citations") or []),
+                json.dumps(signal["cross_model_opinion"]) if signal.get("cross_model_opinion") else None,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -402,12 +501,15 @@ def log_pass(signal: dict) -> None:
                  net_edge_after_fee,ev_after_fee_per_contract,event_ticker,series_ticker,
                  whale_max_trade_size,category,
                  ob_flag,ob_imbalance,ob_direction,spread_wide,spread_pct,
+                 volume,open_interest,
                  confidence_downgraded,second_pass,
                  ext_estimate,ext_edge,ext_n_signals,ext_alpha,confluence_count,
-                 poly_price,poly_price_gap,consensus_gap,consensus_dir,
-                 smart_money_count,smart_money_dir,reasoning,sources)
+                 poly_price,poly_price_gap,poly_net_price_gap,consensus_gap,consensus_dir,
+                 smart_money_count,smart_money_dir,reasoning,sources,
+                 ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
+                 cross_model_opinion)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -454,6 +556,8 @@ def log_pass(signal: dict) -> None:
                 signal.get("ob_direction"),
                 1 if signal.get("spread_wide") else 0,
                 _to_float(signal.get("spread_pct")),
+                _to_float(signal.get("volume")),
+                _to_float(signal.get("open_interest")),
                 1 if signal.get("confidence_downgraded") else 0,
                 1 if signal.get("second_pass") else 0,
                 _to_float(signal.get("ext_estimate")),
@@ -463,12 +567,19 @@ def log_pass(signal: dict) -> None:
                 _to_int(signal.get("confluence_count")),
                 _to_float(signal.get("poly_price")),
                 _to_float(signal.get("poly_price_gap")),
+                _to_float(signal.get("poly_net_price_gap")),
                 _to_float(signal.get("consensus_gap")),
                 signal.get("consensus_dir"),
                 _to_int(signal.get("smart_money_count")) or 0,
                 signal.get("smart_money_dir"),
                 signal.get("reasoning") or "",
                 json.dumps(signal.get("sources") or []),
+                _to_float(signal.get("ob_bid_depth")),
+                _to_float(signal.get("ob_ask_depth")),
+                1 if signal.get("liquidity_checked") else 0,
+                1 if signal.get("liquidity_thin") else 0,
+                json.dumps(signal.get("citations") or []),
+                json.dumps(signal["cross_model_opinion"]) if signal.get("cross_model_opinion") else None,
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")
@@ -1019,10 +1130,11 @@ def resolve_outcomes(config: dict) -> int:
             with _db() as conn:
                 conn.execute(
                     "UPDATE signals SET outcome=?, result=?, pnl_if_traded=?, "
-                    "market_baseline_brier=?, stake_size_hypothetical=?, market_drift_pp=? "
+                    "market_baseline_brier=?, stake_size_hypothetical=?, market_drift_pp=?, "
+                    "resolved_at=? "
                     "WHERE call_id=?",
                     (outcome, "WIN" if win else "LOSS", pnl, baseline_brier, stake_size,
-                     drift_pp, row["call_id"])
+                     drift_pp, datetime.now(timezone.utc).isoformat(), row["call_id"])
                 )
             resolved_count += 1
         except Exception as e:
@@ -1098,6 +1210,145 @@ def get_resolved_track_record(days: int | None = None) -> list[dict]:
         return []
 
 
+_TICKER_DATE_SUFFIX_RE = re.compile(r"-\d{2}[A-Z]{3}\d{0,2}$")
+
+
+def _ticker_stem(ticker: str) -> str:
+    """
+    Strips exactly one trailing rolling-window expiry token (e.g. -26AUG,
+    -27JAN01) from a ticker, leaving the part that identifies the
+    underlying real-world question. Two tickers sharing a stem are the
+    same story re-flagged under a new expiry window, not independent
+    markets -- see backlog: rolled-market-repeat-detection (the
+    KXCABLEAVE-26MAY22-{26JUN,26JUL,26AUG,26SEP} finding, later confirmed
+    to recur across at least 4 distinct stories, 2026-08-24).
+
+    Strips ONE token, not "+" (one-or-more) -- a ticker like
+    KXCABLEAVE-26MAY22-26JUN has two date-shaped segments (a creation
+    date and an expiry date; "26MAY22" itself matches the same
+    \\d{2}[A-Z]{3}\\d{0,2} shape as the expiry token it's paired with).
+    Stripping both would collapse it to bare "KXCABLEAVE" and wrongly
+    merge it with any other, unrelated KXCABLEAVE-prefixed story that
+    happens to exist. Confirmed against the real ticker format: for this
+    project's actual KX<TOPIC>-<created>-<expiry> shape, the creation-date
+    segment is part of what identifies a distinct real-world question,
+    only the expiry segment rolls.
+    """
+    return _TICKER_DATE_SUFFIX_RE.sub("", ticker)
+
+
+def get_repeat_family(ticker: str) -> list[dict]:
+    """
+    Every OTHER ticker sharing `ticker`'s stem (see _ticker_stem) -- the
+    same real-world question, previously flagged under a different expiry
+    window. One row per sibling ticker: its most recent signal (timestamp,
+    direction, our_estimate, market_price, outcome). Empty list if `ticker`
+    has no stem-mates, including when the stem is the whole ticker (no
+    trailing date suffix matched) -- a bare, unrolled ticker never has
+    siblings by definition.
+
+    Deliberately no automatic confidence penalty derived from this --
+    the 2026-08-24 investigation found the pattern's actual effect on
+    calibration was mixed (badly overconfident in one family, fine to
+    good, including two wins, in three others). This is visibility for
+    the scorer prompt to weigh, not a rule.
+    """
+    stem = _ticker_stem(ticker)
+    if stem == ticker:
+        return []
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT s.* FROM signals s
+                INNER JOIN (
+                    SELECT ticker, MAX(timestamp) AS max_ts
+                    FROM signals
+                    WHERE ({_PAPER}) AND ticker != ? AND ticker LIKE ?
+                    GROUP BY ticker
+                ) latest ON s.ticker = latest.ticker AND s.timestamp = latest.max_ts
+                WHERE ({_PAPER})
+                ORDER BY s.timestamp ASC
+                """,
+                (ticker, f"{stem}%"),
+            ).fetchall()
+        # LIKE '<stem>%' over-matches any ticker sharing the stem as a
+        # prefix, not just ones matching the full date-suffix pattern
+        # (e.g. a genuinely different ticker that happens to start with
+        # the same characters) -- filter to true stem equality before
+        # returning, not just prefix match.
+        return [dict(r) for r in rows if _ticker_stem(r["ticker"]) == stem]
+    except Exception:
+        return []
+
+
+def get_titles_for_tickers(tickers: list[str]) -> dict[str, str]:
+    """
+    Latest known title per ticker, for surfaces that only have the raw
+    ticker (e.g. data/whale_history/streak.json, which predates title
+    ever being persisted alongside it) and need something a human can
+    actually read. One batched exact-match query, not N calls to
+    get_market_data()'s LIKE-based lookup -- correct (no substring
+    over-matching between tickers that share a prefix) and cheap even
+    for a large ticker list. Tickers with no signals row at all are
+    simply absent from the returned dict, not mapped to '' or None --
+    callers should fall back to showing the raw ticker themselves.
+    """
+    if not tickers:
+        return {}
+    try:
+        with _db() as conn:
+            placeholders = ",".join("?" for _ in tickers)
+            rows = conn.execute(
+                f"""
+                SELECT ticker, title FROM signals s
+                WHERE ticker IN ({placeholders}) AND title != '' AND title IS NOT NULL
+                  AND timestamp = (
+                      SELECT MAX(timestamp) FROM signals
+                      WHERE ticker = s.ticker AND title != '' AND title IS NOT NULL
+                  )
+                """,
+                tickers,
+            ).fetchall()
+        return {r["ticker"]: r["title"] for r in rows}
+    except Exception:
+        return {}
+
+
+def get_market_meta_for_tickers(tickers: list[str]) -> dict[str, dict]:
+    """
+    Like get_titles_for_tickers(), but also returns series_ticker/
+    event_ticker so a caller can build a real clickable Kalshi link
+    (core.kalshi.kalshi_market_url) instead of showing a bare, often
+    unreadable ticker string (e.g. "KXFDAAPPROVE-MDMA-27JAN01"). Added for
+    the Smart Money dashboard's whale-activity table -- a separate
+    function rather than changing get_titles_for_tickers()'s existing
+    dict[str, str] contract, which other/future callers may still want.
+    Tickers with no signals row at all are simply absent from the
+    returned dict; callers should fall back to the raw ticker themselves.
+    """
+    if not tickers:
+        return {}
+    try:
+        with _db() as conn:
+            placeholders = ",".join("?" for _ in tickers)
+            rows = conn.execute(
+                f"""
+                SELECT ticker, title, series_ticker, event_ticker FROM signals s
+                WHERE ticker IN ({placeholders}) AND title != '' AND title IS NOT NULL
+                  AND timestamp = (
+                      SELECT MAX(timestamp) FROM signals
+                      WHERE ticker = s.ticker AND title != '' AND title IS NOT NULL
+                  )
+                """,
+                tickers,
+            ).fetchall()
+        return {r["ticker"]: {"title": r["title"], "series_ticker": r["series_ticker"],
+                               "event_ticker": r["event_ticker"]} for r in rows}
+    except Exception:
+        return {}
+
+
 def get_market_data(ticker: str | None = None, date: str | None = None) -> list[dict]:
     """
     Scored market data for a ticker (partial match) or a signal date
@@ -1120,6 +1371,44 @@ def get_market_data(ticker: str | None = None, date: str | None = None) -> list[
                 f"SELECT * FROM signals WHERE {' AND '.join(where)} "
                 f"ORDER BY timestamp DESC",
                 params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_run_history(limit: int = 20) -> list[dict]:
+    """
+    Most recent pipeline runs, newest first -- one row per main.py
+    invocation (markets_scanned, signals_generated, whale_flags,
+    runtime_ms, model_used, brier_scorer/brier_market/brier_n). Used by
+    the MCP run-history query tool for comparing a config trial (e.g.
+    a cli_model_override change) against its preceding baseline window
+    without a one-off SQL query each time.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM runs ORDER BY timestamp DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def get_category_breakdown() -> list[dict]:
+    """
+    Signal counts grouped by (category, flag_path), most common first.
+    Never fabricates a category for a blank value -- '' is returned as
+    its own bucket, same as querying the raw column directly, so a gap
+    like resolve-first-never-carried-category shows up rather than
+    silently merging into some other bucket.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT category, flag_path, COUNT(*) as n FROM signals "
+                f"WHERE {_NO_PASS} GROUP BY category, flag_path ORDER BY n DESC"
             ).fetchall()
         return [dict(r) for r in rows]
     except Exception:
@@ -2503,3 +2792,139 @@ def get_stats_by_heuristic_label() -> list[dict]:
             "total_pnl":       r["total_pnl"],
         })
     return result
+
+
+# ── Smart money fills persistence ───────────────────────────────────────────
+# smart-money-fills-persistence-build (2026-09-07): no table anywhere in this
+# codebase previously persisted individual wallet fills with resolution
+# outcomes over time -- diagnose_discovery()/run_smart_money_scan() computed
+# wallet-level stats live, on demand, against Polymarket's API each call,
+# with nothing written to leviathan.db. This is what per-wallet-track-record,
+# skill-vs-luck-weighting, and wallet-tracking-dashboard are gated behind
+# (resolved_count_per_wallet_max >= 10) -- building the table alone does not
+# unlock those; enough real resolved fills still need to accumulate after.
+
+def record_smart_money_fills(trader_data: dict) -> dict:
+    """
+    Upserts one smart_money_fills row per (wallet, poly_slug, outcome) for
+    every currently-open, qualifying position observed this scan (only
+    verified watchlist wallets -- see analysis.smart_money_scan.
+    fetch_watchlist_positions).
+
+    entry_price/first_seen_at are captured only on first observation and
+    never overwritten afterward -- Polymarket's positions API exposes the
+    wallet's currently-held state, not exact historical fill timestamps or
+    prices, so "the first time Leviathan observed this open position" is
+    the closest available proxy for a real fill record, not an exact one.
+    Position size (position_val) and last_seen_at DO refresh each scan
+    while the position stays open, so a currently-open row always reflects
+    the latest observed size.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    inserted = 0
+    refreshed = 0
+    with _db() as conn:
+        for name, data in trader_data.items():
+            if not data.get("verified"):
+                continue
+            wallet = data.get("address", "")
+            if not wallet:
+                continue
+            for p in data.get("positions", []):
+                slug = (p.get("eventSlug") or p.get("slug") or "").strip()
+                outcome = (p.get("outcome") or "").strip()
+                if not slug or not outcome:
+                    continue
+                existing = conn.execute(
+                    "SELECT id FROM smart_money_fills WHERE wallet=? AND poly_slug=? AND outcome=?",
+                    (wallet, slug, outcome),
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE smart_money_fills SET last_seen_at=?, position_val=? WHERE id=?",
+                        (now, float(p.get("currentValue") or 0), existing["id"]),
+                    )
+                    refreshed += 1
+                else:
+                    conn.execute(
+                        "INSERT INTO smart_money_fills "
+                        "(wallet, trader_name, poly_slug, outcome, poly_title, entry_price, "
+                        " position_val, first_seen_at, last_seen_at, resolved) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                        (wallet, name, slug, outcome, p.get("title", ""),
+                         float(p.get("curPrice") or p.get("avgPrice") or 0),
+                         float(p.get("currentValue") or 0), now, now),
+                    )
+                    inserted += 1
+    return {"inserted": inserted, "refreshed": refreshed}
+
+
+def backfill_smart_money_resolutions(trader_data: dict) -> dict:
+    """
+    Marks previously-recorded unresolved fills as resolved once Polymarket's
+    API shows that exact (wallet, poly_slug, outcome) position as redeemable
+    -- the same signal sources.accounts._score_wallet already uses to decide
+    a position is resolved, and pct_pnl > 0 as the same hit/win definition
+    used there too (kept consistent with the existing wallet-scoring logic
+    rather than inventing a second definition of "won").
+
+    Never infers resolution from absence -- a position missing from this
+    scan's all_positions (API pagination limit -- fetch_user_positions caps
+    at 500 -- or a position closed before the market resolved) is NOT the
+    same as confirmed-resolved, so it's left untouched rather than guessed
+    at. Only a positive redeemable=True observation on the same
+    (wallet, poly_slug, outcome) ever triggers the update.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    resolved_count = 0
+    with _db() as conn:
+        for name, data in trader_data.items():
+            if not data.get("verified"):
+                continue
+            wallet = data.get("address", "")
+            if not wallet:
+                continue
+            unresolved = conn.execute(
+                "SELECT id, poly_slug, outcome FROM smart_money_fills WHERE wallet=? AND resolved=0",
+                (wallet,),
+            ).fetchall()
+            if not unresolved:
+                continue
+            pending = {(r["poly_slug"], r["outcome"]): r["id"] for r in unresolved}
+            for p in data.get("all_positions", []):
+                if not p.get("redeemable"):
+                    continue
+                slug = (p.get("eventSlug") or p.get("slug") or "").strip()
+                outcome = (p.get("outcome") or "").strip()
+                key = (slug, outcome)
+                if key not in pending:
+                    continue
+                pct = float(p.get("percentPnl") or 0)
+                cash = float(p.get("cashPnl") or 0)
+                conn.execute(
+                    "UPDATE smart_money_fills SET resolved=1, hit=?, resolved_pct_pnl=?, "
+                    "resolved_cash_pnl=?, resolved_at=? WHERE id=?",
+                    (1 if pct > 0 else 0, pct, cash, now, pending[key]),
+                )
+                resolved_count += 1
+    return {"resolved": resolved_count}
+
+
+def get_resolved_count_per_wallet_max() -> int:
+    """
+    Max number of RESOLVED smart_money_fills rows for any single wallet --
+    the gate metric per-wallet-track-record/skill-vs-luck-weighting/
+    wallet-tracking-dashboard are blocked behind. Returns 0 if the table is
+    empty or missing (never fabricates a nonzero count).
+    """
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT MAX(cnt) AS m FROM ("
+                "  SELECT wallet, COUNT(*) AS cnt FROM smart_money_fills"
+                "  WHERE resolved=1 GROUP BY wallet"
+                ")"
+            ).fetchone()
+            return row["m"] or 0
+    except Exception:
+        return 0

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core import kalshi, scanner, whales, scorer, logger, report
+from core import kalshi, scanner, whales, scorer, logger, report, cross_model
 from core.fees import kalshi_fee
 from sources import polymarket, external_markets, accounts
 from analysis.smart_money_scan import run_smart_money_scan, save_report as save_sm_report
@@ -115,18 +115,33 @@ def _rescore_shortlist_for_clean_sources(
     Anthropic's web_search_tool_result blocks aren't tagged per-market --
     every score in that batch shares one `sources` list, which is a real
     misattribution once rendered as "the sources behind THIS pick." Only
-    the handful of markets about to be published as subscriber calls need
-    this -- cost is ~N_published extra API calls, not O(flagged_markets).
+    the handful of top-ranked markets need this -- cost is ~N_published
+    extra API calls, not O(flagged_markets).
 
     Mutates each shortlisted signal's `sources` key in place (same object
-    identity report.determine_subscriber_shortlist returns, per its own
+    identity report.determine_top_shortlist returns, per its own
     docstring) and returns accounting info for the caller to fold into
     run_meta: {"rescored_count": n, "shortlist_size": n, "tokens": n,
     "cost_usd": float}. A market re-score that comes back empty leaves that
     pick's existing batch-scored `sources` untouched rather than losing the
     pick outright.
+
+    Also mutates each successfully re-scored signal's `citations` key
+    (backlog: citations-provenance-grounding) via a second, non-forced API
+    call that re-fetches the pick's own sources and asks Claude to ground
+    its reasoning in specific cited passages -- see scorer.ground_citations.
+    A citations-grounding failure is non-fatal and independent of the
+    `sources` re-score above: it never removes or downgrades `sources`,
+    it just leaves `citations` unset on that signal.
+
+    Also mutates `cross_model_opinion` (backlog: cross-model-corroboration)
+    via an independent, different-model second opinion (never Claude) --
+    off by default, see core.cross_model.get_opinion's own docstring for
+    the full off-switch/failure-mode contract. Purely auxiliary: never
+    read by any win-rate/Brier calculation, never blended into direction/
+    confidence/edge.
     """
-    shortlist = report.determine_subscriber_shortlist(final_signals, config)
+    shortlist = report.determine_top_shortlist(final_signals, config)
     markets_by_ticker = {m.get("ticker", ""): m for m in flagged_markets}
     rescored_count = 0
     tokens = 0
@@ -144,6 +159,29 @@ def _rescore_shortlist_for_clean_sources(
         if fresh_score:
             sig["sources"] = fresh_score.get("sources") or []
             rescored_count += 1
+            # backlog: citations-provenance-grounding. A second, non-forced
+            # API call re-fetches this pick's own sources and asks Claude to
+            # ground its reasoning in specific cited passages -- additive,
+            # never touches sources/reasoning, and failure here must not
+            # cost the pick its already-good sources from the block above.
+            try:
+                citations, cite_info = scorer.ground_citations(market, fresh_score, config)
+                sig["citations"] = citations
+                cost_usd += cite_info.get("cost_usd", 0) or 0
+                tokens   += (cite_info.get("input_tokens", 0) or 0) + \
+                            (cite_info.get("output_tokens", 0) or 0)
+            except Exception as e:
+                print(f"      Citations grounding FAILED for {sig.get('ticker', '?')} (non-fatal): {e}")
+            # backlog: cross-model-corroboration. get_opinion() already
+            # no-ops to None when config.cross_model.enabled is falsy (the
+            # live default), so this is a zero-cost call to add here even
+            # while the feature stays off pipeline-wide.
+            try:
+                opinion = cross_model.get_opinion(market, fresh_score, config)
+                if opinion:
+                    sig["cross_model_opinion"] = opinion
+            except Exception as e:
+                print(f"      Cross-model corroboration FAILED for {sig.get('ticker', '?')} (non-fatal): {e}")
 
     return {
         "shortlist_size": len(shortlist),
@@ -222,7 +260,9 @@ def main():
         "markets_scanned":   0,
         "signals_generated": 0,
         "whale_flags":       0,
-        "model_used":        config.get("scoring", {}).get("scorer_model", "claude-sonnet-4-6"),
+        "model_used":        (config.get("llm", {}).get("cli_model_override")
+                               if config.get("llm", {}).get("backend", "cli") == "cli"
+                               else None) or config.get("scoring", {}).get("scorer_model", "claude-sonnet-4-6"),
         "tokens_used":       0,
         "cost_usd":          0,
         "runtime_ms":        0,
@@ -244,6 +284,27 @@ def main():
     except Exception as e:
         print(f"      FAILED: {e}")
         print("      Cannot proceed without valid auth. Exiting.")
+        # 2026-08-30: this early return used to be completely silent -- no
+        # alert, unlike the shape-anomaly abort below. A real incident (a
+        # transient Kalshi API failure during Task Scheduler's 7am run,
+        # likely the SDK's own exponential-backoff retry exhausting itself
+        # over ~22 minutes before finally raising) went unnoticed for 19
+        # hours until heartbeat_check.py's own staleness alert caught it --
+        # this run's actual error message was never seen by anyone, since
+        # Task Scheduler's action has no output capture and this path sent
+        # no email of its own. Matches the shape-anomaly alert's pattern.
+        try:
+            report.send_report(
+                f"Kalshi authentication failed at the start of this run: {e}\n\n"
+                "This run aborted before fetching any markets -- no scan happened. "
+                "If this was a transient API/network issue it may already be resolved; "
+                "if it recurs, check config.json's kalshi credentials and "
+                "core.kalshi.authenticate()'s error for the real cause.",
+                [], 0, config,
+                subject_override="Leviathan ALERT — Kalshi auth failed, run aborted",
+            )
+        except Exception as _e:
+            print(f"      [warn] Auth-failure alert email failed: {_e}")
         return
 
     # Resolve any prior calls that have since settled
@@ -316,6 +377,7 @@ def main():
         print(f"      Events fetch failed ({e}), falling back to /markets...")
         try:
             all_markets = kalshi.fetch_markets(config)
+            all_markets = kalshi.attach_event_category_metadata(config, all_markets)
             print(f"      Fetched {len(all_markets)} markets (fallback)")
         except Exception as e2:
             print(f"      FAILED: {e2}")
@@ -779,10 +841,32 @@ def main():
         )
     )
 
+    # backlog: rolled-market-repeat-detection. Attaches each flagged
+    # market's repeat-family history (same real-world story, previously
+    # flagged under a different rolling-window ticker -- see
+    # logger.get_repeat_family()) so build_prompt() can surface it as
+    # context. Deliberately visibility only, no automatic confidence
+    # penalty -- see get_repeat_family()'s own docstring for why.
+    for m in flagged_markets:
+        try:
+            m["repeat_family"] = logger.get_repeat_family(m.get("ticker", ""))
+        except Exception:
+            m["repeat_family"] = []
+
     # Step 6 — Score with Claude + web search
     print("[6/8] Scoring with Claude...")
 
     claude_scores = []
+    # Set only inside the except below -- that branch is only reachable when
+    # flagged_markets was non-empty and scorer.score_markets() raised (e.g.
+    # the CLI backend exhausted its usage limit and every retry in
+    # scorer.py's own backoff loop still failed), never for a legitimately
+    # quiet day with nothing flagged. Drives the sys.exit(1) at the very end
+    # of main() -- everything else in this function still runs and still
+    # reports/logs normally; this only changes the process's final exit
+    # code so Task Scheduler's RestartCount on Leviathan-DailyRun (see
+    # schedule_setup.ps1) has something real to catch and retry.
+    scoring_hard_failed = False
     try:
         if flagged_markets:
             # Pass historical calibration so Claude can self-correct if overconfident
@@ -802,6 +886,7 @@ def main():
     except Exception as e:
         print(f"      FAILED: {e}")
         traceback.print_exc()
+        scoring_hard_failed = True
 
     cost = estimate_cost(token_info, run_meta["model_used"])
     run_meta["tokens_used"] = token_info.get("input_tokens", 0) + token_info.get("output_tokens", 0)
@@ -836,9 +921,17 @@ def main():
             "price_drift":     m.get("price_drift"),
             "spread_wide":     m.get("spread_wide", False),
             "spread_pct":      m.get("spread_pct"),
+            # Already fetched onto `m` for filtering/scoring (core.scanner,
+            # core.scorer both read these) but never persisted before --
+            # without this, "did edge cluster in illiquid markets" can
+            # never be answered from historical data.
+            "volume":          m.get("volume_fp") or m.get("volume"),
+            "open_interest":   m.get("open_interest_fp") or m.get("open_interest"),
             "ob_flag":         m.get("ob_flag", False),
             "ob_imbalance":    m.get("ob_imbalance"),
             "ob_direction":    m.get("ob_direction"),
+            "ob_bid_depth":    m.get("ob_bid_depth"),
+            "ob_ask_depth":    m.get("ob_ask_depth"),
             "time_horizon":    m.get("time_horizon", "MONTHLY"),
             "poly":            m.get("poly"),
             "ext_markets":     m.get("ext_markets", []),
@@ -847,8 +940,9 @@ def main():
             # Flattened for persistence -- the raw poly/ext_consensus/
             # smart_money structures above are used for the prompt/report
             # only and are never stored on the signals row.
-            "poly_price":        (m.get("poly") or {}).get("poly_price"),
-            "poly_price_gap":    (m.get("poly") or {}).get("price_gap"),
+            "poly_price":         (m.get("poly") or {}).get("poly_price"),
+            "poly_price_gap":     (m.get("poly") or {}).get("price_gap"),
+            "poly_net_price_gap": (m.get("poly") or {}).get("net_price_gap"),
             "consensus_gap":     (m.get("ext_consensus") or {}).get("consensus_gap"),
             "consensus_dir":     (m.get("ext_consensus") or {}).get("consensus_dir"),
             "smart_money_count": len(m.get("smart_money") or []),
@@ -900,6 +994,19 @@ def main():
             _fee = kalshi_fee(_mp_ev, _unit)
             _ev_ff = (float(_est_ev) - _mp_ev) * _unit if _dir_ev == "YES" else (_mp_ev - float(_est_ev)) * _unit
             signal["ev_after_fee_per_contract"] = round(_ev_ff - _fee, 4)
+
+        # backlog: net-edge-fee-depth-model. net_edge_after_fee prices the
+        # trade off the top-of-book quote only -- it has no idea whether the
+        # book can actually fill unit_size contracts on the side this
+        # direction needs. Downgrade confidence (same mechanism as the
+        # short-horizon corroboration gate above) rather than trusting the
+        # face-value edge when the book is too thin to support the stake.
+        _liq = scanner.check_liquidity(_dir_ev, signal.get("ob_bid_depth"), signal.get("ob_ask_depth"), _unit)
+        signal["liquidity_checked"] = _liq["liquidity_checked"]
+        signal["liquidity_thin"]    = _liq["liquidity_thin"]
+        if _liq["liquidity_thin"] and signal.get("confidence") in ("HIGH", "MED"):
+            signal["confidence"] = "MED" if signal["confidence"] == "HIGH" else "LOW"
+            signal["confidence_downgraded"] = True
 
         # Extremizing: when ≥2 independent sources agree with Claude's direction,
         # the true probability is more extreme than any single estimate suggests.
@@ -962,17 +1069,22 @@ def main():
                     "price_drift":     m.get("price_drift"),
                     "spread_wide":     m.get("spread_wide", False),
                     "spread_pct":      m.get("spread_pct"),
+                    "volume":          m.get("volume_fp") or m.get("volume"),
+                    "open_interest":   m.get("open_interest_fp") or m.get("open_interest"),
                     "ob_flag":         m.get("ob_flag", False),
                     "ob_imbalance":    m.get("ob_imbalance"),
                     "ob_direction":    m.get("ob_direction"),
+                    "ob_bid_depth":    m.get("ob_bid_depth"),
+                    "ob_ask_depth":    m.get("ob_ask_depth"),
                     "time_horizon":    m.get("time_horizon", "MONTHLY"),
                     "poly":            m.get("poly"),
                     "ext_markets":     m.get("ext_markets", []),
                     "ext_consensus":   m.get("ext_consensus", {}),
                     "smart_money":     m.get("smart_money", []),
-                    "poly_price":        (m.get("poly") or {}).get("poly_price"),
-                    "poly_price_gap":    (m.get("poly") or {}).get("price_gap"),
-                    "consensus_gap":     (m.get("ext_consensus") or {}).get("consensus_gap"),
+                    "poly_price":         (m.get("poly") or {}).get("poly_price"),
+                    "poly_price_gap":     (m.get("poly") or {}).get("price_gap"),
+                    "poly_net_price_gap": (m.get("poly") or {}).get("net_price_gap"),
+                    "consensus_gap":      (m.get("ext_consensus") or {}).get("consensus_gap"),
                     "consensus_dir":     (m.get("ext_consensus") or {}).get("consensus_dir"),
                     "smart_money_count": len(m.get("smart_money") or []),
                     "smart_money_dir":   _smart_money_majority_dir(m.get("smart_money") or []),
@@ -990,14 +1102,29 @@ def main():
                     "run_id":               run_id,
                     "second_pass":          True,
                 }
+                _liq2 = scanner.check_liquidity(
+                    signal.get("direction", "PASS"), signal.get("ob_bid_depth"),
+                    signal.get("ob_ask_depth"), config.get("betting", {}).get("unit_size", 10),
+                )
+                signal["liquidity_checked"] = _liq2["liquidity_checked"]
+                signal["liquidity_thin"]    = _liq2["liquidity_thin"]
                 final_signals.append(signal)
         if final_signals:
             print(f"      Second pass found {len(final_signals)} LOW confidence signal(s)")
 
     run_meta["signals_generated"] = len(final_signals)
 
-    # Tag signals as new or repeat (seen in past 7 days); annotate repeat count
-    recent_tickers = logger.get_recent_tickers(days=7)
+    # Tag signals as new or repeat (seen within the repeat-dedup window);
+    # annotate repeat count. Widened 7 -> config-driven (default 30) days
+    # 2026-08-20 -- a 7-day window let the same still-open market re-flag
+    # with a genuinely different direction just outside the window
+    # (KXMLBDEBUT-KANDERSON-26NOV01: NO then YES, 8 days apart), which
+    # logs as two independent rows that will resolve as one win and one
+    # loss for the same real-world event by construction -- inflating
+    # resolved_count (every locked backlog item's gate) with non-
+    # independent samples. See config.example.json's repeat_dedup_days note.
+    repeat_dedup_days = int(config.get("scoring", {}).get("repeat_dedup_days", 30))
+    recent_tickers = logger.get_recent_tickers(days=repeat_dedup_days)
     for sig in final_signals:
         ticker = sig.get("ticker", "")
         sig["is_repeat"] = ticker in recent_tickers
@@ -1082,7 +1209,7 @@ def main():
     try:
         from core.export_to_csv import export_csvs
         counts = export_csvs()
-        print(f"[export] CSVs updated — {counts['signals']} signals, {counts['runs']} runs")
+        print(f"[export] CSVs updated — {counts['signals']} signals, {counts['scan_log']} scan_log, {counts['runs']} runs")
     except Exception as e:
         print(f"[export] CSV update failed (non-fatal): {e}")
 
@@ -1094,18 +1221,24 @@ def main():
             if week_sigs:
                 _weekly_stats    = logger.get_stats()
                 _weekly_flag_cal = logger.get_stats_by_flag_path()
+                _weekly_heur_cal = logger.get_stats_by_heuristic_label()
+                _weekly_whale    = logger.get_stats_by_whale()
                 _weekly_brier    = logger.get_brier_score()
                 _weekly_lv       = logger.get_stats_by_leviathan_score()
                 weekly_body = report.compile_weekly_digest(week_sigs, _weekly_stats, config,
                                                           flag_path_stats=_weekly_flag_cal,
                                                           brier=_weekly_brier,
-                                                          lv_stats=_weekly_lv)
+                                                          lv_stats=_weekly_lv,
+                                                          heuristic_label_stats=_weekly_heur_cal,
+                                                          whale_stats=_weekly_whale)
                 weekly_html = None
                 try:
                     weekly_html = report.render_weekly_html(week_sigs, _weekly_stats, config,
                                                             flag_path_stats=_weekly_flag_cal,
                                                             brier=_weekly_brier,
-                                                            lv_stats=_weekly_lv)
+                                                            lv_stats=_weekly_lv,
+                                                            heuristic_label_stats=_weekly_heur_cal,
+                                                            whale_stats=_weekly_whale)
                 except Exception as e:
                     print(f"      [warn] Weekly HTML render failed, sending text-only: {e}")
                 report.send_report(weekly_body, [], 0, config,
@@ -1133,6 +1266,8 @@ def main():
         stats            = logger.get_stats()
         probe_stats      = logger.get_stats_probe()
         flag_path_stats  = logger.get_stats_by_flag_path()
+        heuristic_stats  = logger.get_stats_by_heuristic_label()
+        whale_stats      = logger.get_stats_by_whale()
         lv_stats         = logger.get_stats_by_leviathan_score()
         # Shared now_utc: compile_report and render_html must render the same
         # run's date/time (and every other computed value) identically — see
@@ -1147,7 +1282,9 @@ def main():
                                       flag_path_stats=flag_path_stats,
                                       lv_stats=lv_stats,
                                       db_path=logger.DB_PATH,
-                                      now_utc=report_now_utc)
+                                      now_utc=report_now_utc,
+                                      heuristic_label_stats=heuristic_stats,
+                                      whale_stats=whale_stats)
         html_body = None
         try:
             html_body = report.render_html(final_signals, whale_only, stats, run_meta, config,
@@ -1173,14 +1310,35 @@ def main():
                                          probe_stats=logger.get_stats_probe(),
                                          flag_path_stats=logger.get_stats_by_flag_path(),
                                          lv_stats=logger.get_stats_by_leviathan_score(),
-                                         db_path=logger.DB_PATH)
+                                         db_path=logger.DB_PATH,
+                                         heuristic_label_stats=logger.get_stats_by_heuristic_label(),
+                                         whale_stats=logger.get_stats_by_whale())
             print(body)
         except Exception:
             pass
 
     print(f"\n=== Done in {time.time() - start_time:.1f}s | {len(final_signals)} signals | cost {_fmt_usd(cost)} ===\n")
     if sys.platform == "win32":
-        winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+        # Task Scheduler's S4U logon runs this in a non-interactive session
+        # with no audio device -- PlaySound raises RuntimeError there (real
+        # 2026-08-18 incident: the scan/score/log/report work all completed
+        # successfully, but this unguarded call still crashed main() at the
+        # very last line, so Task Scheduler recorded the whole run as failed
+        # (LastTaskResult 0x8007042B) despite nothing upstream being broken.
+        # Purely a local "done" chime -- never worth failing a real run over.
+        try:
+            winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+        except Exception:
+            pass
+
+    # Deliberately last -- unlike the winsound call above (an accidental
+    # crash the 2026-08-18 incident specifically fixed away from), this is
+    # an intentional signal: markets WERE flagged today but the CLI scoring
+    # call never produced a single score, so today's report undercounts by
+    # construction. A nonzero exit here is what lets Task Scheduler's
+    # RestartCount actually retry -- see scoring_hard_failed above.
+    if scoring_hard_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

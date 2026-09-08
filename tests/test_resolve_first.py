@@ -181,6 +181,74 @@ class TestSelectNearDated(unittest.TestCase):
         self.assertEqual(len(selected), 0)
 
 
+class TestSelectNearDatedTopN(unittest.TestCase):
+    """
+    backlog: resolve-first-top-n-per-bucket. select_near_dated()'s new
+    picks_per_bucket parameter (default 1) picks the top N highest-volume
+    markets per (band, flag_path) bucket instead of just the single best.
+    """
+
+    def setUp(self):
+        _clear_signals()
+
+    def test_default_picks_per_bucket_matches_today(self):
+        """No third arg passed -- must behave exactly like pre-2026-08-31
+        code: only the single highest-volume market per bucket, even with
+        several same-bucket candidates available."""
+        now = datetime.now(timezone.utc)
+        markets = [
+            _market("LOW_VOL",  days=5, mid=0.10, volume=1000, flag_path="HEURISTIC"),
+            _market("MID_VOL",  days=5, mid=0.10, volume=5000, flag_path="HEURISTIC"),
+            _market("HIGH_VOL", days=5, mid=0.10, volume=9000, flag_path="HEURISTIC"),
+        ]
+        selected, _ = select_near_dated(markets, max_days=14, now=now)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["ticker"], "HIGH_VOL")
+
+    def test_picks_per_bucket_n_returns_up_to_n_highest_volume(self):
+        """picks_per_bucket=3 with 5 same-bucket candidates returns exactly
+        the 3 highest-volume ones."""
+        now = datetime.now(timezone.utc)
+        markets = [
+            _market("V1", days=5, mid=0.10, volume=1000, flag_path="HEURISTIC"),
+            _market("V2", days=5, mid=0.10, volume=2000, flag_path="HEURISTIC"),
+            _market("V3", days=5, mid=0.10, volume=3000, flag_path="HEURISTIC"),
+            _market("V4", days=5, mid=0.10, volume=4000, flag_path="HEURISTIC"),
+            _market("V5", days=5, mid=0.10, volume=5000, flag_path="HEURISTIC"),
+        ]
+        selected, _ = select_near_dated(markets, max_days=14, now=now, picks_per_bucket=3)
+        tickers = {m["ticker"] for m in selected}
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(tickers, {"V3", "V4", "V5"})
+
+    def test_picks_per_bucket_never_exceeds_real_inventory(self):
+        """A bucket with only 1 real candidate, asked for 3 -- must return
+        exactly 1, never duplicate or fabricate."""
+        now = datetime.now(timezone.utc)
+        markets = [_market("ONLY_ONE", days=5, mid=0.10, volume=5000, flag_path="HEURISTIC")]
+        selected, _ = select_near_dated(markets, max_days=14, now=now, picks_per_bucket=3)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["ticker"], "ONLY_ONE")
+
+    def test_picks_per_bucket_independent_across_buckets(self):
+        """Two distinct (band, flag_path) buckets, each with different real
+        inventory -- picks_per_bucket=2 must apply independently to each,
+        never borrowing headroom from one bucket to another."""
+        now = datetime.now(timezone.utc)
+        markets = [
+            # Bucket A: 5-15% / HEURISTIC -- 3 candidates, expect top 2
+            _market("A1", days=5, mid=0.10, volume=1000, flag_path="HEURISTIC"),
+            _market("A2", days=5, mid=0.10, volume=2000, flag_path="HEURISTIC"),
+            _market("A3", days=5, mid=0.10, volume=3000, flag_path="HEURISTIC"),
+            # Bucket B: 15-40% / DRIFT -- only 1 candidate, expect exactly 1
+            _market("B1", days=5, mid=0.25, volume=4000, flag_path="DRIFT"),
+        ]
+        selected, _ = select_near_dated(markets, max_days=14, now=now, picks_per_bucket=2)
+        tickers = {m["ticker"] for m in selected}
+        self.assertEqual(len(selected), 3)  # 2 from bucket A + 1 from bucket B
+        self.assertEqual(tickers, {"A2", "A3", "B1"})
+
+
 class TestDedupAlreadyLogged(unittest.TestCase):
     """dedup_already_logged removes tickers already in the DB."""
 
@@ -276,6 +344,31 @@ class TestLogSelected(unittest.TestCase):
             m["_mid"] = mid_price(m) or 0.15
         count = log_selected(markets, run_id="test04")
         self.assertEqual(count, 2)
+
+    def test_category_stored(self):
+        """log_selected carries the source market's category through to the
+        logged row -- found 2026-09-01 landing blank on 100% of real
+        RESOLVE_FIRST signals despite the source snapshot always having it."""
+        m = _market("CAT-TICK", days=5, mid=0.30)
+        m["category"] = "Politics"
+        m["_mid"] = 0.30
+        log_selected([m], run_id="test05")
+        with _logger_mod._db() as conn:
+            row = conn.execute(
+                "SELECT category FROM signals WHERE ticker = 'CAT-TICK'"
+            ).fetchone()
+        self.assertEqual(row[0], "Politics")
+
+    def test_category_blank_when_absent(self):
+        """Never fabricates a category the source market doesn't have."""
+        m = _market("CAT-NONE", days=5, mid=0.30)
+        m["_mid"] = 0.30
+        log_selected([m], run_id="test06")
+        with _logger_mod._db() as conn:
+            row = conn.execute(
+                "SELECT category FROM signals WHERE ticker = 'CAT-NONE'"
+            ).fetchone()
+        self.assertEqual(row[0], "")
 
 
 class TestPrintResolutionStatus(unittest.TestCase):

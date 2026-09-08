@@ -87,12 +87,64 @@ def _make_web_search_error_block():
     return block
 
 
+def _make_web_fetch_result_block(url: str, title: str = "A title", tool_use_id: str = "srvtoolu_1"):
+    """A successful web_fetch_tool_result block -- .content is a web_fetch_result."""
+    block = MagicMock()
+    block.type = "web_fetch_tool_result"
+    block.tool_use_id = tool_use_id
+    result = MagicMock()
+    result.type = "web_fetch_result"
+    result.url = url
+    result.retrieved_at = "2026-08-18T00:00:00Z"
+    doc = MagicMock()
+    doc.title = title
+    result.content = doc
+    block.content = result
+    return block
+
+
+def _make_web_fetch_error_block(tool_use_id: str = "srvtoolu_err"):
+    """A failed web_fetch_tool_result block -- .content is an error object, not a web_fetch_result."""
+    block = MagicMock()
+    block.type = "web_fetch_tool_result"
+    block.tool_use_id = tool_use_id
+    error = MagicMock()
+    error.type = "web_fetch_tool_result_error"
+    error.error_code = "url_not_accessible"
+    block.content = error
+    return block
+
+
+def _make_citation(document_index, document_title="A title", cited_text="cited passage",
+                    start_char_index=0, end_char_index=10):
+    cite = MagicMock()
+    cite.type = "char_location"
+    cite.document_index = document_index
+    cite.document_title = document_title
+    cite.cited_text = cited_text
+    cite.start_char_index = start_char_index
+    cite.end_char_index = end_char_index
+    return cite
+
+
+def _make_text_block(text: str, citations=None):
+    block = MagicMock()
+    block.type = "text"
+    block.text = text
+    block.citations = citations
+    return block
+
+
 def _make_config(backend="api"):
     return {
         "llm": {
             "backend": backend,
             "model": "claude-sonnet-4-6",
             "max_web_searches": 4,
+            # Every metered function requires this explicitly -- default it
+            # true here so existing tests exercise the real (mocked) API
+            # path; TestApiSpendAuthorization below tests the guard itself.
+            "api_spend_authorized": True,
         }
     }
 
@@ -818,10 +870,305 @@ class TestBackendCliRegression:
             "open_interest": 50,
         }
 
-        with patch("core.scorer._score_via_cli", return_value=[]) as mock_cli, \
+        with patch("core.scorer._score_via_cli", return_value=([], {})) as mock_cli, \
              patch("core.llm._make_client") as mock_client_fn:
             from core.scorer import score_markets
             score_markets([market], config)
 
         mock_cli.assert_called_once()
         mock_client_fn.assert_not_called()
+
+
+# ── ground_citations_via_api tests (backlog: citations-provenance-grounding) ──
+
+def _valid_grounding_score(**overrides):
+    base = {
+        "reasoning": "Strong evidence from Reuters supports this estimate.",
+        "sources": [{"url": "https://reuters.com/a", "title": "Reuters piece", "age": "1 day ago"}],
+    }
+    base.update(overrides)
+    return base
+
+
+class TestExtractWebFetchCitations:
+
+    def test_no_text_blocks_returns_empty_list(self):
+        from core.llm import _extract_web_fetch_citations
+        block = _make_web_fetch_result_block("https://a.com")
+        resp  = _make_response([block])
+        assert _extract_web_fetch_citations(resp) == []
+
+    def test_single_citation_resolves_url_and_title_by_document_index(self):
+        from core.llm import _extract_web_fetch_citations
+        fetch_block = _make_web_fetch_result_block("https://reuters.com/a", title="Reuters piece")
+        cite  = _make_citation(document_index=0, document_title="Reuters piece", cited_text="the key fact")
+        text  = _make_text_block("Based on the article, ", citations=None)
+        cited = _make_text_block("the key fact was reported.", citations=[cite])
+        resp  = _make_response([fetch_block, text, cited])
+
+        citations = _extract_web_fetch_citations(resp)
+
+        assert citations == [{
+            "url": "https://reuters.com/a",
+            "title": "Reuters piece",
+            "cited_text": "the key fact",
+            "start_char_index": 0,
+            "end_char_index": 10,
+        }]
+
+    def test_error_fetch_block_does_not_consume_a_document_index(self):
+        """A failed fetch carries no document -- the next successful fetch is still index 0."""
+        from core.llm import _extract_web_fetch_citations
+        error_block = _make_web_fetch_error_block()
+        good_block  = _make_web_fetch_result_block("https://ap.org/b", title="AP piece")
+        cite  = _make_citation(document_index=0, document_title="AP piece")
+        cited = _make_text_block("cited text", citations=[cite])
+        resp  = _make_response([error_block, good_block, cited])
+
+        citations = _extract_web_fetch_citations(resp)
+
+        assert len(citations) == 1
+        assert citations[0]["url"] == "https://ap.org/b"
+
+    def test_no_citations_on_text_block_returns_empty_list(self):
+        from core.llm import _extract_web_fetch_citations
+        fetch_block = _make_web_fetch_result_block("https://a.com")
+        text = _make_text_block("No citations here.", citations=None)
+        resp = _make_response([fetch_block, text])
+        assert _extract_web_fetch_citations(resp) == []
+
+    def test_multiple_citations_across_two_documents(self):
+        from core.llm import _extract_web_fetch_citations
+        block1 = _make_web_fetch_result_block("https://a.com", title="A")
+        block2 = _make_web_fetch_result_block("https://b.com", title="B")
+        cite1  = _make_citation(document_index=0, document_title="A", cited_text="from A")
+        cite2  = _make_citation(document_index=1, document_title="B", cited_text="from B")
+        text   = _make_text_block("combined", citations=[cite1, cite2])
+        resp   = _make_response([block1, block2, text])
+
+        citations = _extract_web_fetch_citations(resp)
+
+        assert [c["url"] for c in citations] == ["https://a.com", "https://b.com"]
+        assert [c["cited_text"] for c in citations] == ["from A", "from B"]
+
+
+class TestGroundCitationsViaApi:
+
+    def test_no_sources_skips_api_call(self):
+        from core.llm import ground_citations_via_api
+        score = _valid_grounding_score(sources=[])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            citations, token_info = ground_citations_via_api({"ticker": "KXTEST"}, score, _make_config())
+
+        mock_client_fn.assert_not_called()
+        assert citations == []
+        assert token_info == {}
+
+    def test_happy_path_returns_citations_and_token_info(self):
+        from core.llm import ground_citations_via_api
+        score = _valid_grounding_score()
+        fetch_block = _make_web_fetch_result_block("https://reuters.com/a", title="Reuters piece")
+        cite  = _make_citation(document_index=0, document_title="Reuters piece")
+        text  = _make_text_block("Restated reasoning.", citations=[cite])
+        resp  = _make_response([fetch_block, text])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            citations, token_info = ground_citations_via_api(
+                {"ticker": "KXTEST", "title": "Will X happen?"}, score, _make_config(),
+            )
+
+        assert len(citations) == 1
+        assert citations[0]["url"] == "https://reuters.com/a"
+        assert "cost_usd" in token_info
+
+    def test_max_uses_capped_at_max_sources_per_signal(self):
+        from core.llm import ground_citations_via_api, MAX_SOURCES_PER_SIGNAL
+        many_sources = [{"url": f"https://x.com/{i}", "title": f"Source {i}"} for i in range(10)]
+        score = _valid_grounding_score(sources=many_sources)
+        resp  = _make_response([_make_text_block("ok", citations=None)])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            ground_citations_via_api({"ticker": "KXTEST"}, score, _make_config())
+
+        _, kwargs = mock_client.messages.create.call_args
+        assert kwargs["tools"][0]["max_uses"] == MAX_SOURCES_PER_SIGNAL
+
+    def test_tool_definition_enables_citations(self):
+        from core.llm import ground_citations_via_api
+        score = _valid_grounding_score()
+        resp  = _make_response([_make_text_block("ok", citations=None)])
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+
+            ground_citations_via_api({"ticker": "KXTEST"}, score, _make_config())
+
+        _, kwargs = mock_client.messages.create.call_args
+        tool = kwargs["tools"][0]
+        assert tool["type"] == "web_fetch_20260318"
+        assert tool["citations"] == {"enabled": True}
+
+    def test_blocked_when_cost_ceiling_already_breached(self):
+        from core.llm import _accumulate_daily_cost, LLMCostCeilingExceeded, ground_citations_via_api
+        _accumulate_daily_cost(10.0)
+        config = _make_config()
+        config["llm"]["daily_cost_ceiling_usd"] = 5.0
+        score = _valid_grounding_score()
+
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            with pytest.raises(LLMCostCeilingExceeded):
+                ground_citations_via_api({"ticker": "KXTEST"}, score, config)
+            mock_client.messages.create.assert_not_called()
+
+    def test_api_error_twice_then_success(self):
+        import anthropic as _ant
+        score = _valid_grounding_score()
+        resp  = _make_response([_make_text_block("ok", citations=None)])
+
+        with patch("core.llm._make_client") as mock_client_fn, \
+             patch("core.llm.time.sleep"):
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.side_effect = [
+                _ant.APIStatusError("err", response=MagicMock(status_code=500), body={}),
+                _ant.APIStatusError("err", response=MagicMock(status_code=500), body={}),
+                resp,
+            ]
+
+            from core.llm import ground_citations_via_api
+            citations, _ = ground_citations_via_api({"ticker": "KXTEST"}, score, _make_config())
+
+        assert citations == []
+        assert mock_client.messages.create.call_count == 3
+
+    def test_api_error_three_times_raises_runtime_error(self):
+        import anthropic as _ant
+        score = _valid_grounding_score()
+
+        with patch("core.llm._make_client") as mock_client_fn, \
+             patch("core.llm.time.sleep"):
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.side_effect = _ant.APIStatusError(
+                "err", response=MagicMock(status_code=500), body={}
+            )
+
+            from core.llm import ground_citations_via_api
+            with pytest.raises(RuntimeError, match="ground_citations_via_api"):
+                ground_citations_via_api({"ticker": "KXTEST"}, score, _make_config())
+
+
+# ── api_spend_authorized guard (2026-08-19 policy: Pro subscription only) ────
+#
+# Every metered function must refuse to call the API at all -- not even
+# reach _make_client() -- unless config.llm.api_spend_authorized is exactly
+# True. False, missing, "true" (string), and 1 (truthy int) must all block;
+# only the literal boolean True passes.
+
+class TestApiSpendAuthorization:
+
+    def test_score_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, score_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_score_via_api_blocked_when_key_missing(self):
+        from core.llm import LLMApiSpendNotAuthorized, score_via_api
+        config = {"llm": {"backend": "api", "model": "claude-sonnet-4-6"}}
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_score_via_api_blocked_by_truthy_non_bool(self):
+        """Only the literal True passes -- truthy strings/ints must still block."""
+        from core.llm import LLMApiSpendNotAuthorized, score_via_api
+        for truthy in ("true", "yes", 1):
+            config = _make_config()
+            config["llm"]["api_spend_authorized"] = truthy
+            with patch("core.llm._make_client") as mock_client_fn:
+                with pytest.raises(LLMApiSpendNotAuthorized):
+                    score_via_api("sys", "user", config)
+                mock_client_fn.assert_not_called()
+
+    def test_score_via_api_proceeds_when_authorized(self):
+        from core.llm import score_via_api
+        score = _valid_score()
+        block = _make_tool_use_block("record_scores", {"scores": [score]})
+        resp = _make_response([block])
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = True
+        with patch("core.llm._make_client") as mock_client_fn:
+            mock_client = MagicMock()
+            mock_client_fn.return_value = mock_client
+            mock_client.messages.create.return_value = resp
+            scores, _ = score_via_api("sys", "user", config)
+        assert scores[0]["ticker"] == "KXTEST-01"
+
+    def test_probe_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, probe_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                probe_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_score_blind_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, score_blind_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_blind_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()
+
+    def test_ground_citations_via_api_blocked_by_default(self):
+        from core.llm import LLMApiSpendNotAuthorized, ground_citations_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        score = _valid_grounding_score()
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                ground_citations_via_api({"ticker": "KXTEST"}, score, config)
+            mock_client_fn.assert_not_called()
+
+    def test_ground_citations_via_api_no_sources_skips_guard_too(self):
+        """Empty sources short-circuits before the guard -- still no API call, no exception either."""
+        from core.llm import ground_citations_via_api
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        score = _valid_grounding_score(sources=[])
+        with patch("core.llm._make_client") as mock_client_fn:
+            citations, token_info = ground_citations_via_api({"ticker": "KXTEST"}, score, config)
+        mock_client_fn.assert_not_called()
+        assert citations == []
+        assert token_info == {}
+
+    def test_guard_checked_before_cost_ceiling(self):
+        """Spend-authorization is checked first -- an exhausted cost ceiling doesn't mask it."""
+        from core.llm import LLMApiSpendNotAuthorized, _accumulate_daily_cost, score_via_api
+        _accumulate_daily_cost(100.0)  # blow the ceiling too
+        config = _make_config()
+        config["llm"]["api_spend_authorized"] = False
+        with patch("core.llm._make_client") as mock_client_fn:
+            with pytest.raises(LLMApiSpendNotAuthorized):
+                score_via_api("sys", "user", config)
+            mock_client_fn.assert_not_called()

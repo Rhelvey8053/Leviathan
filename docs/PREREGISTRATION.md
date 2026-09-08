@@ -149,7 +149,7 @@ As of 2026-07-25: **paired n = 8** (well below the n=50 checkpoint), from
 8 resolved paper signals accumulated between 2026-05-23 and 2026-06-19.
 Current scorer Brier = 0.0578, market-baseline Brier = 0.0022 (both
 EXCELLENT by the 0–0.25 scale, but the scorer is currently *worse* than the
-baseline on this small sample — see `docs/PROGRESS.md` 2026-07-23). This
+baseline on this small sample — see `docs/PROGRESS_ARCHIVE.md` 2026-07-23). This
 number is recorded here only to prove this document was written before
 n=50 was reached, not as an early verdict — n=8 is far too small for
 `ci_95_low` to be meaningful, and no checkpoint evaluation has occurred.

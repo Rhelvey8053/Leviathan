@@ -1,9 +1,10 @@
 """
 backtesting/replay_runner.py — replay-runner.
 
-Drives real (metered) Claude API scoring over the settled-market corpus
-built by replay-settled-fetcher, using replay-asof-reconstruction to build
-each market's historical input, then grades each replayed score against the
+Drives Claude scoring (Pro/CLI backend, same as the live daily pipeline --
+see 2026-08-26 note below) over the settled-market corpus built by
+replay-settled-fetcher, using replay-asof-reconstruction to build each
+market's historical input, then grades each replayed score against the
 now-known settled outcome.
 
 LOOK-AHEAD CONTAMINATION — permanent, structural, not something this module
@@ -30,16 +31,30 @@ show genuine multi-week uncertainty before close, others are already
 near-certain days out, and very short-lived markets may have no
 reconstructable state at typical lookback windows at all.
 
-COST-BOUNDED AND RESUMABLE: forces config.llm.backend="api" for real
-metered billing + core.llm's daily cost ceiling (the reason this item
-depends on llm-cost-ceiling) — the CLI/Pro-subscription path has no cost
-concept and would defeat the ceiling entirely. Processes at most
+BOUNDED AND RESUMABLE: originally forced config.llm.backend="api" so
+core.llm's daily cost ceiling could bound a run in real dollars — the
+CLI/Pro-subscription path has no cost concept, so that specific ceiling
+can't apply to it. 2026-08-26: switched to backend="cli" at the user's
+explicit request, after confirming the API requirement was purely a
+side effect of that $-based safety mechanism, not something the
+validation task itself needs — the grading instrument (Brier scoring,
+edge-case handling) tests the SCORES Claude returns, not which billing
+path produced them, and market-baseline-brier/replay-runner's own
+correctness were already validated independent of backend (see this
+item's own backlog notes). The LLMCostCeilingExceeded catch below is now
+inert in practice (CLI never raises it) but left in place rather than
+removed, in case backend is ever reverted to "api" for a specific reason.
+Boundedness now comes from `max_markets` per invocation alone, same as
+this module already relied on primarily -- still processes at most
 `max_markets` newly-scored tickers per call and persists idempotently
-(INSERT OR IGNORE keyed on ticker), so a ceiling-triggered stop is a pause,
-not lost work or a corrupted partial state. Skipped candidates (no
-reconstructable data, or already-telegraphed at every lookback) are not
-persisted, so a re-run may re-attempt them — wasted local computation, but
-never wasted API spend, since skips are decided before any scoring call.
+(INSERT OR IGNORE keyed on ticker). Skipped candidates (no reconstructable
+data, or already-telegraphed at every lookback) are not persisted, so a
+re-run may re-attempt them — wasted local computation, but never wasted
+spend, since skips are decided before any scoring call. Trade-off worth
+knowing: this now draws on the same shared Claude Pro usage the live
+daily pipeline uses, not a separate, unlimited resource -- large
+`max_markets` values compete with the live pipeline's own usage, unlike
+the old $-metered path which was a fully separate budget.
 
 KNOWN SIMPLIFICATION: main.py applies additional post-hoc confidence
 downgrade rules (HIGH -> MED below min_high_confidence_edge, short-horizon
@@ -105,10 +120,23 @@ def _init_table(db_path: str = DB_PATH) -> None:
                 time_horizon        TEXT,
                 resolved_yes        INTEGER,
                 hit                 INTEGER,
-                scored_at           TEXT
+                scored_at           TEXT,
+                market_price        REAL,
+                our_estimate        REAL
             );
             CREATE INDEX IF NOT EXISTS idx_replay_signals_close ON replay_signals(close_time);
         """)
+        # backlog: replay-instrument-validation. market_price/our_estimate were
+        # never persisted even though both exist in `cs` (Claude's own scored
+        # dict) at row-construction time -- edge and direction alone can't
+        # reconstruct a baseline (market-price-as-forecast) Brier score, which
+        # this item's "Brier computes correctly across the full price range"
+        # clause needs. Additive migration for any DB that already has the
+        # table without these columns (mirrors core.logger._add_col's own
+        # idempotent pattern).
+        from core.logger import _add_col
+        for col in ("market_price REAL", "our_estimate REAL"):
+            _add_col(conn, col, table="replay_signals")
 
 
 def _candidate_tickers(db_path: str, limit: int) -> list[dict]:
@@ -179,22 +207,26 @@ def _row_from_scored(enriched: dict, cs: dict, result: str, as_of_dt: datetime) 
         "resolved_yes":        int(resolved_yes),
         "hit":                 None if hit is None else int(hit),
         "scored_at":           datetime.now(timezone.utc).isoformat(),
+        "market_price":        cs.get("market_price"),
+        "our_estimate":        cs.get("our_estimate"),
     }
 
 
 def run_replay(config: dict, max_markets: int = DEFAULT_MAX_MARKETS, db_path: str = DB_PATH) -> dict:
     """
-    Scores up to `max_markets` new settled tickers via the real API backend
-    and persists results to replay_signals. Returns a summary dict:
-    candidates_considered / skipped_no_data / scored / ceiling_stopped.
+    Scores up to `max_markets` new settled tickers via the Claude Pro/CLI
+    backend (2026-08-26, was the metered API backend -- see module
+    docstring) and persists results to replay_signals. Returns a summary
+    dict: candidates_considered / skipped_no_data / scored / ceiling_stopped.
     """
     _init_table(db_path)
-    replay_config = {**config, "llm": {**config.get("llm", {}), "backend": "api"}}
+    replay_config = {**config, "llm": {**config.get("llm", {}), "backend": "cli"}}
 
     summary = {
         "candidates_considered": 0,
         "skipped_no_data":       0,
         "scored":                0,
+        "scoring_errors":        0,
         "ceiling_stopped":       False,
     }
 
@@ -216,6 +248,18 @@ def run_replay(config: dict, max_markets: int = DEFAULT_MAX_MARKETS, db_path: st
         except LLMCostCeilingExceeded:
             summary["ceiling_stopped"] = True
             break
+        except Exception as e:
+            # 2026-08-28: a single market's malformed CLI response (see
+            # core.scorer._score_via_cli's type-check fix, same date) used
+            # to crash this entire batch via an uncaught exception -- every
+            # other candidate this run would have scored, and every dollar
+            # of Pro/CLI usage already spent scoring them, was lost. One bad
+            # response shouldn't cost the whole batch: count it and move on,
+            # same resilience `skipped_no_data` already gives a
+            # can't-reconstruct candidate.
+            print(f"[replay_runner] scoring error on {ticker}, skipping: {e}")
+            summary["scoring_errors"] += 1
+            continue
 
         if not scored:
             summary["skipped_no_data"] += 1
@@ -226,9 +270,11 @@ def run_replay(config: dict, max_markets: int = DEFAULT_MAX_MARKETS, db_path: st
             conn.execute(
                 "INSERT OR IGNORE INTO replay_signals "
                 "(ticker, as_of_date, close_time, reconstruction_tier, direction, "
-                " confidence, edge, reasoning, flag_path, time_horizon, resolved_yes, hit, scored_at) "
+                " confidence, edge, reasoning, flag_path, time_horizon, resolved_yes, hit, scored_at, "
+                " market_price, our_estimate) "
                 "VALUES (:ticker, :as_of_date, :close_time, :reconstruction_tier, :direction, "
-                ":confidence, :edge, :reasoning, :flag_path, :time_horizon, :resolved_yes, :hit, :scored_at)",
+                ":confidence, :edge, :reasoning, :flag_path, :time_horizon, :resolved_yes, :hit, :scored_at, "
+                ":market_price, :our_estimate)",
                 row,
             )
         summary["scored"] += 1

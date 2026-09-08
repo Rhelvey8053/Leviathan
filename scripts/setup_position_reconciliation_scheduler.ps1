@@ -28,12 +28,22 @@ $Settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -RunOnlyIfNetworkAvailable
 
+# S4U (run whether the user is logged on or not), not the Register-
+# ScheduledTask default of Interactive -- explicit here so re-running this
+# script later (e.g. to tweak the schedule) can never silently regress it
+# back to Interactive the way Leviathan-SubscriberReport and
+# Leviathan-WeeklyAudit both did (found in a 2026-08-17 audit).
+$Principal = New-ScheduledTaskPrincipal `
+    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -LogonType S4U `
+    -RunLevel Highest
+
 Register-ScheduledTask `
-    -TaskName $TaskName `
-    -Action   $Action `
-    -Trigger  $Trigger `
-    -Settings $Settings `
-    -RunLevel Highest `
+    -TaskName  $TaskName `
+    -Action    $Action `
+    -Trigger   $Trigger `
+    -Settings  $Settings `
+    -Principal $Principal `
     -Force
 
 Write-Host ""

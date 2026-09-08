@@ -8,9 +8,11 @@ core.logger query functions (which have their own dedicated tests).
 """
 
 import asyncio
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -55,17 +57,33 @@ def _insert(call_id, ticker, direction, market_price,
 
 
 def _call(tool_name, **kwargs):
-    """Call an MCP tool end-to-end; return the structured result list/dict."""
-    _content, structured = asyncio.run(server.mcp.call_tool(tool_name, kwargs))
-    return structured.get("result", structured)
+    """
+    Call an MCP tool end-to-end; return the structured result list/dict.
+
+    FastMCP only returns the (content, structured) tuple for tools whose
+    return type it can infer an output schema for (e.g. list[dict]) --
+    a tool returning a plain, heterogeneously-shaped dict (get_backlog_status)
+    falls back to unstructured content only, a bare list of TextContent.
+    Handle both rather than assuming every tool takes the structured path.
+    """
+    result = asyncio.run(server.mcp.call_tool(tool_name, kwargs))
+    if isinstance(result, tuple) and len(result) == 2:
+        _content, structured = result
+        return structured.get("result", structured)
+    content = result[0] if isinstance(result, list) else result
+    return json.loads(content.text)
 
 
 # ─── server scaffold ──────────────────────────────────────────────────────────
 
-def test_server_has_three_tools():
+def test_server_has_seven_tools():
     tools = asyncio.run(server.mcp.list_tools())
     names = {t.name for t in tools}
-    assert names == {"get_signal_log", "get_resolved_track_record", "lookup_market"}
+    assert names == {
+        "get_signal_log", "get_resolved_track_record", "lookup_market",
+        "get_run_history", "get_category_breakdown",
+        "get_backlog_status", "get_pipeline_health",
+    }
 
 
 def test_server_name_is_leviathan():
@@ -175,3 +193,140 @@ def test_lookup_market_tool_no_filters_returns_empty(tmp_db):
     _insert("t12", "KXTOOLANY", "YES", 0.40)
     rows = _call("lookup_market")
     assert rows == []
+
+
+# ─── get_run_history ──────────────────────────────────────────────────────────
+
+def _insert_run(run_id, timestamp, model_used="claude-sonnet-4-6", signals_generated=0):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO runs (run_id, timestamp, markets_scanned, signals_generated, "
+            "whale_flags, model_used, tokens_used, cost_usd, runtime_ms) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (run_id, timestamp, 100, signals_generated, 5, model_used, 0, 0.0, 60000),
+        )
+
+
+def test_get_run_history_tool_returns_real_rows(tmp_db):
+    _insert_run("r1", "2026-09-01T12:00:00+00:00")
+    rows = _call("get_run_history", limit=10)
+    assert any(r["run_id"] == "r1" for r in rows)
+
+
+def test_get_run_history_tool_newest_first(tmp_db):
+    _insert_run("r_old", "2026-08-30T12:00:00+00:00")
+    _insert_run("r_new", "2026-09-01T12:00:00+00:00")
+    rows = _call("get_run_history", limit=10)
+    assert rows[0]["run_id"] == "r_new"
+
+
+def test_get_run_history_tool_respects_limit(tmp_db):
+    for i in range(5):
+        _insert_run(f"r{i}", f"2026-08-2{i}T12:00:00+00:00")
+    rows = _call("get_run_history", limit=2)
+    assert len(rows) == 2
+
+
+def test_get_run_history_tool_includes_model_used(tmp_db):
+    _insert_run("r_opus", "2026-09-01T12:00:00+00:00", model_used="opus")
+    rows = _call("get_run_history", limit=10)
+    row = next(r for r in rows if r["run_id"] == "r_opus")
+    assert row["model_used"] == "opus"
+
+
+# ─── get_category_breakdown ───────────────────────────────────────────────────
+
+def test_get_category_breakdown_tool_groups_by_category_and_flag_path(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, "
+            "source, category, flag_path) VALUES "
+            "('c1','2026-09-01T00:00:00+00:00','KXCATA','YES',0.3,'paper','Politics','DRIFT')"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id, timestamp, ticker, direction, market_price, "
+            "source, category, flag_path) VALUES "
+            "('c2','2026-09-01T00:00:00+00:00','KXCATB','YES',0.3,'paper','','RESOLVE_FIRST')"
+        )
+    rows = _call("get_category_breakdown")
+    by_key = {(r["category"], r["flag_path"]): r["n"] for r in rows}
+    assert by_key.get(("Politics", "DRIFT")) == 1
+    assert by_key.get(("", "RESOLVE_FIRST")) == 1
+
+
+def test_get_category_breakdown_tool_excludes_pass(tmp_db):
+    _insert("c3", "KXCATPASS", "PASS", 0.30)
+    rows = _call("get_category_breakdown")
+    tickers_covered = sum(r["n"] for r in rows)
+    assert tickers_covered == 0
+
+
+# ─── get_backlog_status ───────────────────────────────────────────────────────
+
+_FAKE_BACKLOG = {
+    "items": [
+        {"id": "ready-1", "title": "Ready thing", "status": "ready", "priority": 2,
+         "area": "infra", "action": "Do the ready thing.", "trigger": {"all": []},
+         "depends_on": []},
+        {"id": "locked-1", "title": "Locked thing", "status": "locked", "priority": 3,
+         "area": "data-quality", "action": "Do the locked thing.",
+         "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 30}]},
+         "depends_on": []},
+        {"id": "blocked-1", "title": "Blocked thing", "status": "blocked", "priority": 4,
+         "area": "infra", "action": "Do the blocked thing.", "trigger": {"all": []},
+         "depends_on": ["locked-1"]},
+        {"id": "done-1", "title": "Done thing", "status": "done", "priority": 1,
+         "area": "infra", "action": "Already done.", "trigger": {"all": []},
+         "depends_on": []},
+    ]
+}
+_FAKE_METRICS = {"resolved_count": 22, "resolved_count_per_category_max": 3, "_data_gaps": []}
+
+
+def test_get_backlog_status_tool_counts_by_status():
+    with patch.object(server, "load_backlog", return_value=_FAKE_BACKLOG), \
+         patch.object(server._checker, "compute_metrics", return_value=_FAKE_METRICS):
+        result = _call("get_backlog_status")
+    assert result["counts"] == {"ready": 1, "locked": 1, "blocked": 1, "done": 1, "total": 4}
+
+
+def test_get_backlog_status_tool_locked_item_shows_gate_progress():
+    with patch.object(server, "load_backlog", return_value=_FAKE_BACKLOG), \
+         patch.object(server._checker, "compute_metrics", return_value=_FAKE_METRICS):
+        result = _call("get_backlog_status")
+    locked = next(i for i in result["locked_items"] if i["id"] == "locked-1")
+    assert "resolved_count=22" in locked["gate_or_deps"]
+    assert "not met" in locked["gate_or_deps"]
+
+
+def test_get_backlog_status_tool_blocked_item_shows_deps():
+    with patch.object(server, "load_backlog", return_value=_FAKE_BACKLOG), \
+         patch.object(server._checker, "compute_metrics", return_value=_FAKE_METRICS):
+        result = _call("get_backlog_status")
+    blocked = next(i for i in result["blocked_items"] if i["id"] == "blocked-1")
+    assert blocked["gate_or_deps"] == "waiting on: locked-1"
+
+
+def test_get_backlog_status_tool_includes_live_metrics():
+    with patch.object(server, "load_backlog", return_value=_FAKE_BACKLOG), \
+         patch.object(server._checker, "compute_metrics", return_value=_FAKE_METRICS):
+        result = _call("get_backlog_status")
+    assert result["live_metrics"]["resolved_count"] == 22
+
+
+# ─── get_pipeline_health ──────────────────────────────────────────────────────
+
+def test_get_pipeline_health_tool_healthy_task_has_no_problem():
+    healthy = [{"task": "Leviathan-DailyRun", "problem": None,
+                "hours_since_run": 2.0, "last_result": 0}]
+    with patch.object(server._ahc, "check_scheduled_tasks", return_value=healthy):
+        result = _call("get_pipeline_health")
+    assert result[0]["problem"] is None
+
+
+def test_get_pipeline_health_tool_flags_stale_task():
+    stale = [{"task": "Leviathan-ResolveFirst", "problem": "no run in 48.0h (max 26.0h)",
+              "hours_since_run": 48.0, "last_result": 0}]
+    with patch.object(server._ahc, "check_scheduled_tasks", return_value=stale):
+        result = _call("get_pipeline_health")
+    assert "no run in" in result[0]["problem"]

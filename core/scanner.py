@@ -191,6 +191,39 @@ def dedup_by_event_scored(markets: list[dict]) -> list[dict]:
     return list(by_event.values()) + no_event
 
 
+# backlog: win-catchall-two-team-game-misfire (2026-09-04). Kalshi's
+# older/verbose game-market title template -- "Will Notre Dame win the
+# Rice vs Notre Dame college football game?" -- puts team names between
+# "win the" and "vs", so it never matches the "sports game" rule's own
+# 'win the game' keyword below and instead falls all the way through to
+# the generic ' win ' catch-all (rate 0.08, tuned on a 12,600-row
+# historical corpus that -- confirmed empirically -- contains zero real
+# head-to-head game markets). Live-verified 2026-09-04: 17 of 500 open
+# KXNCAAFGAME markets hit this exact gap, each showing an identical
+# base_rate=0.08 regardless of matchup (Ohio St. vs Texas, LSU vs Ole
+# Miss, ...) -- a fair two-team game's naive prior is ~50%, not 8%.
+# This is a pre-check, not another _HEURISTIC_RULES row, because the
+# table's rows can only OR plain substrings together and this pattern
+# needs an AND: ' vs ' alone also matches structurally unrelated
+# many-way "announcer mention" props ("What will the announcers say
+# during Wings vs Fire...?", confirmed against 443 real historical
+# titles) that never mention winning at all. Requiring both substrings
+# together is verified safe against history: zero settled_markets titles
+# (of 12,600) contain both ' vs ' and ' win ', so this cannot silently
+# reclassify anything that used to resolve through the real table.
+# Reuses the SAME rate/label as the existing "sports game" rule just
+# below (0.52) rather than inventing a new one -- this is the same
+# real-world category, just a title-phrasing gap, not a genuinely
+# distinct sub-population the way down-ballot-election's many-way split
+# was.
+_TWO_WAY_MATCHUP_RATE  = 0.52
+_TWO_WAY_MATCHUP_LABEL = "sports game"
+
+
+def _is_two_way_matchup_phrasing(title: str) -> bool:
+    return " vs " in title and " win " in title
+
+
 _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['win the world series', 'win world series'], 0.5, 'sports championship'),
     (['win the championship', 'win the nba', 'win the nfl', 'win the cup', 'win the world cup', 'win the fifa', 'world cup winner', 'world series winner', 'win the champions league', 'champions league winner', 'stanley cup'], 0.5, 'sports championship'),
@@ -219,6 +252,22 @@ _HEURISTIC_RULES: list[tuple[list[str], float, str]] = [
     (['continuing resolution', 'omnibus bill', 'appropriations bill', 'government funding bill', 'spending bill', 'federal budget', 'budget resolution', 'budget deal', 'budget agreement', 'pass the budget', 'budget bill', 'budget deadline'], 0.4, 'budget/spending legislation'),
     (['pass the senate', 'pass the house', 'pass congress', 'pass in the senate', 'pass in the house', 'pass into law', 'signed into law', 'sign into law', 'pass the bill', 'passes the bill', 'pass legislation', 'become law', 'enacted into law', 'senate pass', 'house pass', 'senate approve', 'house approve', 'senate vote on', 'house vote on'], 0.35, 'legislative passage'),
     (['national emergency', 'declare a national emergency', 'declare an emergency', 'emergency declaration', 'invoke emergency powers', 'state of emergency', 'invoke the national emergencies act', 'invokes emergency powers', 'emergency powers act'], 0.25, 'national emergency'),
+    # backlog: heuristic-sunsetting. Split 2026-08-18 after the flat 0.45
+    # rate was found to actively underperform the naive population-rate
+    # baseline (0.2239 heuristic Brier vs 0.1686 label-specific naive
+    # Brier at n=14) -- all 14 settled matches were Kalshi's newer
+    # "more than N executive orders in this week" laddered-count markets
+    # (Mamdani/President), not the genuine one-off "sign an EO on topic X"
+    # markets the 0.45 rate was written for (zero of which have settled
+    # yet, so that rate is unverified but not contradicted either -- left
+    # unchanged below). Every laddered-count title observed uses "executive
+    # order(s) between <start> and <end>" phrasing, which never appears in
+    # a one-off topic market -- intercepts here before the generic rule.
+    # Blended actual rate across all 14 (12 "more than/above 0" + 2 harder
+    # "more than 1"/"more than 2" thresholds, both NO) was 21.4%; the two
+    # thresholds aren't split further since n=2 on the harder bucket is too
+    # thin to fit a distinct number without just encoding noise.
+    (['executive orders between', 'executive order between'], 0.20, 'executive order (periodic count)'),
     (['executive order', 'sign an executive order', 'issue an executive order'], 0.45, 'executive order'),
     (['senate confirmation', 'confirmed by the senate', 'cabinet nomination', 'confirmed as secretary', 'confirmed as director', 'confirmed as ambassador'], 0.55, 'senate confirmation'),
     (["member of trump's cabinet", 'trump cabinet member', 'member of the cabinet leave', 'cabinet member leave', 'leave the cabinet', 'depart from the cabinet'], 0.65, 'cabinet departure'),
@@ -459,6 +508,8 @@ def estimate_base_rate(market: dict) -> float | None:
     2,344 heuristic-matched settled markets got a rate but no label).
     """
     title = (market.get("title") or "").lower()
+    if _is_two_way_matchup_phrasing(title):
+        return _TWO_WAY_MATCHUP_RATE
     for keywords, rate, _label in _HEURISTIC_RULES:
         if any(k in title for k in keywords):
             return rate
@@ -471,10 +522,13 @@ def get_heuristic_label(market: dict) -> str | None:
     Used in build_prompt() so Claude sees the category name alongside the base
     rate, enabling it to apply category-specific calibration rules.
     Returns None when estimate_base_rate() would also return None -- both
-    read the same _HEURISTIC_RULES table, so this is now structurally
-    guaranteed rather than merely intended.
+    read the same _HEURISTIC_RULES table (plus the shared
+    _is_two_way_matchup_phrasing pre-check both functions run first), so
+    this is now structurally guaranteed rather than merely intended.
     """
     title = (market.get("title") or "").lower()
+    if _is_two_way_matchup_phrasing(title):
+        return _TWO_WAY_MATCHUP_LABEL
     for keywords, _rate, label in _HEURISTIC_RULES:
         if any(k in title for k in keywords):
             return label
@@ -644,6 +698,30 @@ def compute_orderbook_signal(orderbook: dict) -> dict:
         "ob_flag":      ob_flag,
         "ob_direction": direction,
     }
+
+
+def check_liquidity(direction: str, ob_bid_depth, ob_ask_depth, unit_size: int) -> dict:
+    """
+    Ex-ante check: does the order book actually have unit_size contracts
+    resting on the side this direction needs to fill against, or is
+    net_edge_after_fee pricing a trade off a top-of-book quote the visible
+    book can't actually absorb.
+
+    direction "YES" fills against the YES ask book (ob_ask_depth, summed
+    from no_dollars); direction "NO" fills against the YES bid book
+    (ob_bid_depth, summed from yes_dollars) -- same yes_dollars/no_dollars
+    mapping compute_orderbook_signal() uses above. Complements, not
+    duplicates, slippage-tracking (which measures realized post-trade fill
+    price on real trades, ex-post) -- this is pre-trade, at scan time.
+    """
+    if direction not in ("YES", "NO") or not unit_size or unit_size <= 0:
+        return {"liquidity_checked": False, "liquidity_thin": False}
+
+    depth = ob_ask_depth if direction == "YES" else ob_bid_depth
+    if depth is None:
+        return {"liquidity_checked": False, "liquidity_thin": False}
+
+    return {"liquidity_checked": True, "liquidity_thin": depth < unit_size}
 
 
 def score_market(market: dict, config: dict) -> dict:

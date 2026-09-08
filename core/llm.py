@@ -16,7 +16,16 @@ to attach real source links. If Claude reaches end_turn without calling
 record_scores, a forced second call constrains tool_choice to record_scores only.
 
 _find_claude() is the canonical CLI binary finder — imported by scorer.py and
-analysis/research_probe.py for the legacy backend="cli" path.
+analysis/research_probe.py for the backend="cli" path, which is the
+permanent default (Claude Pro subscription, no per-token bill) per the
+user's 2026-08-19 decision, not a legacy fallback.
+
+Every metered function below (score_via_api, probe_via_api,
+score_blind_via_api, ground_citations_via_api) is gated by
+_check_api_spend_authorized(): real API spend requires
+config.llm.api_spend_authorized == True, which defaults to False and must
+be deliberately, explicitly flipped per session. This applies regardless
+of backend, blind_arm.enabled, or which higher-level caller reached it.
 """
 
 import json
@@ -90,6 +99,36 @@ def _accumulate_daily_cost(cost_usd: float) -> float:
     state["total_cost_usd"] = round(float(state.get("total_cost_usd", 0.0)) + cost_usd, 6)
     _save_daily_cost_state(state)
     return state["total_cost_usd"]
+
+
+class LLMApiSpendNotAuthorized(RuntimeError):
+    """Raised when a metered call is attempted without config.llm.api_spend_authorized == True."""
+
+
+def _check_api_spend_authorized(config: dict) -> None:
+    """
+    Raises LLMApiSpendNotAuthorized unless config["llm"]["api_spend_authorized"]
+    is exactly True -- called before _check_cost_ceiling (and thus before any
+    real request) in every metered function in this module (score_via_api,
+    probe_via_api, score_blind_via_api, ground_citations_via_api), so this is
+    a single choke point every caller passes through regardless of backend,
+    blind_arm.enabled, or which higher-level path reached it (replay-runner
+    forces backend="api" but still routes through score_via_api -> this
+    guard). Per the user's 2026-08-19 decision: the bot may only draw on the
+    Claude Pro subscription (backend="cli"), never metered Anthropic console
+    API spend, without fresh explicit authorization in the moment. Defaults
+    to False in both config.json and config.example.json -- flipping it is a
+    deliberate, visible edit, not an ambient env var that could be left set
+    and forgotten across sessions.
+    """
+    if config.get("llm", {}).get("api_spend_authorized") is not True:
+        raise LLMApiSpendNotAuthorized(
+            "Real metered Anthropic API spend is not authorized "
+            "(config.llm.api_spend_authorized is not true). The bot may only "
+            "use the Claude Pro subscription (backend=\"cli\") unless a human "
+            "explicitly authorizes real API spend for this session by setting "
+            "config.llm.api_spend_authorized to true, then reverting it after."
+        )
 
 
 def _check_cost_ceiling(config: dict) -> None:
@@ -473,6 +512,7 @@ def score_via_api(
     explicitly passed — production callers are unaffected. The eval harness
     (analysis/eval_rescore.py) pins temperature=0 for reproducible re-scoring.
     """
+    _check_api_spend_authorized(config)
     _check_cost_ceiling(config)
 
     llm_cfg      = config.get("llm", {})
@@ -559,6 +599,7 @@ def score_blind_via_api(
     Each returned score also gets a "sources" key -- see score_via_api's
     docstring; same structured/freeform separation from sources_checked.
     """
+    _check_api_spend_authorized(config)
     _check_cost_ceiling(config)
 
     llm_cfg      = config.get("llm", {})
@@ -638,6 +679,7 @@ def probe_via_api(
     rationale, sources ([{"url","title","age"}, ...] from real web_search_tool_result
     blocks -- unambiguous here since probe scores exactly one market per call).
     """
+    _check_api_spend_authorized(config)
     _check_cost_ceiling(config)
 
     llm_cfg      = config.get("llm", {})
@@ -695,3 +737,151 @@ def probe_via_api(
             ) from e
 
     raise RuntimeError(f"probe_via_api: failed after 3 attempts: {last_exc}")
+
+
+# ── Citations grounding (backlog: citations-provenance-grounding) ─────────────
+# web_fetch_20260318's native citations support (Anthropic docs, confirmed
+# live 2026-08) means fetched-page citations don't need a hand-built
+# document-block pipeline: the API fetches each URL server-side and returns
+# web_fetch_tool_result blocks alongside text blocks carrying a `citations`
+# array. The only documented citations incompatibility is with
+# output_config.format (structured outputs) -- this module's forced
+# tool_choice pattern (record_scores etc.) is a different mechanism the
+# citations docs never call incompatible, but citations grounding is still
+# kept as its own separate, non-forced call: forced tool_choice would end
+# the turn on a single tool_use block, leaving no room for the interleaved
+# cited text citations require, and that cited prose has nowhere to live
+# inside record_scores's structured `reasoning` string anyway.
+
+def _extract_web_fetch_citations(response: Any) -> list[dict]:
+    """
+    Collect cited passages from one response's text blocks into
+    [{"url","title","cited_text","start_char_index","end_char_index"}, ...].
+
+    A citation's document_index refers to the fetched documents in the
+    order Claude's web_fetch calls succeeded within THIS response -- the
+    web fetch tool docs' own response example shows document_index:0
+    lining up with the sole preceding web_fetch_tool_result block, and
+    citations.md defines document_index as 0-indexed across the document
+    content blocks present, so the Nth successful web_fetch_tool_result
+    block here IS document index N. A failed fetch (content.type ==
+    "web_fetch_tool_result_error") carries no document for Claude to cite,
+    so it's skipped rather than consuming an index.
+
+    Each web_fetch_result carries the fetched `url` directly (confirmed in
+    the web fetch tool docs' response example) -- no separate correlation
+    against request-supplied document blocks is needed, unlike citations on
+    caller-provided `document` content blocks.
+    """
+    fetched_docs: list[dict] = []
+    for block in response.content:
+        if getattr(block, "type", None) != "web_fetch_tool_result":
+            continue
+        result = getattr(block, "content", None)
+        if getattr(result, "type", None) != "web_fetch_result":
+            continue  # web_fetch_tool_result_error -- skip, don't raise
+        doc = getattr(result, "content", None)
+        fetched_docs.append({
+            "url":   getattr(result, "url", "") or "",
+            "title": getattr(doc, "title", "") or "",
+        })
+
+    citations: list[dict] = []
+    for block in response.content:
+        if getattr(block, "type", None) != "text":
+            continue
+        for cite in (getattr(block, "citations", None) or []):
+            idx = getattr(cite, "document_index", None)
+            source = fetched_docs[idx] if idx is not None and 0 <= idx < len(fetched_docs) else {}
+            citations.append({
+                "url":              source.get("url", ""),
+                "title":            source.get("title") or getattr(cite, "document_title", "") or "",
+                "cited_text":       getattr(cite, "cited_text", "") or "",
+                "start_char_index": getattr(cite, "start_char_index", None),
+                "end_char_index":   getattr(cite, "end_char_index", None),
+            })
+    return citations
+
+
+def ground_citations_via_api(market: dict, score: dict, config: dict) -> tuple[list[dict], dict]:
+    """
+    Re-fetch a scored pick's already-surfaced sources and have Claude
+    ground its reasoning in inline citations to specific fetched passages
+    (backlog: citations-provenance-grounding).
+
+    Only meant to be called from main.py's _rescore_shortlist_for_clean_
+    sources, after rescore_single_market() has already produced `score`
+    for the same market -- that path only runs when config.llm.backend ==
+    "api" (dormant on the live CLI-backed scan), so this inherits the same
+    off-by-default, zero-cost-on-live-runs property as the rest of it.
+    Additive: callers attach the result to a signal's own `citations` key,
+    never touching `sources` or `reasoning`.
+
+    Returns ([], {}) without an API call when `score` has no sources --
+    nothing to fetch or ground citations against.
+
+    Returns (citations, token_info): citations is
+    [{"url","title","cited_text","start_char_index","end_char_index"}, ...]
+    (empty if Claude's response carried none), token_info matches every
+    other function in this module's shape (goes through the same
+    _finalize_token_info / daily cost ceiling as score_via_api etc.).
+    """
+    sources = (score.get("sources") or [])[:MAX_SOURCES_PER_SIGNAL]
+    if not sources:
+        return [], {}
+
+    _check_api_spend_authorized(config)
+    _check_cost_ceiling(config)
+
+    llm_cfg = config.get("llm", {})
+    model   = llm_cfg.get("model", "claude-sonnet-4-6")
+
+    source_lines = "\n".join(
+        f"- {s.get('title') or s.get('url', '')}: {s.get('url', '')}" for s in sources
+    )
+    user_prompt = (
+        f"You previously analyzed the Kalshi market \"{market.get('title') or market.get('ticker', '')}\" "
+        f"(ticker {market.get('ticker', '')}) and reached this conclusion:\n\n"
+        f"{score.get('reasoning', '')}\n\n"
+        f"Fetch each of the following sources and restate the reasoning above, grounding "
+        f"each claim in specific passages from the fetched pages:\n\n"
+        f"{source_lines}\n\n"
+        f"Keep the restated reasoning concise (a few sentences)."
+    )
+    system = (
+        "You are a research assistant verifying and citing the sources behind an "
+        "existing market analysis. Fetch every source URL provided and cite the "
+        "specific passages that support the analysis."
+    )
+    tools: list[dict] = [{
+        "type": "web_fetch_20260318",
+        "name": "web_fetch",
+        "citations": {"enabled": True},
+        "max_uses": len(sources),
+    }]
+    messages = [{"role": "user", "content": user_prompt}]
+    client   = _make_client()
+    last_exc: Exception | None = None
+
+    for attempt in range(3):
+        try:
+            response = client.messages.create(
+                model=model,
+                system=system,
+                messages=messages,
+                tools=tools,
+                max_tokens=2048,
+            )
+            citations = _extract_web_fetch_citations(response)
+            return citations, _finalize_token_info(response, model=model)
+
+        except (anthropic.APIError, anthropic.APITimeoutError) as e:
+            last_exc = e
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))
+                continue
+            raise RuntimeError(
+                f"ground_citations_via_api: API error after 3 attempts: {e}"
+            ) from e
+
+    raise RuntimeError(f"ground_citations_via_api: failed after 3 attempts: {last_exc}")

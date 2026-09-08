@@ -29,7 +29,11 @@ instruction in the override block below -- not just a "disregard this" note.
 Always scored via core.llm's metered API path (score_blind_via_api), never
 the CLI/Pro-subscription backend, regardless of config["llm"]["backend"] --
 the sample-rate-vs-daily-cost-ceiling constraint this item calls for is
-only enforceable through core.llm's _check_cost_ceiling gate.
+only enforceable through core.llm's _check_cost_ceiling gate. Since this
+path always spends real money whenever config.blind_arm.enabled is true,
+it is additionally gated by core.llm's config.llm.api_spend_authorized
+guard (2026-08-19) -- enabling blind_arm alone is not enough to make this
+fire; api_spend_authorized must also be explicitly true.
 """
 
 from datetime import datetime, timezone as _tz

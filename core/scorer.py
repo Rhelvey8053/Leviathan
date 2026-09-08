@@ -1,12 +1,21 @@
 """
 Probability estimation via Claude CLI or Anthropic Messages API.
 
-backend="cli"  (default) — subprocess to local claude CLI, Pro OAuth, no API billing.
+backend="cli"  (default, and the ONLY backend the live/scheduled pipeline may
+                 use) — subprocess to local claude CLI, Pro OAuth, no API billing.
 backend="api"  — Anthropic Messages API via core/llm.py; forced tool_choice structured
-                 output with web_search_20250305; real cost_usd in token_info.
+                 output with web_search_20250305; real cost_usd in token_info. Real
+                 metered spend -- per the user's explicit 2026-08-18 decision, this
+                 backend may only be used with fresh, explicit authorization in the
+                 moment (research probes, one-off eval re-scoring), never by anything
+                 scheduled or run unattended. See [[feedback-leviathan-no-api-billing]]
+                 memory / docs/RUNBOOK.md.
 
-Switch via config["llm"]["backend"]. The CLI path is a legacy fallback scheduled for
-deletion after 2 clean weeks of API runs (goal 5a parallel validation).
+Switch via config["llm"]["backend"]. An earlier goal (5a, "parallel validation")
+once planned to delete the CLI path after 2 clean weeks of API runs and make
+backend="api" the permanent default -- that plan is superseded by the no-API-
+billing policy decision above and will not happen; the CLI path is permanent,
+not a legacy fallback.
 """
 
 import json
@@ -14,13 +23,30 @@ import re
 import subprocess
 import tempfile as _tempfile
 
-from .llm import _find_claude, _validate_scores, score_via_api as _score_via_api
+from .llm import (
+    _find_claude, _validate_scores, score_via_api as _score_via_api,
+    ground_citations_via_api as _ground_citations_via_api,
+)
 from .report import compute_leviathan_score
 
 SYSTEM_PROMPT = (
     "You are a prediction market analyst. For each market provided, estimate the true "
     "probability of the YES outcome occurring. Use web search to find relevant recent "
     "information. Return ONLY valid JSON — no markdown, no explanation outside the JSON.\n\n"
+
+    "RESEARCH DILIGENCE (read before applying any rule below): many rules below correctly "
+    "default to PASS when evidence is absent — but 'absent' must mean you actually looked, "
+    "not that you stopped after one search. Before concluding PASS on any market, perform "
+    "at least 2-3 distinct web searches: (a) the most recent news (last 7-14 days) on this "
+    "exact question — try a second phrasing if the first search returns nothing directly on "
+    "point; (b) the specific named entity's, bill's, or event's current status; (c) if this "
+    "market's data block includes CROSS-MARKET, POLYMARKET, or SMART MONEY data, explicitly "
+    "address it in your reasoning — state whether it agrees or disagrees with your own "
+    "estimate. This does NOT lower the evidence bar the numbered rules set — a thorough "
+    "search that genuinely finds nothing meets the bar for PASS exactly as validly as ever. "
+    "It only means a PASS reached without actually searching does not meet that bar. A rule "
+    "saying 'default to PASS absent evidence' is telling you how to weigh what you find, not "
+    "whether to look first.\n\n"
 
     "CALIBRATION RULES (follow strictly):\n"
     "1. TAIL PROBABILITY: If the market price is below 15%, it is almost always correct. "
@@ -687,6 +713,14 @@ def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
                 f"Polymarket question is priced {gap_pct:.0f}% {direction} than Kalshi. "
                 f"Determine whether Kalshi or Polymarket is better calibrated for this event."
             )
+            net_gap = poly.get("net_price_gap")
+            if net_gap is not None:
+                net_pct = abs(net_gap) * 100
+                note = "still a real gap after modeled fees" if net_pct >= 1.0 else "mostly or entirely fee noise, weight the raw gap accordingly"
+                lines.append(
+                    f"   FEE-ADJUSTED GAP: after modeled Kalshi+Polymarket taker fees, "
+                    f"the gap narrows to {net_pct:.1f}pp — {note}."
+                )
 
         # Pre-computed Leviathan Score — composite signal quality (0-100, A-D band)
         _lv = compute_leviathan_score(m)
@@ -707,6 +741,32 @@ def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
                 f"window. Require 15pp edge AND evidence dated within 72 hours. "
                 f"Default to PASS unless you find a very recent, specific, primary-source catalyst."
             )
+
+        # Repeat-story context -- same real-world question previously flagged
+        # under a different rolling-window expiry ticker (backlog:
+        # rolled-market-repeat-detection, the KXCABLEAVE finding). Visibility
+        # only, no automatic confidence adjustment -- the 2026-08-24
+        # investigation found the pattern's effect on calibration was mixed
+        # (badly overconfident in one family, fine-to-good including two
+        # wins in three others), so the model gets the history to weigh
+        # itself rather than a blanket penalty baked into the prompt.
+        _family = m.get("repeat_family") or []
+        if _family:
+            lines.append(
+                f"   [!] REPEAT STORY: This exact question has been asked "
+                f"{len(_family)} time(s) before under a different expiry ticker:"
+            )
+            for f in _family:
+                f_est    = f.get("our_estimate")
+                f_mkt    = f.get("market_price")
+                f_est_s  = f"{f_est * 100:.0f}%" if f_est is not None else "?"
+                f_mkt_s  = f"{f_mkt * 100:.0f}%" if f_mkt is not None else "?"
+                f_outcome = f.get("outcome") or "unresolved"
+                lines.append(
+                    f"     - {f.get('ticker', '?')} ({(f.get('timestamp') or '')[:10]}): "
+                    f"you estimated {f_est_s}, market priced {f_mkt_s}, outcome: {f_outcome}"
+                )
+            lines.append("     Consider whether this history should inform your confidence here.")
 
         # Cross-market conflict warnings — explicitly flag when key sources disagree.
         _hd  = m.get("heuristic_direction")
@@ -998,9 +1058,22 @@ def build_prompt(markets: list[dict], now: "datetime | None" = None) -> str:
     return "\n".join(lines)
 
 
-def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
+def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None) -> tuple[list[dict], dict]:
     """
     Legacy CLI path -- subprocess to local claude binary with Pro OAuth.
+
+    2026-09-02: switched --output-format from "text" to "json" so this can
+    return real usage telemetry (input/output/cache tokens, total_cost_usd)
+    the same shape core.llm.score_via_api already returns -- previously
+    every CLI-backend run table row hardcoded tokens_used=0/cost_usd=0.0
+    with no way to ever measure it. Live-verified before this change:
+    two consecutive `claude --print --output-format json` calls with the
+    identical ~42KB SYSTEM_PROMPT showed real prompt caching already
+    working across separate subprocess invocations on a 1-hour TTL
+    (cache_creation_input_tokens on call 1, cache_read_input_tokens
+    roughly doubling and total_cost_usd dropping ~50% on call 2) -- this
+    change only makes that existing, already-happening caching visible,
+    it does not change what gets cached or how.
 
     Validates the parsed response the same way score_via_api does
     (core.llm._validate_scores) before returning. This is the DEFAULT
@@ -1020,20 +1093,38 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
     a 10-market batch timed out and produced 0 signals for the run).
     TimeoutExpired is now caught per-attempt and retried the same as a
     nonzero exit code, sharing the same max_retries/backoff.
+
+    backlog: wire-llm-model-cli-flag (2026-08-31). This subprocess call
+    never passed --model, so config.llm.model (a real config key) was
+    completely dead for the live CLI backend -- it only ever fed the
+    disabled metered-API backend. config.llm.cli_model_override is a
+    DELIBERATELY SEPARATE, new key (default unset) rather than reusing
+    llm.model: that key holds "claude-sonnet-4-6", set for the API
+    backend and confirmed STALER than the bare CLI's own current default
+    (live-checked 2026-08-31: bare `claude --print` with no --model flag
+    resolves to claude-sonnet-5) -- wiring the old key through as-is would
+    have been a silent downgrade, not the "higher model" the fix was
+    meant to enable. Passing config=None (or a config with no override
+    set) omits --model entirely, so today's behavior -- whatever the bare
+    CLI's own default currently is -- is completely unchanged.
     """
     import os as _os, time as _time
     claude_cmd = _find_claude()
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
     _sp_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
     _sp_file.write(sys_prompt); _sp_file.close(); _sp_path = _sp_file.name
+    cli_args = [claude_cmd, "--print", "--system-prompt-file", _sp_path,
+                "--allowedTools", "WebSearch", "--output-format", "json"]
+    model_override = (config or {}).get("llm", {}).get("cli_model_override")
+    if model_override:
+        cli_args += ["--model", model_override]
     max_retries = 2; result = None; timed_out = False
     try:
         for attempt in range(max_retries + 1):
             timed_out = False
             try:
                 result = subprocess.run(
-                    [claude_cmd, "--print", "--system-prompt-file", _sp_path,
-                     "--allowedTools", "WebSearch", "--output-format", "text"],
+                    cli_args,
                     input=user_prompt, capture_output=True, text=True, timeout=600,
                     encoding="utf-8", errors="replace", env=clean_env,
                 )
@@ -1057,9 +1148,32 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
         raise RuntimeError(
             f"scorer.py: claude CLI returned exit {result.returncode} after {max_retries + 1} attempt(s): {err[:300]}"
         )
-    all_text = result.stdout.strip()
-    if not all_text:
+    raw_stdout = result.stdout.strip()
+    if not raw_stdout:
         raise RuntimeError("scorer.py: claude CLI returned empty output")
+    try:
+        envelope = json.loads(raw_stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"scorer.py: --output-format json returned non-JSON envelope: {exc}\n"
+            f"Raw output: {raw_stdout[:500]}"
+        ) from exc
+    if not isinstance(envelope, dict) or "result" not in envelope:
+        raise RuntimeError(
+            f"scorer.py: --output-format json envelope missing 'result' key. "
+            f"Raw output: {raw_stdout[:500]}"
+        )
+    all_text = (envelope.get("result") or "").strip()
+    usage = envelope.get("usage") or {}
+    token_info = {
+        "input_tokens":                usage.get("input_tokens", 0),
+        "output_tokens":               usage.get("output_tokens", 0),
+        "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
+        "cache_read_input_tokens":     usage.get("cache_read_input_tokens", 0),
+        "cost_usd":                    round(envelope.get("total_cost_usd", 0.0) or 0.0, 6),
+    }
+    if not all_text:
+        raise RuntimeError("scorer.py: claude CLI returned empty 'result' text")
     fence_match = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", all_text, re.DOTALL)
     if fence_match:
         raw_json = fence_match.group(1).strip()
@@ -1070,6 +1184,22 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
         scores = json.loads(raw_json)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
+    if not isinstance(scores, list):
+        # 2026-08-28: when the CLI's response has no top-level [...] array at
+        # all (e.g. a plain-text non-JSON reply for one market), the find("[")/
+        # rfind("]") fallback above returns -1/-1 and silently falls through to
+        # `raw_json = all_text` -- the ENTIRE raw response. If that text happens
+        # to itself be valid JSON (e.g. a bare quoted string), json.loads()
+        # succeeds with the wrong type instead of raising, and _validate_scores'
+        # `for s in scores: s.keys()` then iterates the string character-by-
+        # character, crashing with a confusing "'str' object has no attribute
+        # 'keys'" instead of a clear, catchable parsing error. Caught live via
+        # backtesting/replay_runner.py's corpus-build batch crashing entirely
+        # on one malformed market response.
+        raise RuntimeError(
+            f"scorer.py: expected a JSON list of score objects, got {type(scores).__name__}. "
+            f"Raw output: {raw_json[:500]}"
+        )
     _validate_scores(scores)
     # db-audit-2026-08: the CLI's own JSON schema asks for "sources_checked"
     # (a self-reported list of headline/URL strings), but every downstream
@@ -1083,7 +1213,7 @@ def _score_via_cli(sys_prompt: str, user_prompt: str) -> list[dict]:
     for s in scores:
         if "sources" not in s and s.get("sources_checked"):
             s["sources"] = [{"url": src, "title": src} for src in s["sources_checked"] if src]
-    return scores
+    return scores, token_info
 
 
 def _aggregate_multi_sample(passes: list[list[dict]]) -> list[dict]:
@@ -1240,7 +1370,7 @@ def score_markets(
     if n_samples <= 1:
         if backend == "api":
             return _score_via_api(sys_prompt, user_prompt, config)
-        return _score_via_cli(sys_prompt, user_prompt), {}
+        return _score_via_cli(sys_prompt, user_prompt, config)
 
     passes: list[list[dict]] = []
     combined_token_info = {
@@ -1251,14 +1381,13 @@ def score_markets(
     for _ in range(n_samples):
         if backend == "api":
             pass_scores, tok = _score_via_api(sys_prompt, user_prompt, config)
-            for key in combined_token_info:
-                combined_token_info[key] += tok.get(key, 0)
         else:
-            pass_scores = _score_via_cli(sys_prompt, user_prompt)
+            pass_scores, tok = _score_via_cli(sys_prompt, user_prompt, config)
+        for key in combined_token_info:
+            combined_token_info[key] += tok.get(key, 0)
         passes.append(pass_scores)
 
-    token_info = combined_token_info if backend == "api" else {}
-    return _aggregate_multi_sample(passes), token_info
+    return _aggregate_multi_sample(passes), combined_token_info
 
 
 def rescore_single_market(
@@ -1298,9 +1427,19 @@ def rescore_single_market(
     if backend == "api":
         scores, token_info = _score_via_api(sys_prompt, user_prompt, config)
     else:
-        scores, token_info = _score_via_cli(sys_prompt, user_prompt), {}
+        scores, token_info = _score_via_cli(sys_prompt, user_prompt, config)
 
     if not scores:
         return None, token_info
     return scores[0], token_info
+
+
+def ground_citations(market: dict, score: dict, config: dict) -> tuple[list[dict], dict]:
+    """
+    Thin passthrough to core.llm.ground_citations_via_api (backlog:
+    citations-provenance-grounding) -- kept here rather than called
+    directly from main.py so callers only ever reach core.llm through
+    scorer.py, matching rescore_single_market's own layering.
+    """
+    return _ground_citations_via_api(market, score, config)
 

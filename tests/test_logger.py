@@ -627,6 +627,51 @@ def test_log_signal_stores_watchlist_flag(tmp_db):
     assert row["watchlist_signal"] == 1
 
 
+# ─── cross_model_opinion (backlog: cross-model-corroboration) ────────────────
+
+def test_log_signal_stores_cross_model_opinion_as_json(tmp_db):
+    """log_signal must JSON-encode a present cross_model_opinion dict."""
+    logger.log_signal({
+        "ticker": "KXCM-01", "title": "Test", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES", "confidence": "MED",
+        "run_id": "r1",
+        "cross_model_opinion": {"model": "big-pickle", "direction": "NO",
+                                 "estimate": 0.3, "reasoning": "disagree"},
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT cross_model_opinion FROM signals WHERE ticker='KXCM-01'").fetchone()
+    import json as _json
+    assert _json.loads(row["cross_model_opinion"]) == {
+        "model": "big-pickle", "direction": "NO", "estimate": 0.3, "reasoning": "disagree",
+    }
+
+
+def test_log_signal_cross_model_opinion_null_when_absent(tmp_db):
+    """Never fabricates a corroboration opinion the caller didn't provide --
+    NULL in the DB, not an empty dict/string."""
+    logger.log_signal({
+        "ticker": "KXCM-02", "title": "Test", "market_price": 0.40,
+        "our_estimate": 0.55, "edge": 0.15, "direction": "YES", "confidence": "MED",
+        "run_id": "r1",
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT cross_model_opinion FROM signals WHERE ticker='KXCM-02'").fetchone()
+    assert row["cross_model_opinion"] is None
+
+
+def test_log_pass_stores_cross_model_opinion_as_json(tmp_db):
+    logger.log_pass({
+        "ticker": "KXCM-03", "title": "Test", "market_price": 0.40,
+        "our_estimate": 0.40, "edge": 0.0, "confidence": "LOW", "run_id": "r1",
+        "cross_model_opinion": {"model": "big-pickle", "direction": "PASS",
+                                 "estimate": 0.4, "reasoning": "no edge either"},
+    })
+    with logger._db() as conn:
+        row = conn.execute("SELECT cross_model_opinion FROM signals WHERE ticker='KXCM-03'").fetchone()
+    import json as _json
+    assert _json.loads(row["cross_model_opinion"])["direction"] == "PASS"
+
+
 def test_log_signal_flag_path_none(tmp_db):
     """log_signal must accept flag_path=None (no flag path set)."""
     logger.log_signal({
@@ -908,6 +953,60 @@ def test_log_signal_close_time_none_when_absent(tmp_db):
         ).fetchone()
     assert row is not None
     assert row["close_time"] is None
+
+
+# ─── volume / open_interest (strategy-review, 2026-08-16) ─────────────────────
+
+def test_log_signal_stores_volume_and_open_interest(tmp_db):
+    """Already fetched onto the market dict for filtering/scoring in
+    main.py -- previously discarded before logging, so "did edge cluster
+    in illiquid markets" could never be answered from historical data."""
+    logger.log_signal({
+        "ticker": "KXVOL1", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rvol1",
+        "volume": 1250.0, "open_interest": 340.0,
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT volume, open_interest FROM signals WHERE ticker='KXVOL1'"
+        ).fetchone()
+    assert row["volume"] == 1250.0
+    assert row["open_interest"] == 340.0
+
+
+def test_log_signal_volume_none_when_absent(tmp_db):
+    logger.log_signal({
+        "ticker": "KXVOL2", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15, "direction": "YES",
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rvol2",
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT volume, open_interest FROM signals WHERE ticker='KXVOL2'"
+        ).fetchone()
+    assert row["volume"] is None
+    assert row["open_interest"] is None
+
+
+def test_log_pass_stores_volume_and_open_interest(tmp_db):
+    """Same field, the PASS-direction INSERT path -- must not silently
+    drop it the way whale_detected once did on this same path."""
+    logger.log_pass({
+        "ticker": "KXVOL3", "title": "T", "market_price": 0.50,
+        "our_estimate": 0.65, "edge": 0.15,
+        "confidence": "MED", "whale_detected": False, "whale_direction": "",
+        "run_id": "rvol3",
+        "volume": 800.0, "open_interest": 200.0,
+    })
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT volume, open_interest FROM signals WHERE ticker='KXVOL3'"
+        ).fetchone()
+    assert row["volume"] == 800.0
+    assert row["open_interest"] == 200.0
 
 
 # ─── get_stats_by_close_horizon ───────────────────────────────────────────────
@@ -1911,6 +2010,49 @@ def test_resolve_outcomes_leaves_market_drift_pp_null_when_late_price_missing(tm
             "SELECT market_drift_pp FROM signals WHERE call_id=?", (cid,)
         ).fetchone()
     assert row["market_drift_pp"] is None
+
+
+def test_resolve_outcomes_stamps_resolved_at(tmp_db):
+    """
+    Strategy-review (2026-08-16): resolved_at is distinct from `timestamp`
+    (signal creation) and `close_time` (the market's SCHEDULED close, which
+    settlement can lag) -- without it, time-to-resolution could only ever
+    be approximated, never measured. Set once here, the same call that
+    fills outcome/result/pnl_if_traded/market_drift_pp.
+    """
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+
+    before = datetime.now(timezone.utc)
+    with patch("core.kalshi.fetch_market", return_value={"result": "yes"}):
+        logger.resolve_outcomes({})
+    after = datetime.now(timezone.utc)
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT resolved_at FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["resolved_at"] is not None
+    stamped = datetime.fromisoformat(row["resolved_at"])
+    assert before <= stamped <= after
+
+
+def test_resolve_outcomes_leaves_resolved_at_null_for_still_unresolved_rows(tmp_db):
+    """A row resolve_outcomes() doesn't touch (Kalshi market still open)
+    must not get a resolved_at stamp -- only rows actually resolved this
+    call should."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "TICKER", "YES", 0.30)
+
+    with patch("core.kalshi.fetch_market", return_value={"result": ""}):
+        logger.resolve_outcomes({})
+
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT resolved_at, result FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["result"] == ""
+    assert row["resolved_at"] is None
 
 
 def test_get_market_drift_stats_empty_db_returns_none_not_zero(tmp_db):
@@ -3337,6 +3479,55 @@ def test_log_signal_stores_cross_market_fields(tmp_db):
     assert row["smart_money_dir"] == "YES"
 
 
+# ─── poly_net_price_gap (backlog: cross-venue-expansion) ──────────────────────
+
+def test_schema_includes_poly_net_price_gap_column(tmp_db):
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "poly_net_price_gap" in cols
+
+
+def test_log_signal_stores_poly_net_price_gap(tmp_db):
+    sig = {
+        "ticker": "KXNPG1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "poly_price": 0.45, "poly_price_gap": 0.15, "poly_net_price_gap": 0.12,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT poly_net_price_gap FROM signals WHERE ticker='KXNPG1'"
+        ).fetchone()
+    assert row["poly_net_price_gap"] == pytest.approx(0.12)
+
+
+def test_log_signal_poly_net_price_gap_null_when_absent(tmp_db):
+    sig = {
+        "ticker": "KXNPG2", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT poly_net_price_gap FROM signals WHERE ticker='KXNPG2'"
+        ).fetchone()
+    assert row["poly_net_price_gap"] is None
+
+
+def test_log_pass_stores_poly_net_price_gap(tmp_db):
+    sig = {
+        "ticker": "KXNPG3", "confidence": "LOW", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.32, "edge": 0.02,
+        "poly_price": 0.31, "poly_price_gap": 0.01, "poly_net_price_gap": 0.0,
+    }
+    logger.log_pass(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT poly_net_price_gap FROM signals WHERE ticker='KXNPG3'"
+        ).fetchone()
+    assert row["poly_net_price_gap"] == pytest.approx(0.0)
+
+
 def test_log_signal_tier23_defaults_when_absent(tmp_db):
     """No Tier-2/3 keys provided -- must default cleanly, not raise."""
     sig = {
@@ -3661,3 +3852,161 @@ def test_get_stats_by_confluence_excludes_pass_direction(tmp_db):
         """)
     stats = logger.get_stats_by_confluence()
     assert stats["2+"]["total"] == 1
+
+
+# ─── _ticker_stem / get_repeat_family (rolled-market-repeat-detection) ────────
+
+def _insert_repeat(call_id, ticker, our_estimate, market_price, outcome="",
+                    timestamp=None, title="Test rolled market"):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             direction, confidence, outcome, source, run_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, timestamp or datetime.now(timezone.utc).isoformat(),
+            ticker, title, market_price, our_estimate,
+            "YES", "MED", outcome, "paper", "run-test",
+        ))
+
+
+@pytest.mark.parametrize("ticker,expected_stem", [
+    ("KXCABLEAVE-26MAY22-26JUN", "KXCABLEAVE-26MAY22"),
+    ("KXCABLEAVE-26MAY22-26AUG", "KXCABLEAVE-26MAY22"),
+    ("KXIMPEACHCABINET-27JAN01", "KXIMPEACHCABINET"),
+    ("KXMLBDEBUT-KANDERSON-26NOV01", "KXMLBDEBUT-KANDERSON"),
+    ("KXSIMPLE", "KXSIMPLE"),  # no trailing date token -- stem == whole ticker
+])
+def test_ticker_stem_strips_trailing_date_tokens(ticker, expected_stem):
+    assert logger._ticker_stem(ticker) == expected_stem
+
+
+def test_get_repeat_family_finds_siblings_excludes_self(tmp_db):
+    _insert_repeat("r1", "KXCABLEAVE-26MAY22-26JUN", 0.15, 0.045, "NO",
+                    timestamp="2026-05-29T00:00:00Z")
+    _insert_repeat("r2", "KXCABLEAVE-26MAY22-26JUL", 0.65, 0.105, "NO",
+                    timestamp="2026-06-19T00:00:00Z")
+    _insert_repeat("r3", "KXCABLEAVE-26MAY22-26AUG", 0.65, 0.05, "",
+                    timestamp="2026-07-27T00:00:00Z")
+
+    family = logger.get_repeat_family("KXCABLEAVE-26MAY22-26AUG")
+    tickers = [f["ticker"] for f in family]
+    assert "KXCABLEAVE-26MAY22-26AUG" not in tickers  # self excluded
+    assert tickers == ["KXCABLEAVE-26MAY22-26JUN", "KXCABLEAVE-26MAY22-26JUL"]
+    assert family[0]["our_estimate"] == 0.15
+    assert family[1]["outcome"] == "NO"
+
+
+def test_get_repeat_family_empty_when_no_siblings(tmp_db):
+    _insert_repeat("r1", "KXLONELY-26AUG01", 0.5, 0.5)
+    assert logger.get_repeat_family("KXLONELY-26AUG01") == []
+
+
+def test_get_repeat_family_empty_when_ticker_has_no_date_suffix(tmp_db):
+    """A ticker with no trailing date token has a stem equal to itself --
+    it can't have "siblings" by definition, even if another literal
+    duplicate row exists."""
+    _insert_repeat("r1", "KXBARE", 0.5, 0.5)
+    _insert_repeat("r2", "KXBARE", 0.6, 0.55)
+    assert logger.get_repeat_family("KXBARE") == []
+
+
+def test_get_repeat_family_does_not_prefix_match_unrelated_tickers(tmp_db):
+    """A ticker that happens to start with the same characters as another
+    stem, but isn't actually date-suffix-shaped, must not be pulled in via
+    a loose LIKE '<stem>%' match."""
+    _insert_repeat("r1", "KXCABLEAVE-26MAY22-26JUN", 0.15, 0.045)
+    _insert_repeat("r2", "KXCABLEAVE-26MAY22-26JUNEXTRA-NOTASIBLING", 0.9, 0.9)
+    family = logger.get_repeat_family("KXCABLEAVE-26MAY22-26AUG")
+    tickers = [f["ticker"] for f in family]
+    assert "KXCABLEAVE-26MAY22-26JUNEXTRA-NOTASIBLING" not in tickers
+    assert tickers == ["KXCABLEAVE-26MAY22-26JUN"]
+
+
+def test_get_repeat_family_only_latest_row_per_sibling_ticker(tmp_db):
+    """Multiple scans of the same sibling ticker over time -- only its
+    most recent row should appear, not every historical scan."""
+    _insert_repeat("r1", "KXCABLEAVE-26MAY22-26JUL", 0.20, 0.10,
+                    timestamp="2026-06-10T00:00:00Z")
+    _insert_repeat("r2", "KXCABLEAVE-26MAY22-26JUL", 0.65, 0.105,
+                    timestamp="2026-06-19T00:00:00Z")
+    family = logger.get_repeat_family("KXCABLEAVE-26MAY22-26AUG")
+    assert len(family) == 1
+    assert family[0]["our_estimate"] == 0.65
+
+
+# ─── get_titles_for_tickers (Smart Money dashboard readability fix) ───────────
+
+def test_get_titles_for_tickers_returns_latest_title_per_ticker(tmp_db):
+    _insert_repeat("t1", "KXFOO-26AUG01", 0.5, 0.5, title="Old title",
+                    timestamp="2026-08-01T00:00:00Z")
+    _insert_repeat("t2", "KXFOO-26AUG01", 0.5, 0.5, title="Latest title",
+                    timestamp="2026-08-10T00:00:00Z")
+    titles = logger.get_titles_for_tickers(["KXFOO-26AUG01"])
+    assert titles == {"KXFOO-26AUG01": "Latest title"}
+
+
+def test_get_titles_for_tickers_omits_unknown_tickers(tmp_db):
+    """A ticker with no signals row at all must be absent from the dict,
+    not mapped to '' or None -- callers fall back to the raw ticker
+    themselves on a missing key."""
+    titles = logger.get_titles_for_tickers(["KXNOTREAL-99ZZZ99"])
+    assert "KXNOTREAL-99ZZZ99" not in titles
+
+
+def test_get_titles_for_tickers_empty_list_returns_empty_dict(tmp_db):
+    assert logger.get_titles_for_tickers([]) == {}
+
+
+def test_get_titles_for_tickers_exact_match_not_substring(tmp_db):
+    """Two tickers where one is a prefix of the other must not cross-
+    contaminate -- an exact IN() match, not a LIKE."""
+    _insert_repeat("t1", "KXFOO", 0.5, 0.5, title="Short ticker title")
+    _insert_repeat("t2", "KXFOO-26AUG01", 0.5, 0.5, title="Long ticker title")
+    titles = logger.get_titles_for_tickers(["KXFOO"])
+    assert titles == {"KXFOO": "Short ticker title"}
+
+
+# ─── get_market_meta_for_tickers (Smart Money dashboard clickable links) ──────
+
+def _insert_signal_with_meta(call_id, ticker, series_ticker, event_ticker,
+                              title="Test market", timestamp=None):
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, series_ticker, event_ticker,
+             market_price, our_estimate, direction, confidence, outcome, source, run_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            call_id, timestamp or datetime.now(timezone.utc).isoformat(),
+            ticker, title, series_ticker, event_ticker,
+            0.5, 0.5, "YES", "MED", "", "paper", "run-test",
+        ))
+
+
+def test_get_market_meta_for_tickers_returns_title_and_series_event(tmp_db):
+    _insert_signal_with_meta("m1", "KXFOO-26AUG01", "KXFOO", "KXFOO-26AUG01",
+                              title="Will foo happen?")
+    meta = logger.get_market_meta_for_tickers(["KXFOO-26AUG01"])
+    assert meta == {"KXFOO-26AUG01": {"title": "Will foo happen?",
+                                       "series_ticker": "KXFOO", "event_ticker": "KXFOO-26AUG01"}}
+
+
+def test_get_market_meta_for_tickers_omits_unknown_tickers(tmp_db):
+    meta = logger.get_market_meta_for_tickers(["KXNOTREAL-99ZZZ99"])
+    assert "KXNOTREAL-99ZZZ99" not in meta
+
+
+def test_get_market_meta_for_tickers_empty_list_returns_empty_dict(tmp_db):
+    assert logger.get_market_meta_for_tickers([]) == {}
+
+
+def test_get_market_meta_for_tickers_uses_latest_row_per_ticker(tmp_db):
+    _insert_signal_with_meta("m1", "KXFOO-26AUG01", "KXFOO_OLD", "KXFOO_OLD-26AUG01",
+                              title="Old title", timestamp="2026-08-01T00:00:00Z")
+    _insert_signal_with_meta("m2", "KXFOO-26AUG01", "KXFOO", "KXFOO-26AUG01",
+                              title="Latest title", timestamp="2026-08-10T00:00:00Z")
+    meta = logger.get_market_meta_for_tickers(["KXFOO-26AUG01"])
+    assert meta["KXFOO-26AUG01"]["title"] == "Latest title"
+    assert meta["KXFOO-26AUG01"]["series_ticker"] == "KXFOO"

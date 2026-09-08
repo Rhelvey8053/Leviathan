@@ -41,12 +41,25 @@ $Settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew
 
+# S4U (run whether the user is logged on or not) rather than the Register-
+# ScheduledTask default of Interactive -- explicit here so re-running this
+# script later (e.g. to tweak settings) can never silently regress it back
+# to Interactive the way Leviathan-SubscriberReport and
+# Leviathan-WeeklyAudit both did (found in a 2026-08-17 audit). Combined
+# with the AtLogOn trigger above, this still only starts replicate when
+# this user logs on -- S4U vs Interactive governs the credential/token
+# type the process runs under, not when the trigger fires.
+$Principal = New-ScheduledTaskPrincipal `
+    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -LogonType S4U `
+    -RunLevel Highest
+
 Register-ScheduledTask `
-    -TaskName $TaskName `
-    -Action   $Action `
-    -Trigger  $Trigger `
-    -Settings $Settings `
-    -RunLevel Highest `
+    -TaskName  $TaskName `
+    -Action    $Action `
+    -Trigger   $Trigger `
+    -Settings  $Settings `
+    -Principal $Principal `
     -Force
 
 Write-Host ""

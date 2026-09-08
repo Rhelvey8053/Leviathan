@@ -162,7 +162,7 @@ def test_html_row_with_series_and_event_ticker_gets_real_href():
     """
     With BOTH series_ticker and event_ticker present, the REAL (unmocked)
     kalshi_market_url now constructs a working link — no mock needed,
-    since the pattern is confirmed (see core/kalshi.py, docs/PROGRESS.md).
+    since the pattern is confirmed (see core/kalshi.py, docs/PROGRESS_ARCHIVE.md 2026-07-23).
     """
     s = _sig(ticker="KXLINKED-01", series_ticker="KXLINKED", event_ticker="KXLINKED-01-EVT")
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
@@ -183,13 +183,18 @@ def test_html_row_with_mocked_resolver_gets_href():
     assert 'href="https://kalshi.com/markets/KXLINKED2/KXLINKED-02-EVT"' in html_body
 
 
-def test_html_row_with_empty_event_ticker_has_no_href():
+def test_html_row_with_empty_event_ticker_has_no_href(tmp_path):
     """A row missing event_ticker (series_ticker present or not) shows the
     bare ticker with NO href anywhere for it."""
     s = _sig(ticker="KXBARE-01", series_ticker="KXBARE", event_ticker="")
+    # db_path pointed at a not-yet-existing file: render_html's betting-queue
+    # section (_betting_queue_data) otherwise falls back to core.logger's
+    # real DB_PATH, which can legitimately contain unrelated real signals
+    # with valid hrefs (e.g. after a live pipeline run) and make this
+    # single-signal assertion depend on the local machine's live data.
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
                                    new_signals=[s], repeat_signals=[],
-                                   now_utc=_FIXED_NOW)
+                                   db_path=str(tmp_path / "empty.db"), now_utc=_FIXED_NOW)
     assert "KXBARE-01" in html_body
     assert 'href=""' not in html_body
     # event_ticker missing -> kalshi_market_url (real, unmocked) returns
@@ -197,13 +202,13 @@ def test_html_row_with_empty_event_ticker_has_no_href():
     assert "<a href" not in html_body
 
 
-def test_html_row_with_empty_series_ticker_has_no_href():
+def test_html_row_with_empty_series_ticker_has_no_href(tmp_path):
     """A row missing series_ticker (the field a pre-upgrade row would lack)
     shows the bare ticker with NO href, even with a valid event_ticker."""
     s = _sig(ticker="KXNOSERIES-01", series_ticker="", event_ticker="KXNOSERIES-01-EVT")
     html_body = report.render_html([s], [], _EMPTY_STATS, _run_meta(), _CFG,
                                    new_signals=[s], repeat_signals=[],
-                                   now_utc=_FIXED_NOW)
+                                   db_path=str(tmp_path / "empty.db"), now_utc=_FIXED_NOW)
     assert "KXNOSERIES-01" in html_body
     assert 'href=""' not in html_body
     assert "<a href" not in html_body
@@ -247,8 +252,7 @@ def test_send_report_with_html_body_is_multipart_alternative():
 
     mock_smtp.sendmail.side_effect = _fake_sendmail
 
-    with patch.object(report, "smtplib") as mock_smtplib, \
-         patch("core.subscribers.get_active_subscribers", return_value=[]):
+    with patch.object(report, "smtplib") as mock_smtplib:
         mock_smtplib.SMTP.return_value = mock_smtp
         report.send_report("plain text body", [], 0, _cfg_with_report(),
                            html_body="<html><body>hi</body></html>")
@@ -272,8 +276,7 @@ def test_send_report_without_html_body_stays_single_part():
     captured = {}
     mock_smtp.sendmail.side_effect = lambda f, t, m: captured.update(msg_string=m)
 
-    with patch.object(report, "smtplib") as mock_smtplib, \
-         patch("core.subscribers.get_active_subscribers", return_value=[]):
+    with patch.object(report, "smtplib") as mock_smtplib:
         mock_smtplib.SMTP.return_value = mock_smtp
         report.send_report("plain only", [], 0, _cfg_with_report())
 
@@ -289,14 +292,36 @@ def test_send_report_preserves_subject_and_recipients():
     sent_to = []
     mock_smtp.sendmail.side_effect = lambda f, t, m: sent_to.append(t)
 
-    with patch.object(report, "smtplib") as mock_smtplib, \
-         patch("core.subscribers.get_active_subscribers", return_value=[]):
+    with patch.object(report, "smtplib") as mock_smtplib:
         mock_smtplib.SMTP.return_value = mock_smtp
         report.send_report("body", [], 0, _cfg_with_report(),
                            subject_override="Custom Subject",
                            html_body="<html></html>")
 
     assert sent_to == ["owner@example.com"]
+
+
+def test_send_report_sets_date_and_message_id_headers():
+    """
+    2026-08-25: neither header was ever set -- real spam-filter risk for
+    automated, self-addressed mail sent via SMTP+app-password with no
+    prior thread. Regression guard against that gap reappearing.
+    """
+    mock_smtp = MagicMock()
+    mock_smtp.__enter__ = MagicMock(return_value=mock_smtp)
+    mock_smtp.__exit__ = MagicMock(return_value=False)
+
+    captured = {}
+    mock_smtp.sendmail.side_effect = lambda f, t, m: captured.update(msg_string=m)
+
+    with patch.object(report, "smtplib") as mock_smtplib:
+        mock_smtplib.SMTP.return_value = mock_smtp
+        report.send_report("plain only", [], 0, _cfg_with_report())
+
+    raw = captured["msg_string"]
+    assert "\nDate: " in raw
+    assert "\nMessage-ID: <" in raw
+    assert "@example.com>" in raw  # domain derived from email_from
 
 
 # ─── Track Record guard ───────────────────────────────────────────────────────

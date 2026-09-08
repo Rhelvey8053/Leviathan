@@ -1,7 +1,9 @@
 # The Story of Leviathan
 
 This is the human version of the project. For the technical changelog —
-every fix, every root cause, every commit — see [`PROGRESS.md`](PROGRESS.md).
+every fix, every root cause, every commit — see [`PROGRESS.md`](PROGRESS.md)
+(entries from 2026-08-01 on; anything older is in
+[`PROGRESS_ARCHIVE.md`](PROGRESS_ARCHIVE.md)).
 This document is for anyone who wants to understand *what happened* without
 needing to read code.
 

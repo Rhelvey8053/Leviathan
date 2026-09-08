@@ -93,3 +93,19 @@ def test_both_scores_shown_side_by_side(tmp_db, capsys):
     assert "Brier Score:" in out
     assert "Market Baseline Brier:" in out
     assert "Scorer vs Baseline:" in out
+
+
+def test_source_is_cp1252_safe():
+    """
+    Regression guard: this script previously used em-dash/arrow/<=
+    characters (U+2014, U+2192, U+2264) that crash with
+    UnicodeEncodeError on a real Windows console (cp1252 codec) --
+    silently truncating output partway through every real run on
+    Windows, though never caught by the tests above since capsys
+    captures via a UTF-8-safe stream, not a real console. Encoding the
+    actual source against cp1252 (what a real `python analysis/
+    calibration.py` run hits) is the check that would have caught it.
+    """
+    source = Path(__file__).parent.parent / "analysis" / "calibration.py"
+    text = source.read_text(encoding="utf-8")
+    text.encode("cp1252")  # raises UnicodeEncodeError if any char can't map

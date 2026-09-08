@@ -3,7 +3,7 @@ tests/test_rescore_shortlist.py — Offline tests for
 main._rescore_shortlist_for_clean_sources() (GOAL_phase2-6_decisions.md
 Decision 1).
 
-Pure function apart from its two collaborators (report.determine_subscriber_
+Pure function apart from its two collaborators (report.determine_top_
 shortlist, scorer.rescore_single_market), both mocked here -- no network,
 no DB, no LLM. main.py's own orchestration around this call (the try/except
 + print + run_meta accounting) has no test harness, consistent with this
@@ -32,7 +32,7 @@ def _market(ticker):
 
 
 def test_no_shortlist_returns_zeroed_result():
-    with patch("core.report.determine_subscriber_shortlist", return_value=[]):
+    with patch("core.report.determine_top_shortlist", return_value=[]):
         result = main._rescore_shortlist_for_clean_sources([], [], {})
     assert result == {"shortlist_size": 0, "rescored_count": 0, "tokens": 0, "cost_usd": 0.0}
 
@@ -40,7 +40,7 @@ def test_no_shortlist_returns_zeroed_result():
 def test_rescored_signal_gets_fresh_sources():
     sig = _sig("KXA", sources=[{"url": "https://batch-shared.com", "title": "shared"}])
     fresh_score = {"ticker": "KXA", "sources": [{"url": "https://clean.com", "title": "clean"}]}
-    with patch("core.report.determine_subscriber_shortlist", return_value=[sig]), \
+    with patch("core.report.determine_top_shortlist", return_value=[sig]), \
          patch("core.scorer.rescore_single_market", return_value=(fresh_score, {"cost_usd": 0.02, "input_tokens": 500, "output_tokens": 100})):
         result = main._rescore_shortlist_for_clean_sources([sig], [_market("KXA")], {})
 
@@ -52,7 +52,7 @@ def test_market_not_found_skipped_without_crashing():
     """A shortlisted ticker missing from flagged_markets (shouldn't happen,
     but must not raise) is skipped -- its batch-scored sources stay as-is."""
     sig = _sig("KXMISSING", sources=[{"url": "https://original.com"}])
-    with patch("core.report.determine_subscriber_shortlist", return_value=[sig]):
+    with patch("core.report.determine_top_shortlist", return_value=[sig]):
         result = main._rescore_shortlist_for_clean_sources([sig], [], {})  # no matching market
 
     assert sig["sources"] == [{"url": "https://original.com"}]  # untouched
@@ -65,7 +65,7 @@ def test_empty_rescore_result_keeps_batch_sources():
     declined to score this ticker alone -- must not wipe out the pick's
     existing batch-scored sources."""
     sig = _sig("KXA", sources=[{"url": "https://batch-shared.com"}])
-    with patch("core.report.determine_subscriber_shortlist", return_value=[sig]), \
+    with patch("core.report.determine_top_shortlist", return_value=[sig]), \
          patch("core.scorer.rescore_single_market", return_value=(None, {"cost_usd": 0.01})):
         result = main._rescore_shortlist_for_clean_sources([sig], [_market("KXA")], {})
 
@@ -79,7 +79,7 @@ def test_cost_and_tokens_accumulate_across_multiple_picks():
     sig_b = _sig("KXB")
     fresh_a = {"ticker": "KXA", "sources": [{"url": "https://a.com"}]}
     fresh_b = {"ticker": "KXB", "sources": [{"url": "https://b.com"}]}
-    with patch("core.report.determine_subscriber_shortlist", return_value=[sig_a, sig_b]), \
+    with patch("core.report.determine_top_shortlist", return_value=[sig_a, sig_b]), \
          patch("core.scorer.rescore_single_market", side_effect=[
              (fresh_a, {"cost_usd": 0.01, "input_tokens": 100, "output_tokens": 50}),
              (fresh_b, {"cost_usd": 0.02, "input_tokens": 200, "output_tokens": 60}),
@@ -96,7 +96,7 @@ def test_cost_and_tokens_accumulate_across_multiple_picks():
 def test_calibration_and_flag_cal_passed_through():
     sig = _sig("KXA")
     cal, flag_cal = {"HIGH": {}}, {"DRIFT": {}}
-    with patch("core.report.determine_subscriber_shortlist", return_value=[sig]), \
+    with patch("core.report.determine_top_shortlist", return_value=[sig]), \
          patch("core.scorer.rescore_single_market", return_value=(None, {})) as mock_rescore:
         main._rescore_shortlist_for_clean_sources(
             [sig], [_market("KXA")], {}, calibration=cal, flag_cal=flag_cal,
