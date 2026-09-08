@@ -3,7 +3,7 @@ Last updated: 2026-09-07 | Metrics: resolved=37, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (9)
+## Ready (8)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -13,7 +13,6 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
-| 5 | report-ticker-none-vs-missing-audit | Found and fixed 2026-09-06 while removing the daily report's whale/smart-money sections (daily-report-drop-whale-smart-money): _week_whale_rows(), compile_weekly_digest()'s 'MARKETS FLAGGED THIS… | infra |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
 
 ## Locked (5)
@@ -32,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (101)
+## Done (102)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -133,6 +132,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | heuristic-sunsetting | Ran analysis/heuristic_backtest.py fresh and screened every label with n>=10 for underperformance -- but the correct comparison isn't raw Brier vs. | calibration |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
 | 5 | metaculus-community-prediction-inaccessible | Found 2026-08-25 while setting up the (previously dormant, missing-token) Metaculus integration at the owner's request. | data-quality |
+| 5 | report-ticker-none-vs-missing-audit | Found and fixed 2026-09-06 while removing the daily report's whale/smart-money sections (daily-report-drop-whale-smart-money): _week_whale_rows(), compile_weekly_digest()'s 'MARKETS FLAGGED THIS… | infra |
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
 | 5 | subscriber-report-removed-2026-08 | User question: if the strategy is proven profitable, why send picks to subscribers instead of trading it directly? Investigated before acting -- found neither justification for the feature actually… | infra |
 | 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |

@@ -427,7 +427,11 @@ def _signal_block(s: dict, index: int = 0, unit_size: float = 10) -> list[str]:
     direction = s.get("direction", "")
     horizon   = HORIZON_LABEL.get(s.get("time_horizon", "MONTHLY"), s.get("time_horizon", ""))
     ticker    = s.get("ticker", "")
-    title     = s.get("title", "")
+    # or "" (not .get(key, "")) -- title can be a present key with an
+    # explicit None value, not just missing; _wrap() below crashes on
+    # None the same way _trunc(None, ...) does elsewhere in this file
+    # (see the 2026-08-05 whale_direction / 2026-09-06 ticker crashes).
+    title     = s.get("title") or ""
     close_fmt, urgency = _close_and_urgency(s)
 
     mkt_p    = _pct(s.get("market_price"))

@@ -86,6 +86,20 @@ def test_heuristic_signal_absent_when_base_rate_none():
     assert "Heuristic Base Rate" not in full
 
 
+def test_signal_block_none_title_does_not_crash():
+    """
+    report-ticker-none-vs-missing-audit (2026-09-07): title can be a
+    present key with an explicit None value, not just missing --
+    s.get("title", "") only substitutes the default for a MISSING key.
+    _wrap() (used to word-wrap the title line) crashes on None the same
+    way _trunc(None, ...) crashes elsewhere in this file for the
+    identical reason (2026-08-05 whale_direction, 2026-09-06 ticker).
+    """
+    s = _signal(title=None)
+    lines = report._signal_block(s, index=1)
+    assert lines  # must not raise
+
+
 # ─── Second-pass label ────────────────────────────────────────────────────────
 
 def test_second_pass_label_shown():
