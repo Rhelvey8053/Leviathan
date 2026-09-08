@@ -1761,6 +1761,45 @@
       "depends_on": [],
       "action": "Found alongside dynamic-sizing-activated-and-pnl-scaling-bug-fix (2026-09-08): core.logger.get_stats() had a real bug where its headline total_hypothetical_pnl was displayed as dollars everywhere but was actually an unscaled per-$1-notional ratio sum -- fixed for that one function. The same bug pattern (SUM(pnl_if_traded) treated as dollars with no stake/unit_size multiplication) exists identically in roughly a dozen sibling functions: get_stats_by_sig, get_stats_by_flag_path, get_stats_by_confidence, get_stats_by_heuristic_label, get_stats_by_time_horizon, get_stats_by_heuristic_alignment, get_stats_by_net_edge, get_stats_by_close_horizon, get_stats_by_whale, get_stats_by_watchlist, get_stats_by_confluence, get_stats_by_leviathan_score. These feed report.py's per-group win-rate/P&L breakdown tables (daily and weekly) and analysis/calibration.py's own per-group tables via its _pnl() helper, which multiplies by unit_size at display time -- so those tables are at least scaled by flat unit_size correctly (unlike the headline was), but none of them reflect confidence-weighted stake_size_hypothetical the way the fixed headline now does. Left out of the same pass deliberately: fixing ~12 functions plus their report.py/calibration.py call sites plus tests in one sweep was too large to do safely alongside the user's actual request.",
       "notes": "Not started. When picked up: convert each get_stats_by_*() function's total_pnl to SUM(pnl_if_traded * COALESCE(stake_size_hypothetical, 10.0)) (same COALESCE convention as get_stats()'s own fix), then remove the now-redundant unit_size multiplication at each report.py and analysis/calibration.py call site (calibration.py's _pnl() helper is used by every per-group table -- once the underlying total_pnl values are pre-scaled, call sites should print them directly instead, same pattern used for the headline fix). Sum of per-group breakdown dollars should then equal the headline total again, which it currently does not (headline is stake-weighted, breakdowns are flat-unit-weighted)."
+    },
+    {
+      "id": "backlog-load-duplicate-key-protection",
+      "title": "load_backlog() now raises on a duplicate JSON key instead of silently discarding it",
+      "area": "infra",
+      "priority": 3,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "PM workflow audit (2026-09-08, user asked what else could be automated/streamlined): plain json.load() applies Python's last-key-wins rule on a duplicate object key with no error and no warning. This already caused a real, silent data-loss incident (2026-09-07): a duplicate top-level \"status\" key in trial-stronger-model-main-scoring's JSON object meant an earlier status-update edit was silently discarded, only found by chance re-reading the item afterward. Nothing in the toolchain (backlog.checker, tests) caught it -- every edit session since has relied on manually re-running an ad-hoc duplicate-key check by hand.",
+      "notes": "backlog/engine.py: load_backlog() now passes object_pairs_hook=_no_duplicate_keys to json.load(), which raises ValueError listing the offending key(s) if any object at any nesting level (not just top-level items) has a repeated key. save_backlog() already used the safe ensure_ascii=True default -- untouched. 3 new tests in tests/test_backlog.py (raises on duplicate top-level key, raises on duplicate nested key, real backlog.json still loads clean). Confirmed live against the real file (125 items, no duplicates). This turns a discipline someone has to remember into a structural guarantee."
+    },
+    {
+      "id": "verify-pnl-scheduled-and-alerting",
+      "title": "scripts/verify_pnl.py was never on any schedule -- now runs weekly and alerts on drift",
+      "area": "infra",
+      "priority": 4,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "PM workflow audit (2026-09-08): verify_pnl.py is a real, working, self-healing PnL integrity check (dry-run by default, backs up and fixes drift with --apply) that had existed since Goal 5b Part A with no Task Scheduler entry at all -- it only ever ran when a human happened to invoke it by hand, which is exactly what happened twice in this same session (2026-09-08), coincidentally, while working on the confidence-weighted-sizing change.",
+      "notes": "Added send_alert_if_needed()/compose_alert() to scripts/verify_pnl.py, same core.report.send_report path and day-based dedup-by-signature state pattern as automation_health_check.py (state: data/verify_pnl_alert_state.json). New --no-alert flag for manual/interactive runs that shouldn't also send an email. New scripts/setup_verify_pnl_scheduler.ps1 registers Leviathan-VerifyPnL, weekly Sunday 10:30am (right after Leviathan-WeeklyAudit's 10:00am slot), running WITHOUT --apply -- an unattended job never silently rewrites the DB; a human reviews and re-applies by hand. Registered live and smoke-tested via Start-ScheduledTask -- ran clean, logged to logs/verify_pnl.log. Added a matching RUNBOOK.md troubleshooting section (same format as the other alert types) and a quick-reference row. 6 new tests in tests/test_verify_pnl.py (send/no-send, same-day dedup, different-diff-set still alerts, failed-send doesn't persist state, compose_alert content)."
+    },
+    {
+      "id": "runbook-liam-section-pruned",
+      "title": "Removed docs/RUNBOOK.md's dead Liam/monday.com triage section",
+      "area": "infra",
+      "priority": 5,
+      "status": "done",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "PM workflow audit (2026-09-08): docs/RUNBOOK.md still had a full \"Triaging Liam (monday.com's built-in PM agent) reports\" section (confirmed failure modes, a documented process invoking scripts/verify_liam_report.py) for an integration explicitly retired 2026-08-30 (trial expired). Same staleness class as the README/METHODOLOGY numbers fixed earlier the same day -- a future session following this runbook could waste time on a process for something that no longer exists. Confirmed no Leviathan-MondaySync scheduled task remains registered (cleanly removed at retirement, unlike the docs).",
+      "notes": "Removed the full section and its quick-reference row (\"Triage Liam's latest report against real state\"). Added a new RUNBOOK.md section + quick-reference rows for the newly-scheduled verify_pnl.py alert instead, in the same slot. Did NOT touch docs/monday_sync_runbook.md or scripts/verify_liam_report.py/monday_sync.py themselves -- out of scope for this pass, flagged to the user as a further possible cleanup, not acted on unprompted."
     }
   ]
 }

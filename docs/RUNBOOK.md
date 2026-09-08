@@ -116,6 +116,34 @@ reset.
 
 ---
 
+## "Leviathan ALERT — PnL integrity: N row(s) mismatched" (from scripts/verify_pnl.py, weekly)
+
+`resolve_outcomes()`'s stored `pnl_if_traded` for one or more resolved
+signals no longer matches what the current payoff formula in
+`core/logger.py` would compute from the same stored inputs (market price,
+entry price/fill data, direction, outcome) — meaning either the formula
+changed after those rows resolved and they were never backfilled, or the
+stored data is otherwise inconsistent. This has never actually happened
+in production; the check exists so a future formula change (like the
+2026-09-08 dollar-scaling fix in `get_stats()`, a related but different
+column) can't silently leave old rows wrong the way that fix's own
+backfill deliberately avoided.
+
+The alert email lists each mismatched `call_id`/ticker with its stored vs.
+recomputed value. To fix:
+```
+python scripts/verify_pnl.py            # confirm the diff table again
+python scripts/verify_pnl.py --apply    # backs up the DB, then writes the fix
+```
+Never run `--apply` without reading the diff table first — it's a
+one-time bulk UPDATE across every mismatched row, not scoped to any
+particular fix in mind. Re-alerts once per day for a *different* set of
+mismatched rows, but not for the same still-unresolved set (state in
+`data/verify_pnl_alert_state.json`) — applying the fix is what actually
+stops it, not any separate manual acknowledgement.
+
+---
+
 ## `weekly_code_audit.py` timed out / raw traceback in logs/weekly_code_audit.log
 
 The Sunday 11am `claude --print` audit run ran out of its time budget
@@ -261,79 +289,6 @@ waste one run's worth of Kalshi/Claude calls.
 
 ---
 
-## Triaging Liam (monday.com's built-in PM agent) reports
-
-For running/diagnosing the sync tool itself (`scripts/monday_sync.py`),
-see `docs/monday_sync_runbook.md` instead -- this section is about
-evaluating Liam's judgment, a separate concern from the sync mechanism.
-
-Liam posts a "Daily + Weekly Report" update to the "Leviathan Sync Log"
-item on the monday board on its own cadence, independent of anything in
-this repo. It's a genuine second source of *external* research (regulatory
-news, competitor platform changes) that nothing in this codebase gathers
-on a standing basis. It is NOT reliable on *internal* project state, and
-its "stale block" / "move to Ready" recommendations must never be acted
-on directly — verify first.
-
-**Confirmed failure modes** (observed 2026-08-18 and again 2026-08-19,
-same mistake both times):
-
-- **Conflates `depends_on` with the real trigger.** Liam checks whether an
-  item's listed dependencies are Done and calls the block "stale" if so —
-  it does not evaluate the item's actual `trigger.all` metric conditions
-  at all. `auto-calibration-loop` has been flagged as a stale block in
-  both reports despite `resolved_count` sitting at 13 against a required
-  30 — the dependencies (`sample-size-gates`, `brier-tracking`) are done,
-  but that's a different, weaker condition than the trigger being met.
-- **No visibility into policy decisions made in conversation.** Liam
-  recommended unblocking `replay-instrument-validation` in both reports
-  because its dependencies are done — it has no way to know the user
-  explicitly decided the bot may never spend real metered Anthropic API
-  money, which is why that item is deliberately re-gated behind a
-  sentinel trigger metric (`api_spend_authorized`) that never clears on
-  its own. Any item gated by a sentinel metric (see
-  `backlog.json`'s `metrics_glossary` for which ones — currently
-  `api_spend_authorized`, `graphify_corpus_shape_changed`) requires a
-  fresh human decision, and Liam will keep recommending it every report
-  until that changes.
-- **Inconsistent live DB access.** The 2026-08-18 report showed real
-  `resolved_count` numbers; the 2026-08-19 report said "no gate metrics
-  are available in this run (no live DB access)" for the exact same
-  section. Don't assume any given report actually queried live data.
-- **"Automated Actions Taken" may just be narrating existing state.**
-  Liam's 2026-08-19 report claimed credit for stamping `Completed On`
-  dates on 3 items — those were the exact dates Claude had already
-  written the day before via `scripts/_backfill_completed_on_dates.py`.
-  Treat this section as "what changed since I last looked", not
-  necessarily "what I personally did."
-
-**What Liam is genuinely good for**: the "Weekly Intelligence Brief"
-section (regulatory changes, competitor API/venue news, package-security
-findings on evaluated tools) is real research worth reading and folding
-into the relevant backlog item's `action` text when it changes something
-material — see `cross-venue-expansion`'s 2026-08-19 update (Kalshi's WA
-geofencing injunction) for the pattern: read it, verify it's real and
-material, fold the specific finding into the item, cite the source
-("via Liam/monday.com PM agent's weekly intelligence brief, verified
-before incorporating").
-
-**Process — run this before acting on anything Liam recommends:**
-```
-python scripts/verify_liam_report.py
-```
-This fetches Liam's latest post and, independently, computes real ground
-truth for every `locked`/`blocked` backlog item straight from
-`backlog.checker.compute_metrics()` and `backlog.json`'s own
-`trigger`/`depends_on` fields — showing exactly which metric is or isn't
-met, which dependency is or isn't done, and flagging sentinel-gated items
-explicitly. Only an item the script marks
-`*** REALLY UNLOCKABLE NOW ***` actually qualifies for a status change;
-everything else in Liam's recommendations should be treated as either
-external research (evaluate on its own merits) or noise (a repeat of an
-already-known false claim).
-
----
-
 ## Quick reference
 
 | Task | Command |
@@ -348,7 +303,8 @@ already-known false claim).
 | Check today's LLM daily spend (metered API only) | `python -c "from core.llm import get_daily_cost_usd; print(get_daily_cost_usd())"` |
 | Check DB location | `python -c "from core import logger; print(logger.DB_PATH)"` |
 | Full test suite | `python -m pytest -q` |
-| Triage Liam's (monday.com PM agent) latest report against real state | `python scripts/verify_liam_report.py` |
+| Check PnL integrity without waiting for the weekly schedule | `python scripts/verify_pnl.py --no-alert` |
+| Re-register the PnL integrity scheduler | `powershell -ExecutionPolicy Bypass -File scripts\setup_verify_pnl_scheduler.ps1` |
 | Check Task Scheduler event log is enabled | `Get-WinEvent -ListLog "Microsoft-Windows-TaskScheduler/Operational" \| Select IsEnabled` |
 | Enable it if not (requires Administrator) | `wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true` — from Git Bash, prefix with `MSYS_NO_PATHCONV=1` or its automatic POSIX-path conversion mangles the `/e:true` argument |
 | View recent scheduled-task activity | `Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" -MaxEvents 50` |

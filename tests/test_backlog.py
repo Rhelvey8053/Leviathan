@@ -39,6 +39,42 @@ def tmp_backlog(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# load_backlog: duplicate-key protection (2026-09-08)
+# ---------------------------------------------------------------------------
+#
+# Plain json.load() silently applies last-key-wins on a duplicate object
+# key -- this already caused a real, silent data-loss incident once
+# (2026-09-07: a duplicate "status" key meant an earlier status-update
+# edit was discarded with no error). load_backlog() now raises instead.
+
+def test_load_backlog_raises_on_duplicate_top_level_key(tmp_backlog):
+    tmp_backlog.write_text(
+        '{"items": [{"id": "x", "status": "ready", "status": "done"}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="duplicate key"):
+        load_backlog(tmp_backlog)
+
+
+def test_load_backlog_raises_on_duplicate_nested_key(tmp_backlog):
+    """Duplicate keys inside a nested object (e.g. trigger conditions),
+    not just at an item's top level, must also be caught."""
+    tmp_backlog.write_text(
+        '{"items": [{"id": "x", "trigger": {"all": [], "all": []}}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="duplicate key"):
+        load_backlog(tmp_backlog)
+
+
+def test_load_backlog_accepts_real_file_with_no_duplicates(backlog_data):
+    """The real backlog.json has no duplicate keys anywhere -- confirms
+    the fixture itself (used by every other test in this file) still
+    loads cleanly under the new check."""
+    assert len(backlog_data["items"]) > 0
+
+
+# ---------------------------------------------------------------------------
 # backlog.json structure
 # ---------------------------------------------------------------------------
 
@@ -522,8 +558,19 @@ def test_parses_and_96_items(backlog_data):
     done) and logged the ~12 sibling per-group breakdown functions with
     the identical bug as a separate, deliberately out-of-scope follow-up
     (per-group-pnl-tables-still-flat-not-stake-weighted, ready).
+
+    128, not 125: user asked what other workflows could be automated/
+    streamlined. Found and fixed three: (1) backlog-load-duplicate-key-
+    protection -- load_backlog() now raises on a duplicate JSON key
+    instead of silently discarding it, the exact bug class that already
+    caused real data loss once (2026-09-07). (2) verify-pnl-scheduled-and-
+    alerting -- scripts/verify_pnl.py had no Task Scheduler entry at all,
+    only ever run by hand; now scheduled weekly with its own alert email
+    on drift. (3) runbook-liam-section-pruned -- docs/RUNBOOK.md still had
+    a full troubleshooting section for the Liam/monday.com integration
+    retired 2026-08-30.
     """
-    assert len(backlog_data["items"]) == 125
+    assert len(backlog_data["items"]) == 128
 
 
 def test_all_ids_unique(backlog_data):

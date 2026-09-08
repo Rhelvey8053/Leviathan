@@ -31,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (109)
+## Done (112)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -86,6 +86,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 2 | smart-money-fills-table-missing | Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a… | infra |
 | 2 | wake-triggered-task-catchup | Built 2026-08-24, registered and confirmed State=Ready (not stuck Queued, unlike the two tasks registered earlier the same day). | infra |
 | 2 | wilson-intervals | Add Wilson score confidence intervals to win-rate stats in the email report. | reporting |
+| 3 | backlog-load-duplicate-key-protection | PM workflow audit (2026-09-08, user asked what else could be automated/streamlined): plain json.load() applies Python's last-key-wins rule on a duplicate object key with no error and no warning. | infra |
 | 3 | backtest-harness | Build a framework to replay historical signals against resolved market outcomes. | backtesting |
 | 3 | cli-backend-token-telemetry | User asked to research reducing Leviathan's own token footprint (after a separate detour into whether OmniRoute could help -- rejected, since routing Claude Code through it means replacing native… | infra |
 | 3 | daily-operations-digest | Built and verified 2026-08-24. | infra |
@@ -132,6 +133,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | trial-stronger-model-main-scoring | Using the now-live config.llm.cli_model_override (see wire-llm-model-cli-flag, done -- no depends_on here since that item is already done as of this item's own creation, not a real gate), run a… | calibration |
 | 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. | infra |
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
+| 4 | verify-pnl-scheduled-and-alerting | PM workflow audit (2026-09-08): verify_pnl.py is a real, working, self-healing PnL integrity check (dry-run by default, backs up and fixes drift with --apply) that had existed since Goal 5b Part A… | infra |
 | 4 | whale-actionability-scorecard | User asked what we're actually doing with whale-flag data beyond identifying it -- the report's WHALE ACTIVITY table just lists sightings (a market a whale traded, no track record attached), so there… | reporting |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
 | 5 | edge-decay-analysis | Measure how quickly identified edges decay as markets approach their resolution date. | validation |
@@ -140,6 +142,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
 | 5 | metaculus-community-prediction-inaccessible | Found 2026-08-25 while setting up the (previously dormant, missing-token) Metaculus integration at the owner's request. | data-quality |
 | 5 | report-ticker-none-vs-missing-audit | Found and fixed 2026-09-06 while removing the daily report's whale/smart-money sections (daily-report-drop-whale-smart-money): _week_whale_rows(), compile_weekly_digest()'s 'MARKETS FLAGGED THIS… | infra |
+| 5 | runbook-liam-section-pruned | PM workflow audit (2026-09-08): docs/RUNBOOK.md still had a full "Triaging Liam (monday.com's built-in PM agent) reports" section (confirmed failure modes, a documented process invoking… | infra |
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
 | 5 | subscriber-report-removed-2026-08 | User question: if the strategy is proven profitable, why send picks to subscribers instead of trading it directly? Investigated before acting -- found neither justification for the feature actually… | infra |
 | 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |

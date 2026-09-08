@@ -90,9 +90,29 @@ def validate_item(item: dict, existing_items: list, glossary: dict) -> list:
     return errors
 
 
+def _no_duplicate_keys(pairs):
+    """
+    object_pairs_hook for json.load -- plain json.load silently applies
+    Python's last-key-wins rule on a duplicate object key, discarding any
+    earlier value with no error and no warning. This bit real work once
+    (2026-09-07): a duplicate top-level "status" key in one item's JSON
+    object meant an earlier status-update edit was silently overwritten
+    by a stale trailing value, and nothing in the toolchain caught it --
+    only found by chance when the item was re-read and looked wrong.
+    Applied automatically at every nesting level json.load visits, so a
+    duplicate key inside a trigger/condition object is caught too, not
+    just at the top level or within one item.
+    """
+    keys = [k for k, _ in pairs]
+    dupes = sorted({k for k in keys if keys.count(k) > 1})
+    if dupes:
+        raise ValueError(f"duplicate key(s) in backlog JSON: {dupes}")
+    return dict(pairs)
+
+
 def load_backlog(path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return json.load(f, object_pairs_hook=_no_duplicate_keys)
 
 
 def save_backlog(path, data: dict) -> None:
