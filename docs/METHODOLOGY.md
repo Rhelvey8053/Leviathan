@@ -137,19 +137,20 @@ loosened after seeing an unfavorable result.
 
 ## 5. Current state (not a checkpoint result)
 
-As of this writing: **25 resolved paper signals**, well below the n=50
-checkpoint. These numbers are recorded for transparency, not as a verdict —
-no PASS/FAIL evaluation has occurred, and none is claimed here.
+As of this writing (2026-09-08): **38 resolved paper signals**, 12 away
+from the n=50 checkpoint. These numbers are recorded for transparency, not
+as a verdict — no PASS/FAIL evaluation has occurred, and none is claimed
+here.
 
 | Metric | Value |
 |---|---|
-| Total paper signals logged | 47 |
-| Resolved | 25 |
-| Win rate | 32% |
-| Scorer Brier score | 0.2173 — "FAIR (near random)" |
-| Market-baseline Brier score | 0.0935 — "EXCELLENT" |
-| Scorer vs. baseline | Scorer is **worse** than the market-price baseline |
-| Hypothetical P&L ($10/contract, paper only) | -$2.46 |
+| Total paper signals logged | 59 |
+| Resolved | 38 |
+| Win rate | 34% |
+| Scorer Brier score | 0.2169 — "FAIR (near random)" |
+| Market-baseline Brier score | 0.1152 — "GOOD" |
+| Scorer vs. baseline | Scorer is **worse** than the market-price baseline (delta +0.1017) |
+| Hypothetical P&L (paper only) | +$64.50 |
 
 Reproduce with:
 
@@ -157,17 +158,31 @@ Reproduce with:
 python -m analysis.calibration
 ```
 
-This is the same anchoring risk described in Section 2, now visible again
-at a larger (though still small) sample: the scorer is currently tracking
-the market price worse than the market price tracks itself. This is
-recorded here, unedited, because a methodology document that only shows
+The hypothetical P&L figure changed method as of 2026-09-08: it's now
+confidence-weighted stake sizing ($50 base unit; 1.5x/1.0x/0.5x for
+HIGH/MED/LOW confidence — see `core/sizing.py`) applied to every resolved
+signal, past and future, rather than a flat $10-per-contract multiply. The
+win rate and both Brier scores are sizing-independent and directly
+comparable to the earlier n=25 snapshot below; the P&L figure alone is not,
+since it's now measuring a different bet-sizing policy, not just a bigger
+sample under the old one.
+
+This is the same anchoring risk described in Section 2, still visible at a
+larger (though still not-yet-checkpoint) sample: the scorer is currently
+tracking the market price worse than the market price tracks itself. This
+is recorded here, unedited, because a methodology document that only shows
 favorable numbers isn't one.
 
-Two things are true at once: (a) n=25 is still too small to draw a real
-conclusion from — the pre-registered checkpoint exists precisely because
-smaller samples are noisy — and (b) the direction of the current evidence is
-not encouraging, and pretending otherwise would defeat the purpose of
-publishing this.
+Two things are true at once: (a) n=38 is still below the pre-registered
+n=50 checkpoint — the checkpoint exists precisely because smaller samples
+are noisy — and (b) the direction of the current evidence has not improved
+since the n=25 snapshot below, and pretending otherwise would defeat the
+purpose of publishing this.
+
+**n=25 snapshot (2026-09-05, preserved for comparison, not current):**
+total signals 47, resolved 25, win rate 32%, scorer Brier 0.2173 ("FAIR,
+near random"), market-baseline Brier 0.0935 ("EXCELLENT"), hypothetical
+P&L -$2.46 at the old flat $10/contract sizing.
 
 ---
 

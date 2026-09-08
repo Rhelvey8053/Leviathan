@@ -14,10 +14,10 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 ## System Status
 
-- **Phase:** Data accumulation — 8 resolved paper signals confirmed current as of 2026-07-27 (next gate: n=20 before calibration analysis is meaningful)
+- **Phase:** Data accumulation — 38 resolved paper signals confirmed current as of 2026-09-08 (next gate: the pre-registered n=50 checkpoint, see [`docs/PREREGISTRATION.md`](docs/PREREGISTRATION.md) — 12 signals away)
 - **Mode:** Read-only — no trade execution. All signals are paper.
-- **Test suite:** 1,850 tests, 0 failures (1 skipped — requires `--network`)
-- **Verified track record (2026-07-14, re-confirmed unchanged 2026-07-27):** win rate 38%, Brier score 0.0578 (EXCELLENT), hypothetical P&L -$1.66 at $10/contract. PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=8 is far below the n=20 gate, so read them as an integrity checkpoint, not a performance claim.
+- **Test suite:** 2,419 tests, 0 failures (1 skipped — requires `--network`)
+- **Verified track record (2026-09-08):** win rate 34%, scorer Brier score 0.2169 ("FAIR, near random"), market-baseline Brier 0.1152 ("GOOD") — the scorer is currently **worse** than just reading the market price, the same anchoring risk this project flags on itself elsewhere. Hypothetical P&L +$64.50, confidence-weighted stake sizing ($50 base unit; 1.5x/1.0x/0.5x for HIGH/MED/LOW confidence, applied to every resolved signal, past and future). PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=38 is still below the pre-registered n=50 checkpoint, so read them as a progress update, not a pass/fail verdict; the checkpoint decides that, not this line.
 
 ### Validation approach
 
@@ -52,7 +52,7 @@ Each daily run executes an 8-step pipeline:
 
 ## What This Demonstrates
 
-Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across five external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 1,850-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
+Leviathan was built as a self-directed systems project: no course requirement, no existing codebase to extend, no team. The scope — API integration across five external platforms, a multi-layer signal pipeline, SQLite persistence, automated reporting, Windows Task Scheduler integration, and a 2,419-test offline suite — was defined and executed independently. Each layer (scanner, scorer, logger, report compiler) is independently testable with no circular dependencies between modules.
 
 The design reflects a deliberate choice to build measurement infrastructure before claiming results. The calibration script (`analysis/calibration.py`) computes Brier scores and win rates broken down by flag path, time horizon, confidence tier, and cross-market alignment. The backlog is explicitly structured around data conditions: several planned features are blocked until the resolved-signal count clears n=20, because prior to that threshold any accuracy metric is too noisy to act on. This is an easy discipline to skip when you're the only one checking.
 
@@ -74,7 +74,7 @@ Every folder in the repo has one job. `main.py` is the only entry-point script l
 | `mcp_server/` | MCP server exposing the signal log, resolved track record, and market-data lookup as tools — reads `data/leviathan.db` directly, live. |
 | `dashboard/` | Local Streamlit dashboard (Overview / Signal Breakdown / Signal Log) reading `data/powerbi_export/`'s CSV export — the project's only dashboard as of 2026-08-19; a prior Power BI `.pbix` was retired (Pro-subscription-only cost policy, and Streamlit already covered the same ground for free). |
 | `scripts/` | Scheduled/maintenance entry points — daily smart-money scan, position reconciliation, PnL verification, gate-unlock and no-run-completed alerting, Task Scheduler registration. |
-| `tests/` | The full offline test suite (1,850 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
+| `tests/` | The full offline test suite (2,419 tests) plus `conftest.py`, which puts the repo root on `sys.path` for every test. |
 | `data/` | All runtime state: the live `leviathan.db`, its old backups (`data/db_backups/`), the CSV export directory (`data/powerbi_export/` — name predates the Power BI retirement, kept as-is since renaming touches `core/export_to_csv.py`, `dashboard/data.py`, and tests for no functional gain), market snapshots, and smart-money/whale caches. |
 | `docs/` | Progress log (`PROGRESS.md`, 2026-08-01 onward; older entries in `PROGRESS_ARCHIVE.md`), a plain-language project narrative for non-technical readers (`STORY.md`), the unattended-operation runbook (`RUNBOOK.md`), and a human-triaged, append-only parking lot for premature/declined ideas (`IDEAS.md`) — never read by an agent for direction. |
 | `reports/` | Saved output from one-off analysis runs (threshold sweeps, flag-mode comparisons). |
@@ -311,7 +311,7 @@ python analysis/eval_rescore.py --check    # separate: proves re-score reproduci
 python -m pytest -q
 ```
 
-1,850 tests, almost all offline — no network calls, no Claude CLI invocations (one test is explicitly `--network`-gated and skipped by default). SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test. Live API calls (`core/llm.py`, `core/blind_scorer.py`) are tested against a mocked Anthropic client, never a real key.
+2,419 tests, almost all offline — no network calls, no Claude CLI invocations (one test is explicitly `--network`-gated and skipped by default). SQLite tests use a throwaway `tmp_path` DB; `logger.DB_PATH` is monkeypatched before each test. Live API calls (`core/llm.py`, `core/blind_scorer.py`) are tested against a mocked Anthropic client, never a real key.
 
 | Test file | What it covers |
 |---|---|
