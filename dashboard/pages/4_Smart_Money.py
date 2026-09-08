@@ -451,9 +451,10 @@ if _fills_df.empty:
         f"0 resolved fills recorded yet, across {_wallets_with_fills} wallets that have ever had a fill "
         f"tracked (0 of the {len(_watchlist)} watchlist wallets currently pass the qualification gates "
         "that would let one be recorded -- see sources.accounts._verify_watchlist_trader). This is a "
-        "real, honest zero, not a bug: the smart_money_fills table itself was only built today. It will "
-        "start filling in as the daily scan keeps running and watchlist wallets open new positions -- "
-        "this section will populate on its own, nothing here needs to be manually seeded."
+        "real, honest zero, not a bug: the smart_money_fills table was only built 2026-09-07, and no "
+        "watchlist wallet has cleared the qualification gates since. It will start filling in as the "
+        "daily scan keeps running and watchlist wallets open new positions -- this section will "
+        "populate on its own, nothing here needs to be manually seeded."
     )
 else:
     st.markdown("**Per-Wallet Tally**")

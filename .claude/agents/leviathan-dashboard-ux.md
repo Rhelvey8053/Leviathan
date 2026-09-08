@@ -215,3 +215,93 @@ production data (198 real week signals, 81.6KB final HTML, under the
 was sent for this fix, not three — once a task is "the fix," ship one
 considered answer, not a menu, unless the user's ask was genuinely
 open-ended.
+
+## Learned from the 2026-09-07 Smart Money "Fill Tracking" panel build
+
+**When a task says "no existing correct version to port," verify that
+claim against the project's own backlog before designing freely.** This
+task (new Panel 4 on `4_Smart_Money.py`, surfacing the new
+`smart_money_fills` table) was correctly scoped as original-design work,
+not a reskin -- but `backlog/backlog.json` turned out to already contain
+an explicit, named item for almost exactly this feature
+(`wallet-tracking-dashboard`, status `blocked`, waiting on
+`per-wallet-track-record`, itself `locked` behind
+`resolved_count_per_wallet_max >= 10`). Building the panel anyway was
+still correct -- the task asked for raw counts/tallies with honest-zero
+handling, not the gated item's actual scope (a ranked leaderboard /
+trend-over-time view implying the per-wallet numbers are already
+decision-grade) -- but the distinction is easy to blur by accident once
+you're building a table with a "win rate" column in it. The fix that
+kept it honestly on the right side of the line: label every per-wallet
+win-rate cell with its own sample size against the project's real n=10
+floor ("n=3, below the reliability floor"), and surface the live
+`resolved_count_per_wallet_max` gate metric on the page itself (reusing
+`backlog.checker.compute_metrics()`/`gate_progress_str()`, the same
+functions `5_Backlog.py` already uses) rather than a separately-invented
+number. Lesson: before designing a "new" panel, grep
+`backlog/backlog.json` for the feature's own name/area -- a locked or
+blocked item there isn't a blocker to inline transparency, but it is the
+line you must not cross into.
+
+**Streamlit's `AppTest` (`streamlit.testing.v1.AppTest`) is the right
+verification tool when no browser is attached.** `claude-in-chrome`
+requires a connected extension + logged-in session that may simply not
+exist in a given environment ("Browser extension is not connected").
+`AppTest.from_file(path).run()` executes the real page script in-process
+and exposes `.exception`, `.info`, `.metric`, `.dataframe`, `.markdown`,
+etc. for direct inspection -- no screenshot, but exact values, which is
+often *more* useful for catching a wrong number than a screenshot would
+be (a screenshot doesn't tell you `20` was actually supposed to be
+`0`). It caught a real bug this session: `config.get("watchlist", [])`
+silently returned `[]` because the real key path is
+`config["accounts"]["watchlist"]` (confirmed against
+`analysis/smart_money_scan.py`'s `fetch_watchlist_positions`, the actual
+production reader) -- a wrong-nesting-level bug that would have shipped
+a silently-false "Watchlist Size: 0" metric right next to an honest
+"0 resolved fills" message, undermining exactly the honesty this
+project cares about. Two practical notes: (1) any panel making a live
+external-data call (this page's Panel 2, Polymarket discovery diagnostic)
+will hang `AppTest` for its full real-world duration/rate-limit pacing --
+monkeypatch the module-level function (e.g.
+`sources.accounts.diagnose_discovery = stub_fn`) before `.run()`, since
+the page imports the module object and calls through it, so patching the
+attribute on the already-imported module affects the page's call. (2) A
+module-level function with a mutable-looking default argument bound to
+another module's live path (e.g. `backlog/checker.py`'s
+`compute_metrics(db_path=DEFAULT_DB)`, where `DEFAULT_DB` is a plain
+string captured once at import time) will NOT follow a
+`core.logger.DB_PATH` monkeypatch done later in the same process --
+useful to know so a populated-state test via a seeded throwaway DB
+doesn't waste time chasing a metric that looks stuck at a stale value
+for a reason that has nothing to do with the page code being tested.
+
+**Verifying a populated state that doesn't exist yet in production:**
+same throwaway-DB pattern the project's own test suite already uses
+(`tests/test_smart_money_fills.py`'s `tmp_db` fixture: monkeypatch
+`core.logger.DB_PATH` to a `tempfile.mktemp()` path, call `_init_db()`,
+then seed via the real writer functions -- `record_smart_money_fills()`/
+`backfill_smart_money_resolutions()` -- never hand-rolled `INSERT`
+statements) works just as well outside pytest, in a throwaway script, to
+drive an `AppTest` run and see the *other* branch of an if/else render
+render for real before it exists in the live database. Never write this
+kind of synthetic data into the real `data/leviathan.db`, even
+temporarily -- always a fresh `tempfile.mktemp()` path, deleted after.
+
+**A staged-but-uncommitted change can get swept into an unrelated
+automated commit.** This same session, `git add`-staged changes to
+`core/logger.py`/`dashboard/pages/4_Smart_Money.py`/
+`tests/test_smart_money_fills.py` were never explicitly committed before
+a session-limit interruption -- and the project's own autonomous daily
+pipeline (running under the same git identity, committing its own data
+outputs on a schedule) picked up the already-staged files on its next
+commit and folded them into its generic `"data: smart money scan
+2026-09-08..."` message. Nothing was lost -- `git log --oneline -- <path>`
+found the real content sitting in that commit -- but it looked, from
+`git status`/`git diff` alone (both clean against HEAD), exactly like
+the work had vanished. Lesson: if a session gets interrupted mid-task on
+a repo with any autonomous/scheduled commit process sharing its git
+identity, don't trust "no diff against HEAD" to mean "not done" --
+check `git log --oneline -- <path>` for the file first, since "done and
+already committed" and "never happened" look identical from `git status`
+alone. Stage-then-commit-immediately (not stage-then-do-more-work-first)
+is the safer order specifically on repos like this one.
