@@ -214,3 +214,29 @@ def test_wallet_max_returns_real_max_across_wallets(tmp_db):
                       all_positions=[_position(slug="b-event", outcome="No", redeemable=True, percentPnl=-5.0)])
     )
     assert logger.get_resolved_count_per_wallet_max() == 3
+
+
+# ─── get_smart_money_fills ──────────────────────────────────────────────────
+
+def test_get_fills_empty_table_returns_empty_list(tmp_db):
+    assert logger.get_smart_money_fills() == []
+
+
+def test_get_fills_returns_open_and_resolved_rows(tmp_db):
+    logger.record_smart_money_fills(
+        _trader_data(wallet="0xA", name="a", positions=[_position(slug="e1", outcome="Yes")])
+    )
+    logger.record_smart_money_fills(
+        _trader_data(wallet="0xB", name="b", positions=[_position(slug="e2", outcome="No")])
+    )
+    logger.backfill_smart_money_resolutions(
+        _trader_data(wallet="0xB", name="b", positions=[],
+                      all_positions=[_position(slug="e2", outcome="No", redeemable=True, percentPnl=12.0)])
+    )
+    rows = logger.get_smart_money_fills()
+    assert len(rows) == 2
+    by_wallet = {r["wallet"]: r for r in rows}
+    assert by_wallet["0xA"]["resolved"] == 0
+    assert by_wallet["0xA"]["kalshi_ticker"] is None
+    assert by_wallet["0xB"]["resolved"] == 1
+    assert by_wallet["0xB"]["hit"] == 1

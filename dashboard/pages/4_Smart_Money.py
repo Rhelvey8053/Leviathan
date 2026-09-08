@@ -37,6 +37,30 @@ through to act on it. Real, structural fixes, not just cosmetic:
   - Panel 3 gets an explicit "Longest streak" vs "Most recent" sort
     toggle -- recency was previously impossible to see at a glance.
 
+2026-09-07 addition -- Panel 4 (Fill Tracking): core.logger's new
+smart_money_fills table (record_smart_money_fills() /
+backfill_smart_money_resolutions(), built same day) is the first place
+this project persists individual watchlist-wallet fills with resolution
+outcomes over time, instead of computing everything live against
+Polymarket's API on every page load the way Panels 1-3 do. It is a
+DIFFERENT data source from Panel 1's read_cached_winners() (a broader,
+separately-discovered winner pool refreshed once/day) -- Panel 4 tracks
+only the 20 hand-picked config.json watchlist wallets specifically, and
+only once record_smart_money_fills has actually observed a qualifying
+position for one. Real state as of this addition: 0 rows in the table,
+0 of 20 watchlist wallets currently pass the same verification gates
+Panel 1's wallets pass (see sources.accounts._verify_watchlist_trader),
+so Panel 4 is built to render an honest, explicit zero -- not a chart or
+metric implying a track record that doesn't exist yet. This also feeds
+the backlog's own per-wallet-track-record gate (resolved_count_per_wallet_max
+>= 10, tracked in backlog/checker.py and shown on the Backlog page) --
+Panel 4 surfaces the same live metric here, in context, rather than
+requiring a trip to a different page to see how close that gate is to
+clearing. Deliberately NOT a preview of the gated wallet-tracking-dashboard
+backlog item (blocked on that same gate): this panel shows raw counts and
+per-wallet tallies as they exist right now, not a ranked leaderboard or
+trend-over-time view implying the numbers are already decision-grade.
+
 Requires config.json (falls back to config.example.json if absent) for
 sources.accounts.diagnose_discovery()'s accounts.* thresholds -- the only
 panel on this page making a live external-data call.
@@ -55,6 +79,8 @@ sys.path.insert(0, str(ROOT))
 from sources import accounts as _accounts
 from core import whales as _whales
 from core import logger as _logger
+from backlog import checker as _bl_checker
+from backlog.engine import load_backlog as _load_backlog
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from theme import LOSS_COLOR, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header
@@ -357,3 +383,156 @@ else:
         stale = int((streak_df["hours_ago"].fillna(0) > 168).sum())
         if stale:
             st.caption(f"{stale} of the {len(streak_df)} shown haven't updated in over a week -- likely a closed or no-longer-scanned market, not an active streak.")
+
+st.divider()
+
+# ── Panel 4: Fill Tracking -- the new persisted per-fill ledger ──────────
+#
+# Distinct from Panel 1: read_cached_winners() reflects a broader,
+# separately-discovered winner pool refreshed once/day from live
+# discovery sampling. This panel is the watchlist-specific ledger --
+# every qualifying fill core.logger.record_smart_money_fills() has
+# actually observed for one of the 20 hand-picked config.json watchlist
+# wallets, plus its resolution once backfill_smart_money_resolutions()
+# confirms one. It starts empty and grows one scan at a time; there is
+# no live-API fallback here the way Panels 1-3 have -- this section can
+# ONLY show what has actually been persisted.
+
+WALLET_TRACK_RECORD_GATE_N = 10  # mirrors backlog: per-wallet-track-record's own trigger
+
+st.subheader("Fill Tracking")
+st.caption(
+    "A new, separate record from everything above: every individual fill "
+    "core.logger has actually observed and persisted for a watchlist wallet, plus its "
+    "outcome once the position resolves. This builds up scan by scan, starting from zero -- "
+    "it is not a live snapshot recomputed on page load like Panels 1-3 above."
+)
+
+_watchlist = _config.get("accounts", {}).get("watchlist", [])
+_fills = _logger.get_smart_money_fills()
+_fills_df = pd.DataFrame(_fills)
+
+_wallets_with_fills = int(_fills_df["wallet"].nunique()) if not _fills_df.empty else 0
+_open_n = int((_fills_df["resolved"] == 0).sum()) if not _fills_df.empty else 0
+_resolved_n = int((_fills_df["resolved"] == 1).sum()) if not _fills_df.empty else 0
+
+try:
+    _bl_backlog = _load_backlog(ROOT / "backlog" / "backlog.json")
+    _bl_metrics = _bl_checker.compute_metrics()
+    _bl_items = {i["id"]: i for i in _bl_backlog.get("items", [])}
+    _gate_item = _bl_items.get("per-wallet-track-record")
+    _wallet_max = _bl_metrics.get("resolved_count_per_wallet_max", 0)
+    _gate_progress = _bl_checker.gate_progress_str(_gate_item, _bl_metrics) if _gate_item else None
+except Exception:
+    _wallet_max = _logger.get_resolved_count_per_wallet_max()  # direct fallback, same underlying query
+    _gate_progress = None
+
+fk1, fk2, fk3, fk4 = st.columns(4)
+fk1.metric("Watchlist Size", len(_watchlist),
+           help="Hand-picked candidate wallets in config.json. Being on this list does not mean "
+                "fills are being recorded for it yet -- see 'Wallets With Recorded Fills'.")
+fk2.metric("Wallets With Recorded Fills", _wallets_with_fills,
+           help="Distinct watchlist wallets that have cleared sources.accounts._verify_watchlist_trader's "
+                "gates at least once and had a real fill written to smart_money_fills. Can be, and "
+                "currently is, far smaller than Watchlist Size.")
+fk3.metric("Open / Resolved Fills", f"{_open_n} / {_resolved_n}",
+           help="Open = currently-held position, outcome not yet known. Resolved = "
+                "backfill_smart_money_resolutions() confirmed the market settled.")
+fk4.metric("Best-Tracked Wallet", f"{_wallet_max}/{WALLET_TRACK_RECORD_GATE_N} resolved",
+           help=f"The single wallet with the most resolved fills, out of the {WALLET_TRACK_RECORD_GATE_N} "
+                "this project's own backlog gate (per-wallet-track-record) requires before any "
+                "per-wallet win rate here is treated as more than a raw tally -- see the Backlog page.")
+
+if _gate_progress:
+    st.caption(f"Backlog gate `per-wallet-track-record`: {_gate_progress}")
+
+if _fills_df.empty:
+    st.info(
+        f"0 resolved fills recorded yet, across {_wallets_with_fills} wallets that have ever had a fill "
+        f"tracked (0 of the {len(_watchlist)} watchlist wallets currently pass the qualification gates "
+        "that would let one be recorded -- see sources.accounts._verify_watchlist_trader). This is a "
+        "real, honest zero, not a bug: the smart_money_fills table itself was only built today. It will "
+        "start filling in as the daily scan keeps running and watchlist wallets open new positions -- "
+        "this section will populate on its own, nothing here needs to be manually seeded."
+    )
+else:
+    st.markdown("**Per-Wallet Tally**")
+    st.caption(
+        "Win rate shown for transparency only, not as a trustworthy signal, until a wallet reaches "
+        f"{WALLET_TRACK_RECORD_GATE_N} resolved fills (this project's own reliability floor -- see the "
+        "Best-Tracked Wallet metric above and the Backlog page's per-wallet-track-record gate). hit = "
+        "resolved_pct_pnl > 0, the same win/loss definition sources.accounts._score_wallet already uses."
+    )
+    _wallet_label = _fills_df["trader_name"].fillna(_fills_df["wallet"])
+    _fills_df = _fills_df.assign(wallet_label=_wallet_label)
+    _summary_rows = []
+    for label, g in _fills_df.groupby("wallet_label"):
+        open_n = int((g["resolved"] == 0).sum())
+        resolved_n = int((g["resolved"] == 1).sum())
+        wins_n = int((g["hit"] == 1).sum())
+        _summary_rows.append({
+            "wallet": label,
+            "open fills": open_n,
+            "resolved fills": resolved_n,
+            "wins": wins_n,
+            "win rate": (wins_n / resolved_n * 100) if resolved_n > 0 else None,
+            "sample": (
+                f"n={resolved_n} (below the n>={WALLET_TRACK_RECORD_GATE_N} reliability floor)"
+                if resolved_n < WALLET_TRACK_RECORD_GATE_N
+                else f"n={resolved_n} (meets the reliability floor)"
+            ),
+        })
+    _summary = pd.DataFrame(_summary_rows).sort_values(
+        ["resolved fills", "open fills"], ascending=False
+    )
+    st.dataframe(
+        _summary[["wallet", "open fills", "resolved fills", "wins", "win rate", "sample"]],
+        use_container_width=True, hide_index=True,
+        column_config={
+            "win rate": st.column_config.NumberColumn("win rate", format="%.1f%%"),
+            "sample": st.column_config.TextColumn("sample", width="medium"),
+        },
+    )
+
+    st.markdown("**Raw Fill History**")
+    st.caption(
+        "Every individual fill on record, newest-observed first. kalshi_ticker is a schema column that "
+        "no writer populates yet (the raw position data doesn't carry a cross-referenced Kalshi ticker) "
+        "-- omitted below rather than shown as a permanently-empty column."
+    )
+    hist_wallets = sorted(_wallet_label.unique())
+    hist_col1, hist_col2 = st.columns([2, 2])
+    picked_wallets = hist_col1.multiselect("Wallet", hist_wallets, default=hist_wallets)
+    status_pick = hist_col2.radio("Status", ["All", "Open", "Resolved"], horizontal=True)
+
+    hist_df = _fills_df[_fills_df["wallet_label"].isin(picked_wallets)]
+    if status_pick == "Open":
+        hist_df = hist_df[hist_df["resolved"] == 0]
+    elif status_pick == "Resolved":
+        hist_df = hist_df[hist_df["resolved"] == 1]
+
+    if hist_df.empty:
+        st.caption("No fills match the current filters.")
+    else:
+        hist_df = hist_df.copy()
+        hist_df["market"] = hist_df["poly_title"].fillna(hist_df["poly_slug"])
+        hist_df["status"] = hist_df["resolved"].map({0: "open", 1: "resolved"})
+        hist_df["outcome (win/loss)"] = hist_df.apply(
+            lambda r: ("win" if r["hit"] == 1 else "loss") if r["resolved"] == 1 else "--", axis=1
+        )
+        display_cols = [
+            "wallet_label", "market", "outcome", "entry_price", "position_val", "status",
+            "outcome (win/loss)", "resolved_pct_pnl", "first_seen_at", "last_seen_at",
+        ]
+        st.dataframe(
+            hist_df[display_cols].rename(columns={"wallet_label": "wallet", "outcome": "side"}),
+            use_container_width=True, hide_index=True,
+            column_config={
+                "market": st.column_config.TextColumn("market", width="large"),
+                "entry_price": st.column_config.NumberColumn("entry price", format="%.3f"),
+                "position_val": st.column_config.NumberColumn("position val ($)", format="$%.2f"),
+                "resolved_pct_pnl": st.column_config.NumberColumn("resolved P&L (%)", format="%.1f%%"),
+                "first_seen_at": st.column_config.TextColumn("first seen", width="medium"),
+                "last_seen_at": st.column_config.TextColumn("last seen", width="medium"),
+            },
+        )

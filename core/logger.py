@@ -2928,3 +2928,31 @@ def get_resolved_count_per_wallet_max() -> int:
             return row["m"] or 0
     except Exception:
         return 0
+
+
+def get_smart_money_fills() -> list[dict]:
+    """
+    Every row currently in smart_money_fills (open and resolved alike),
+    newest-observed first. Read-only, for dashboard/reporting consumption
+    -- record_smart_money_fills()/backfill_smart_money_resolutions() are
+    the only writers, this never is. Returns [] if the table is empty or
+    missing (e.g. an older DB file predating this migration) rather than
+    raising, so a caller can render an honest empty state instead of
+    crashing the page.
+
+    kalshi_ticker is a schema column, not yet populated by any writer as
+    of 2026-09-07 (see backlog: smart-money-fills-table-missing) -- always
+    None on every row right now. Callers should not build a Kalshi-link
+    column expecting it to resolve.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT wallet, trader_name, poly_slug, outcome, poly_title, kalshi_ticker, "
+                "entry_price, position_val, first_seen_at, last_seen_at, resolved, hit, "
+                "resolved_pct_pnl, resolved_cash_pnl, resolved_at "
+                "FROM smart_money_fills ORDER BY last_seen_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
