@@ -89,9 +89,30 @@ def _init_db() -> None:
                 market_price_at_score REAL,
                 cost_usd            REAL
             );
+            CREATE TABLE IF NOT EXISTS smart_money_fills (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet            TEXT NOT NULL,
+                trader_name       TEXT,
+                poly_slug         TEXT NOT NULL,
+                outcome           TEXT NOT NULL,
+                poly_title        TEXT,
+                kalshi_ticker     TEXT,
+                entry_price       REAL,
+                position_val      REAL,
+                first_seen_at     TEXT NOT NULL,
+                last_seen_at      TEXT NOT NULL,
+                resolved          INTEGER NOT NULL DEFAULT 0,
+                hit               INTEGER,
+                resolved_pct_pnl  REAL,
+                resolved_cash_pnl REAL,
+                resolved_at       TEXT,
+                UNIQUE(wallet, poly_slug, outcome)
+            );
             CREATE INDEX IF NOT EXISTS idx_signals_ts     ON signals(timestamp);
             CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker);
             CREATE INDEX IF NOT EXISTS idx_blind_scores_ticker ON blind_scores(ticker);
+            CREATE INDEX IF NOT EXISTS idx_smf_wallet   ON smart_money_fills(wallet);
+            CREATE INDEX IF NOT EXISTS idx_smf_resolved ON smart_money_fills(resolved);
         """)
         # Additive schema migration — non-destructive, safe to run repeatedly.
         for col in [
@@ -2771,3 +2792,139 @@ def get_stats_by_heuristic_label() -> list[dict]:
             "total_pnl":       r["total_pnl"],
         })
     return result
+
+
+# ── Smart money fills persistence ───────────────────────────────────────────
+# smart-money-fills-persistence-build (2026-09-07): no table anywhere in this
+# codebase previously persisted individual wallet fills with resolution
+# outcomes over time -- diagnose_discovery()/run_smart_money_scan() computed
+# wallet-level stats live, on demand, against Polymarket's API each call,
+# with nothing written to leviathan.db. This is what per-wallet-track-record,
+# skill-vs-luck-weighting, and wallet-tracking-dashboard are gated behind
+# (resolved_count_per_wallet_max >= 10) -- building the table alone does not
+# unlock those; enough real resolved fills still need to accumulate after.
+
+def record_smart_money_fills(trader_data: dict) -> dict:
+    """
+    Upserts one smart_money_fills row per (wallet, poly_slug, outcome) for
+    every currently-open, qualifying position observed this scan (only
+    verified watchlist wallets -- see analysis.smart_money_scan.
+    fetch_watchlist_positions).
+
+    entry_price/first_seen_at are captured only on first observation and
+    never overwritten afterward -- Polymarket's positions API exposes the
+    wallet's currently-held state, not exact historical fill timestamps or
+    prices, so "the first time Leviathan observed this open position" is
+    the closest available proxy for a real fill record, not an exact one.
+    Position size (position_val) and last_seen_at DO refresh each scan
+    while the position stays open, so a currently-open row always reflects
+    the latest observed size.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    inserted = 0
+    refreshed = 0
+    with _db() as conn:
+        for name, data in trader_data.items():
+            if not data.get("verified"):
+                continue
+            wallet = data.get("address", "")
+            if not wallet:
+                continue
+            for p in data.get("positions", []):
+                slug = (p.get("eventSlug") or p.get("slug") or "").strip()
+                outcome = (p.get("outcome") or "").strip()
+                if not slug or not outcome:
+                    continue
+                existing = conn.execute(
+                    "SELECT id FROM smart_money_fills WHERE wallet=? AND poly_slug=? AND outcome=?",
+                    (wallet, slug, outcome),
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE smart_money_fills SET last_seen_at=?, position_val=? WHERE id=?",
+                        (now, float(p.get("currentValue") or 0), existing["id"]),
+                    )
+                    refreshed += 1
+                else:
+                    conn.execute(
+                        "INSERT INTO smart_money_fills "
+                        "(wallet, trader_name, poly_slug, outcome, poly_title, entry_price, "
+                        " position_val, first_seen_at, last_seen_at, resolved) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                        (wallet, name, slug, outcome, p.get("title", ""),
+                         float(p.get("curPrice") or p.get("avgPrice") or 0),
+                         float(p.get("currentValue") or 0), now, now),
+                    )
+                    inserted += 1
+    return {"inserted": inserted, "refreshed": refreshed}
+
+
+def backfill_smart_money_resolutions(trader_data: dict) -> dict:
+    """
+    Marks previously-recorded unresolved fills as resolved once Polymarket's
+    API shows that exact (wallet, poly_slug, outcome) position as redeemable
+    -- the same signal sources.accounts._score_wallet already uses to decide
+    a position is resolved, and pct_pnl > 0 as the same hit/win definition
+    used there too (kept consistent with the existing wallet-scoring logic
+    rather than inventing a second definition of "won").
+
+    Never infers resolution from absence -- a position missing from this
+    scan's all_positions (API pagination limit -- fetch_user_positions caps
+    at 500 -- or a position closed before the market resolved) is NOT the
+    same as confirmed-resolved, so it's left untouched rather than guessed
+    at. Only a positive redeemable=True observation on the same
+    (wallet, poly_slug, outcome) ever triggers the update.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    resolved_count = 0
+    with _db() as conn:
+        for name, data in trader_data.items():
+            if not data.get("verified"):
+                continue
+            wallet = data.get("address", "")
+            if not wallet:
+                continue
+            unresolved = conn.execute(
+                "SELECT id, poly_slug, outcome FROM smart_money_fills WHERE wallet=? AND resolved=0",
+                (wallet,),
+            ).fetchall()
+            if not unresolved:
+                continue
+            pending = {(r["poly_slug"], r["outcome"]): r["id"] for r in unresolved}
+            for p in data.get("all_positions", []):
+                if not p.get("redeemable"):
+                    continue
+                slug = (p.get("eventSlug") or p.get("slug") or "").strip()
+                outcome = (p.get("outcome") or "").strip()
+                key = (slug, outcome)
+                if key not in pending:
+                    continue
+                pct = float(p.get("percentPnl") or 0)
+                cash = float(p.get("cashPnl") or 0)
+                conn.execute(
+                    "UPDATE smart_money_fills SET resolved=1, hit=?, resolved_pct_pnl=?, "
+                    "resolved_cash_pnl=?, resolved_at=? WHERE id=?",
+                    (1 if pct > 0 else 0, pct, cash, now, pending[key]),
+                )
+                resolved_count += 1
+    return {"resolved": resolved_count}
+
+
+def get_resolved_count_per_wallet_max() -> int:
+    """
+    Max number of RESOLVED smart_money_fills rows for any single wallet --
+    the gate metric per-wallet-track-record/skill-vs-luck-weighting/
+    wallet-tracking-dashboard are blocked behind. Returns 0 if the table is
+    empty or missing (never fabricates a nonzero count).
+    """
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT MAX(cnt) AS m FROM ("
+                "  SELECT wallet, COUNT(*) AS cnt FROM smart_money_fills"
+                "  WHERE resolved=1 GROUP BY wallet"
+                ")"
+            ).fetchone()
+            return row["m"] or 0
+    except Exception:
+        return 0

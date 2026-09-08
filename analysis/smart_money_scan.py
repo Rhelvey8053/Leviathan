@@ -219,12 +219,19 @@ def fetch_watchlist_positions(config: dict, force: bool = False) -> dict[str, li
         ]
         open_pos.sort(key=lambda p: float(p.get("currentValue") or 0), reverse=True)
         result[name] = {
-            "address":     addr,
-            "monthly_pnl": monthly,
-            "positions":   open_pos,
-            "verified":    True,
-            "fail_reason": None,
-            "stats":       stats,
+            "address":       addr,
+            "monthly_pnl":   monthly,
+            "positions":     open_pos,
+            # smart-money-fills-persistence-build: kept alongside the
+            # filtered `positions` list (not a replacement) specifically so
+            # the fills writer/backfill can see previously-open positions
+            # that have since become redeemable (resolved) -- `positions`
+            # itself excludes redeemable ones by design, so resolution
+            # detection needs the unfiltered set.
+            "all_positions": all_positions,
+            "verified":      True,
+            "fail_reason":   None,
+            "stats":         stats,
         }
         print(f"  {name:<18}  ${monthly/1e6:.1f}M/mo  {len(open_pos)} open positions >= ${min_val:,}")
 
@@ -429,6 +436,21 @@ def run_smart_money_scan(config: dict | None = None, force_refresh: bool = False
 
     trader_data   = fetch_watchlist_positions(config, force=force_refresh)
     kalshi_titles = _load_kalshi_titles()
+
+    # smart-money-fills-persistence-build: backfill BEFORE recording this
+    # scan's open positions, so a position that resolved between scans is
+    # marked resolved using the fill row that already existed, not
+    # overwritten as still-open by the record step running first.
+    try:
+        from core.logger import record_smart_money_fills, backfill_smart_money_resolutions
+        backfill_result = backfill_smart_money_resolutions(trader_data)
+        record_result   = record_smart_money_fills(trader_data)
+        if backfill_result["resolved"] or record_result["inserted"]:
+            print(f"  [smart_money_fills] +{record_result['inserted']} new, "
+                  f"{record_result['refreshed']} refreshed, "
+                  f"{backfill_result['resolved']} newly resolved")
+    except Exception as e:
+        print(f"  [warn] smart_money_fills persistence failed (non-fatal): {e}")
 
     print(f"\n  Kalshi snapshot: {len(kalshi_titles)} markets loaded for cross-reference\n")
     print("=" * 100)

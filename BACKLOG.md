@@ -3,7 +3,7 @@ Last updated: 2026-09-07 | Metrics: resolved=37, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (8)
+## Ready (7)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -11,7 +11,6 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 3 | windows-defender-cpu-contention-2026-08-30 | Found 2026-08-30 while investigating a garbled weekly_code_audit.py run and a main.py catch-up run that appeared stuck on one step for a long stretch (both eventually completed -- confirmed slow, not… | infra |
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
-| 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
 
@@ -31,7 +30,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (102)
+## Done (103)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -121,6 +120,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | rolled-market-repeat-detection | Investigated then built 2026-08-24. | calibration |
 | 4 | signal-csv-strategy-review-2026-08 | User asked for a strategy-standpoint review of signals.csv -- are we capturing everything useful, is there anything we could collect but aren't. | reporting |
 | 4 | signal-scan-log-split-2026-08 | User opened signals.csv directly in Excel and found it looked mostly empty/broken. | data-quality |
+| 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
 | 4 | streamlit-dashboard-2026-08 | Built a free local Streamlit dashboard (dashboard/) as a Power BI alternative -- three pages (Overview, Signal Breakdown, Signal Log) reading the existing data/powerbi_export CSV export, additive… | reporting |
 | 4 | trial-stronger-model-main-scoring | Using the now-live config.llm.cli_model_override (see wire-llm-model-cli-flag, done -- no depends_on here since that item is already done as of this item's own creation, not a real gate), run a… | calibration |
 | 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. | infra |
