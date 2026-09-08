@@ -79,7 +79,12 @@ def main():
     print(f"  Total paper signals:  {stats['total_calls']}")
     print(f"  Resolved:             {stats['resolved']}")
     print(f"  Win rate:             {_wr(stats['win_rate'])}")
-    print(f"  Hypothetical P&L:     {_pnl(stats['total_hypothetical_pnl'], unit_size)}")
+    # get_stats()'s total_hypothetical_pnl is already real, stake-weighted
+    # dollars (2026-09-08 fix) -- printed directly, not through _pnl(),
+    # which multiplies by unit_size for the *_by_group breakdown tables
+    # below (still raw per-$1-notional sums, out of scope for that fix).
+    _headline_pnl = stats['total_hypothetical_pnl']
+    print(f"  Hypothetical P&L:     {f'${_headline_pnl:+.2f}' if _headline_pnl is not None else '--'}")
     bs = brier.get("brier_score")
     bs_n = brier.get("n", 0)
     bs_label = brier.get("label", "PENDING")

@@ -140,11 +140,11 @@
     "_blind_arm_notes": "price-blind-arm: when enabled, samples up to sample_size markets per run (from those the anchored scorer already scored) and re-scores them with no market price shown and no price-anchoring instructions, via the metered Anthropic API (core.llm.score_blind_via_api, counts against llm.daily_cost_ceiling_usd). Results are logged to their own blind_scores DB table and never feed signal selection. Off by default because this spends real metered API cost on every run it fires, unlike the main scan (Pro subscription, no per-token bill) -- enable deliberately, not as a default-on side effect of an unrelated config change."
   },
   "betting": {
-    "unit_size": 10,
+    "unit_size": 50,
     "min_ev_pct_of_unit": 0.25,
-    "dynamic_sizing_enabled": false,
+    "dynamic_sizing_enabled": true,
     "confidence_stake_multipliers": {"HIGH": 1.5, "MED": 1.0, "LOW": 0.5},
-    "_betting_notes": "min_ev_pct_of_unit was lowered from 0.50 to 0.25 (goal 4d). Historical check showed 0.50 passed only ~6.5% of logged signals. Revisit once n>=20 resolved signals exist so the floor can be grounded in observed edge decay. dynamic_sizing_enabled (2026-07-27) is a human opt-in for confidence-weighted stake sizing (core/sizing.py) -- stays fully inert until resolved_count>=30 AND resolved_count_per_category_max>=15 (mirrors auto-calibration-loop's own trigger), regardless of this flag."
+    "_betting_notes": "min_ev_pct_of_unit was lowered from 0.50 to 0.25 (goal 4d). Historical check showed 0.50 passed only ~6.5% of logged signals. Revisit once n>=20 resolved signals exist so the floor can be grounded in observed edge decay. dynamic_sizing_enabled (2026-07-27) is a human opt-in for confidence-weighted stake sizing (core/sizing.py) -- stays fully inert until resolved_count>=30 AND resolved_count_per_category_max>=15 (mirrors auto-calibration-loop's own trigger), regardless of this flag. UPDATE 2026-09-08: unit_size raised 10->50 and dynamic_sizing_enabled turned on (user request) once the live-metrics half of the gate cleared -- see config.json's own note for the full rationale and the backfill applied to past resolved signals."
   },
   "report": {
     "email_to": "your@email.com",

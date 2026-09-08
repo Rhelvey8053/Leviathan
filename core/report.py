@@ -1522,7 +1522,7 @@ def compile_report(
     out.append(f"  Win Rate:       {f'{wr:.1f}%' if wr is not None else '— (no resolved markets yet)'}")
     out.append(_wilson_ci(wr if wr is not None else 0.0, res))
     out.append(f"  Avg Edge:       {_pct(ae) if ae is not None else '—'}")
-    out.append(f"  Hypothetical P&L (${unit_size}/contract): {f'${pnl:.2f}' if pnl is not None else '—'}")
+    out.append(f"  Hypothetical P&L: {f'${pnl:.2f}' if pnl is not None else '—'}")
     out.append("")
 
     if probe_stats:

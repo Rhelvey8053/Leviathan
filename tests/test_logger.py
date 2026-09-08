@@ -3577,11 +3577,13 @@ def test_log_pass_stores_tier23_fields_too(tmp_db):
 # ─── stake_size_hypothetical (confidence-weighted sizing, 2026-07-27) ─────────
 #
 # resolve_outcomes() now also persists stake_size_hypothetical via
-# core.sizing.compute_stake_size() -- a SEPARATE column, never used in
-# place of the existing flat-unit_size pnl_if_traded path. Mocking
-# core.sizing.compute_metrics (not core.logger) since that's where
-# resolve_outcomes' local `from core.sizing import compute_stake_size`
-# actually resolves eligibility from.
+# core.sizing.compute_stake_size(). UPDATE 2026-09-08: once dynamic sizing
+# is turned on for real (not just a shadow preview), get_stats()'s headline
+# total_hypothetical_pnl uses this column directly (pnl_if_traded * stake)
+# instead of a flat unit_size multiply -- see the get_stats() dollar tests
+# below. Mocking core.sizing.compute_metrics (not core.logger) since
+# that's where resolve_outcomes' local `from core.sizing import
+# compute_stake_size` actually resolves eligibility from.
 
 def test_schema_includes_stake_size_hypothetical(tmp_db):
     with logger._db() as conn:
@@ -3640,6 +3642,112 @@ def test_resolve_outcomes_stake_does_not_affect_pnl_if_traded(tmp_db):
         ).fetchone()
     assert row["pnl_if_traded"] == pytest.approx(0.70)  # YES at 0.30 resolves YES
     assert row["stake_size_hypothetical"] == pytest.approx(15.0)
+
+
+# ─── get_stats() dollar P&L (2026-09-08 fix) ───────────────────────────────────
+#
+# total_hypothetical_pnl was, until this fix, the raw SUM(pnl_if_traded) --
+# a per-$1-notional ratio, never actually multiplied by any stake -- even
+# though every display site labeled it as dollars. Now it's
+# SUM(pnl_if_traded * stake_size_hypothetical), real dollars, falling back
+# to $10 (this project's original flat unit_size) for legacy rows that
+# predate the column.
+
+def test_get_stats_pnl_is_stake_weighted_dollars(tmp_db):
+    cid1, cid2 = str(uuid.uuid4())[:8], str(uuid.uuid4())[:8]
+    _insert(cid1, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    _insert(cid2, "T2", "NO", 0.30, outcome="NO", result="WIN", pnl=0.30)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET stake_size_hypothetical=75.0 WHERE call_id=?", (cid1,))
+        conn.execute("UPDATE signals SET stake_size_hypothetical=25.0 WHERE call_id=?", (cid2,))
+    stats = logger.get_stats()
+    # 0.70*75 + 0.30*25 = 52.5 + 7.5 = 60.0, NOT (0.70+0.30) = 1.0 (the old bug)
+    assert stats["total_hypothetical_pnl"] == pytest.approx(60.0)
+
+
+def test_get_stats_pnl_falls_back_to_ten_for_legacy_null_stake(tmp_db):
+    """Rows predating stake_size_hypothetical (NULL) price at the original
+    $10 flat unit_size, not whatever the current live unit_size is -- old
+    rows aren't retroactively re-priced at a stake they were never sized at."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    stats = logger.get_stats()
+    assert stats["total_hypothetical_pnl"] == pytest.approx(7.0)  # 0.70 * 10
+
+
+# ─── backfill_stake_sizes() (2026-09-08) ───────────────────────────────────────
+
+def test_backfill_stake_sizes_updates_resolved_rows(tmp_db):
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET confidence='HIGH' WHERE call_id=?", (cid,))
+    config = {"betting": {"unit_size": 50, "dynamic_sizing_enabled": True}}
+    with patch("core.sizing.compute_metrics", return_value={
+        "resolved_count": 30, "resolved_count_per_category_max": 15,
+    }):
+        result = logger.backfill_stake_sizes(config)
+    assert result["updated"] == 1
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT stake_size_hypothetical FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["stake_size_hypothetical"] == pytest.approx(75.0)  # 50 * 1.5 (HIGH)
+
+
+def test_backfill_stake_sizes_skips_unresolved_rows(tmp_db):
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30)  # no outcome -- still open
+    config = {"betting": {"unit_size": 50, "dynamic_sizing_enabled": True}}
+    result = logger.backfill_stake_sizes(config)
+    assert result["updated"] == 0
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT stake_size_hypothetical FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["stake_size_hypothetical"] is None
+
+
+def test_backfill_stake_sizes_ignores_real_fills(tmp_db):
+    """Real fills track actual executed dollars, not a hypothetical stake --
+    backfill must never touch source='real_fill' rows."""
+    cid = str(uuid.uuid4())[:8]
+    with logger._db() as conn:
+        conn.execute("""
+            INSERT INTO signals
+            (call_id, timestamp, ticker, title, market_price, our_estimate,
+             edge, direction, confidence, whale_detected, whale_direction,
+             outcome, result, pnl_if_traded, run_id, source)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            cid, datetime.now(timezone.utc).isoformat(), "T1", "Test", 0.30, 0.40,
+            0.10, "YES", "HIGH", 0, "", "YES", "WIN", 0.70, "run-test", "real_fill",
+        ))
+    config = {"betting": {"unit_size": 50, "dynamic_sizing_enabled": True}}
+    result = logger.backfill_stake_sizes(config)
+    assert result["updated"] == 0
+
+
+def test_backfill_stake_sizes_overwrites_existing_flat_values(tmp_db):
+    """Rows already backfilled/resolved at the old $10 flat rate get
+    recomputed under the new config, not left stale."""
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    with logger._db() as conn:
+        conn.execute(
+            "UPDATE signals SET confidence='LOW', stake_size_hypothetical=10.0 WHERE call_id=?",
+            (cid,),
+        )
+    config = {"betting": {"unit_size": 50, "dynamic_sizing_enabled": True}}
+    with patch("core.sizing.compute_metrics", return_value={
+        "resolved_count": 30, "resolved_count_per_category_max": 15,
+    }):
+        logger.backfill_stake_sizes(config)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT stake_size_hypothetical FROM signals WHERE call_id=?", (cid,)
+        ).fetchone()
+    assert row["stake_size_hypothetical"] == pytest.approx(25.0)  # 50 * 0.5 (LOW)
 
 
 # ─── reasoning / sources persistence (GOAL_subscriber_report.md Phase 3) ─────

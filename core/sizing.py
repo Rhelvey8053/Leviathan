@@ -21,13 +21,23 @@ live DB on every call rather than caching, so it can never report stale
 eligibility from an earlier, thinner dataset.
 
 compute_stake_size() is called from core.logger.resolve_outcomes() and
-persisted to signals.stake_size_hypothetical -- a NEW, SEPARATE column,
-never used in place of the existing pnl_if_traded/unit_size-based
-headline P&L anywhere. Comparing what P&L would have been under dynamic
-sizing is analysis/dynamic_sizing_preview.py's job, kept deliberately
-apart from analysis/calibration.py and the README's headline figures --
-same "separate table/column, never pooled" discipline used elsewhere in
-this codebase (replay_signals vs. signals, blind_scores vs. signals).
+persisted to signals.stake_size_hypothetical.
+
+UPDATE 2026-09-08: the live-metrics half of the gate cleared
+(resolved_count=38, resolved_count_per_category_max=16) and the user
+explicitly turned dynamic_sizing_enabled on (unit_size raised 10->50 in
+the same request) -- at that point confidence-weighted stake_size_hypothetical
+stopped being a shadow/preview-only scenario and became the real intended
+stake, so core.logger.get_stats()'s headline total_hypothetical_pnl now
+sums pnl_if_traded * stake_size_hypothetical (real dollars) rather than
+a flat unit_size multiply. core.logger.backfill_stake_sizes() recomputes
+stake_size_hypothetical for every already-resolved signal on demand (e.g.
+after this exact kind of config change), using this same
+compute_stake_size() function, so past and future bets are priced
+identically. analysis/dynamic_sizing_preview.py's OWN flat-vs-dynamic
+comparison is unaffected by this and remains a useful "what would a flat
+scheme have done instead" counterfactual -- it was never the thing that
+changed meaning here.
 """
 
 from backlog.checker import compute_metrics, DEFAULT_DB

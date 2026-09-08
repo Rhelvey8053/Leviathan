@@ -1143,6 +1143,45 @@ def resolve_outcomes(config: dict) -> int:
     return resolved_count
 
 
+def backfill_stake_sizes(config: dict) -> dict:
+    """
+    Recomputes stake_size_hypothetical for every already-resolved paper
+    signal using the CURRENT config (betting.unit_size /
+    betting.confidence_stake_multipliers / dynamic sizing eligibility) via
+    core.sizing.compute_stake_size() -- the exact same function
+    resolve_outcomes() calls for newly-resolved signals, so a backfilled
+    row and a freshly-resolved row are computed identically.
+
+    One-time/on-demand recompute, e.g. after unit_size or the confidence
+    multiplier table changes and the human wants that reflected in past
+    hypothetical stakes too, not just future ones. Real fills
+    (source='real_fill') are untouched -- they track actual executed
+    dollars, not a hypothetical stake.
+    """
+    from core.sizing import compute_stake_size
+
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT call_id, confidence FROM signals WHERE ({_PAPER}) "
+                f"AND outcome != '' AND outcome IS NOT NULL"
+            ).fetchall()
+    except Exception:
+        return {"updated": 0}
+
+    updated = 0
+    with _db() as conn:
+        for row in rows:
+            stake = compute_stake_size({"confidence": row["confidence"]}, config)
+            conn.execute(
+                "UPDATE signals SET stake_size_hypothetical=? WHERE call_id=?",
+                (stake, row["call_id"]),
+            )
+            updated += 1
+
+    return {"updated": updated}
+
+
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 # Paper signals are source='paper' or NULL (pre-migration rows).
@@ -1416,7 +1455,20 @@ def get_category_breakdown() -> list[dict]:
 
 
 def get_stats() -> dict:
-    """Stats for paper (simulated) signals only — never blends with real fills."""
+    """
+    Stats for paper (simulated) signals only -- never blends with real fills.
+
+    total_hypothetical_pnl is real dollars: SUM(pnl_if_traded * stake), where
+    stake is each row's own stake_size_hypothetical (2026-09-08 fix -- every
+    call site displaying this value already labeled it as dollars, but it
+    was actually the raw per-$1-notional ratio sum with no stake applied at
+    all, silently identical regardless of unit_size or confidence-weighted
+    sizing). Legacy rows predating the stake_size_hypothetical column
+    (NULL) fall back to $10, the flat unit_size in effect for all of this
+    project's history before dynamic sizing existed -- not the current
+    unit_size, so old rows aren't retroactively re-priced at a stake they
+    were never actually sized at.
+    """
     _NO_PASS = f"({_PAPER}) AND direction != 'PASS'"
     try:
         with _db() as conn:
@@ -1431,7 +1483,8 @@ def get_stats() -> dict:
                 f"SELECT AVG(edge) FROM signals WHERE {_NO_PASS} AND edge IS NOT NULL"
             ).fetchone()[0]
             total_pnl = conn.execute(
-                f"SELECT SUM(pnl_if_traded) FROM signals WHERE {_NO_PASS} AND pnl_if_traded IS NOT NULL"
+                f"SELECT SUM(pnl_if_traded * COALESCE(stake_size_hypothetical, 10.0)) "
+                f"FROM signals WHERE {_NO_PASS} AND pnl_if_traded IS NOT NULL"
             ).fetchone()[0]
             best  = conn.execute(
                 f"SELECT * FROM signals WHERE {_NO_PASS} AND edge IS NOT NULL ORDER BY edge DESC LIMIT 1"

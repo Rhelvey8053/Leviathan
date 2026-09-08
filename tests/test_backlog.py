@@ -510,8 +510,20 @@ def test_parses_and_96_items(backlog_data):
     already staged by a concurrent process) rather than just its own one
     intended data file. Fixed by scoping both the no-changes check and the
     commit itself to that one path.
+
+    125, not 123: user asked to raise unit_size 10->50, keep the existing
+    1.5/1.0/0.5 confidence multipliers, turn dynamic_sizing_enabled on
+    (live-metrics gate already clear), and apply it to past resolved bets
+    too. Found and fixed a real, separate bug while implementing:
+    core.logger.get_stats()'s total_hypothetical_pnl was never actually
+    multiplied by unit_size or stake -- every "Hypothetical P&L" figure in
+    every live email was a raw per-$1 ratio silently mislabeled as
+    dollars. Fixed the headline (dynamic-sizing-activated-and-pnl-scaling-bug-fix,
+    done) and logged the ~12 sibling per-group breakdown functions with
+    the identical bug as a separate, deliberately out-of-scope follow-up
+    (per-group-pnl-tables-still-flat-not-stake-weighted, ready).
     """
-    assert len(backlog_data["items"]) == 123
+    assert len(backlog_data["items"]) == 125
 
 
 def test_all_ids_unique(backlog_data):

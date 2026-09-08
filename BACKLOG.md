@@ -3,7 +3,7 @@ Last updated: 2026-09-08 | Metrics: resolved=38, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (7)
+## Ready (8)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -11,6 +11,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | entertainment-award-emmy-coverage-gap | The same systematic sweep that produced political-coup-couples-misfire / fda-adcom-broadcom-misfire / nasa-mission-hataoka-partial-fix also flagged "entertainment award" (grammy/oscar/academy… | calibration |
+| 4 | per-group-pnl-tables-still-flat-not-stake-weighted | Found alongside dynamic-sizing-activated-and-pnl-scaling-bug-fix (2026-09-08): core.logger.get_stats() had a real bug where its headline total_hypothetical_pnl was displayed as dollars everywhere but… | infra |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
 
@@ -30,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (108)
+## Done (109)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -67,6 +68,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 2 | automation-health-monitoring | Built and verified 2026-08-24. | infra |
 | 2 | citations-provenance-grounding | Ground scorer output in the market's supplied sources via the Anthropic Citations API, so each rationale claim carries a machine-checkable cited-text span (document index + char offset) rather than… | validation |
 | 2 | discovery-funnel-diagnostic | Per-stage drop-off counter + gating-metric distributions for discover_winners; diagnoses why the winner gate finds zero (sample sourcing vs. | smart-money |
+| 2 | dynamic-sizing-activated-and-pnl-scaling-bug-fix | User request 2026-09-08: raise unit_size 10->50, keep the existing confidence_stake_multipliers (HIGH 1.5 / MED 1.0 / LOW 0.5), turn dynamic_sizing_enabled on (the live-metrics half of its gate --… | infra |
 | 2 | email-html-render | Render the daily report as email-safe HTML (multipart/alternative) matching the signed-off design, consuming goal_1 Kalshi links, sharing computed values with the text renderer so the two bodies can… | reporting |
 | 2 | fix-fetch-market-history-endpoint | core.kalshi.fetch_market_history() calls /markets/{ticker}/history, which does not exist on Kalshi's API -- confirmed empirically on 2026-07-25: every ticker tried, including active high-volume… | data-quality |
 | 2 | fix-weekly-code-audit-timeout | Found 2026-08-24 via daily_digest.py's new weekly-log-tail section -- previously silent, since output only ever went to logs/weekly_code_audit.log, which nobody had reason to open. | infra |
