@@ -163,8 +163,15 @@ st.divider()
 st.subheader("Winning Whales")
 st.caption(
     "Polymarket wallets with a genuine resolved track record -- ranked by win rate, then "
-    "realized P&L. 'Live Picks' below the leaderboard is what these specific wallets are "
-    "betting on RIGHT NOW, in plain language, with a link -- the actionable part."
+    "realized P&L. **Win rate** = the share of a wallet's resolved bets that actually settled "
+    "in their favor, checked against Polymarket's official market-resolution data. "
+    "**P&L ($)** = realized profit already banked plus the true payout on whatever they held "
+    "to resolution, minus what they paid -- their real, all-in dollar result on resolved bets. "
+    "(Fixed 2026-09-08: Polymarket's own per-position P&L numbers turn out to read as a near-"
+    "total loss for every resolved bet regardless of whether it actually won, so this page no "
+    "longer uses them -- see the Trader Profile page for the full story on any wallet.) "
+    "'Live Picks' below the leaderboard is what these specific wallets are betting on RIGHT "
+    "NOW, in plain language, with a link -- the actionable part."
 )
 
 if not _winners:
@@ -185,10 +192,11 @@ else:
             "P&L ($)": w.get("resolved_cash_pnl"),
             "avg P&L (%)": w.get("resolved_avg_pct_pnl"),
             "profile": w.get("profile_url") or None,
+            "_address": w.get("address"),
         })
     board_df = pd.DataFrame(board_rows)
     st.dataframe(
-        board_df, use_container_width=True, hide_index=True,
+        board_df.drop(columns=["_address"]), use_container_width=True, hide_index=True,
         column_config={
             "wallet": st.column_config.TextColumn("wallet", width="medium"),
             "win rate": st.column_config.NumberColumn("win rate", format="%.1f%%"),
@@ -197,6 +205,18 @@ else:
             "profile": st.column_config.LinkColumn("profile", display_text="View ↗"),
         },
     )
+
+    st.caption("Want the full picture on one wallet -- why it's tracked, its current bets, and its bet-by-bet history?")
+    pick_col, btn_col = st.columns([4, 1])
+    _label_to_address = {r["wallet"]: r["_address"] for r in board_rows}
+    picked_label = pick_col.selectbox(
+        "Pick a wallet", list(_label_to_address.keys()),
+        label_visibility="collapsed", key="winning_whale_picker",
+    )
+    if btn_col.button("Open Profile →", key="open_winning_whale_profile", use_container_width=True):
+        st.session_state["profile_wallet_address"] = _label_to_address[picked_label]
+        st.session_state["profile_wallet_label"] = picked_label
+        st.switch_page("pages/6_Trader_Profile.py")
 
     st.markdown("**Live Picks from Winning Wallets**")
     st.caption(
@@ -411,6 +431,23 @@ st.caption(
 _watchlist = _config.get("accounts", {}).get("watchlist", [])
 _fills = _logger.get_smart_money_fills()
 _fills_df = pd.DataFrame(_fills)
+
+if _watchlist:
+    st.caption("Look up any of the 20 hand-picked watchlist wallets -- why it's tracked (or isn't), its current bets, and its full resolved bet history.")
+    wl_pick_col, wl_btn_col = st.columns([4, 1])
+    _wl_label_to_address = {
+        f"{w.get('name', w['address'][:10])} ({w['address'][:8]}…)": w["address"]
+        for w in _watchlist
+    }
+    wl_picked_label = wl_pick_col.selectbox(
+        "Pick a watchlist wallet", list(_wl_label_to_address.keys()),
+        label_visibility="collapsed", key="watchlist_picker",
+    )
+    if wl_btn_col.button("Open Profile →", key="open_watchlist_profile", use_container_width=True):
+        st.session_state["profile_wallet_address"] = _wl_label_to_address[wl_picked_label]
+        st.session_state["profile_wallet_label"] = wl_picked_label.split(" (")[0]
+        st.switch_page("pages/6_Trader_Profile.py")
+    st.markdown("")
 
 _wallets_with_fills = int(_fills_df["wallet"].nunique()) if not _fills_df.empty else 0
 _open_n = int((_fills_df["resolved"] == 0).sum()) if not _fills_df.empty else 0

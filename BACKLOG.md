@@ -1,5 +1,5 @@
 # Leviathan Backlog
-Last updated: 2026-09-08 | Metrics: resolved=38, fills=7
+Last updated: 2026-09-09 | Metrics: resolved=39, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
@@ -31,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (113)
+## Done (114)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -82,6 +82,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 2 | replay-asof-reconstruction | Given a ticker and a historical date, reconstruct the market state as it stood then, sourcing from data/snapshots where available and Kalshi history beyond that. | backtesting |
 | 2 | replay-settled-fetcher | Pull Kalshi settled markets with their final outcomes, reaching further back than the local snapshot archive begins. | backtesting |
 | 2 | resolve-first-top-n-per-bucket | User asked to expand scope on active bets to collect resolved_count data faster, without breaking core practices (many backlog gates -- calibration-curve n>=50, edge-decay-analysis n>=30,… | data-quality |
+| 2 | resolved-position-win-loss-bug-fixed-real-winner-found | User (2026-09-08): 'So I want to take a look at the winning traders and whale portion... | smart-money |
 | 2 | sample-size-gates | Document the minimum resolved-signal thresholds that gate each downstream analysis step. | validation |
 | 2 | smart-money-fills-table-missing | Found 2026-08-24/25 by scripts/weekly_code_audit.py's live audit run (the same run used to verify the Write->Edit permission fix): the resolved_count_per_wallet_max backlog-gate metric queries a… | infra |
 | 2 | wake-triggered-task-catchup | Built 2026-08-24, registered and confirmed State=Ready (not stuck Queued, unlike the two tasks registered earlier the same day). | infra |

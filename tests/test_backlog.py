@@ -579,8 +579,13 @@ def test_parses_and_96_items(backlog_data):
     narrative (backlog.json's own item text, PROGRESS.md, README's dated
     mention, this file's own historical docstrings) untouched -- same
     discipline as the README/METHODOLOGY refresh earlier the same day.
+
+    130, not 129: added one more item the same session (2026-09-09) for
+    the resolved-position win/loss measurement fix, the watchlist finding
+    (0/20 real winners), the broad-scan finding (1 genuine winner,
+    Poligarch), and the discover_winners() time-budget operational fix.
     """
-    assert len(backlog_data["items"]) == 129
+    assert len(backlog_data["items"]) == 130
 
 
 def test_all_ids_unique(backlog_data):

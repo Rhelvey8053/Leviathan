@@ -1,8 +1,8 @@
 """
-tests/test_accounts.py — Offline tests for accounts.py wallet-selection fix (Goal 2d PART D).
+tests/test_accounts.py — Offline tests for accounts.py wallet-selection fix (Goal 2d PART D),
+and for the 2026-09-08 true-resolution win/loss fix (see accounts.fetch_market_resolution).
 
-All tests use synthesised position data only — no network calls.
-No existing test was modified to accommodate these changes.
+All tests use synthesised position/resolution data only — no network calls.
 """
 
 import sys
@@ -17,22 +17,55 @@ from unittest.mock import patch
 from sources.accounts import (
     _score_wallet, _is_winner, _is_coinflip, _classify_wallet,
     _distribution, diagnose_discovery, format_diagnostic_report,
+    fetch_market_resolution, fetch_resolutions_for_positions,
+    gate_checklist, get_wallet_profile, discover_winners,
     GATE_ORDER,
 )
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _pos(title: str, pct: float, cash: float, resolved: bool = False) -> dict:
-    """Minimal position dict."""
-    return {
-        "title":      title,
-        "percentPnl": pct,
-        "cashPnl":    cash,
-        "redeemable": resolved,
-        "eventSlug":  "",
-        "outcome":    "yes",
+_CID_COUNTER = [0]
+
+
+def _pos(title: str, won: bool | None, realized: float = 0.0,
+         initial: float = 100.0, size: float = 100.0, cid: str = None) -> dict:
+    """
+    Minimal resolved-shaped position dict + its resolution contribution.
+    won=None means an open (non-redeemable) position — no resolution entry.
+    Returns (position_dict, resolution_entry_or_None) where resolution_entry
+    is (conditionId, {"Yes": won}).
+    """
+    if cid is None:
+        _CID_COUNTER[0] += 1
+        cid = f"cond{_CID_COUNTER[0]}"
+    position = {
+        "title":       title,
+        "conditionId": cid,
+        "outcome":     "Yes",
+        "realizedPnl": realized,
+        "initialValue": initial,
+        "size":        size,
+        "redeemable":  won is not None,
+        "eventSlug":   "",
+        # percentPnl still used for OPEN positions (active_markets) — irrelevant
+        # to the payout math for won is not None, but harmless to include.
+        "percentPnl":  0.0,
     }
+    resolution_entry = (cid, {"Yes": won}) if won is not None else None
+    return position, resolution_entry
+
+
+def _build(specs: list[tuple]) -> tuple[list[dict], dict]:
+    """specs: list of _pos(...) return values -> (positions, resolutions)."""
+    positions = []
+    resolutions = {}
+    for position, resolution_entry in specs:
+        positions.append(position)
+        if resolution_entry:
+            cid, res = resolution_entry
+            resolutions[cid] = res
+    return positions, resolutions
 
 
 def _cfg(**overrides) -> dict:
@@ -48,13 +81,14 @@ def _cfg(**overrides) -> dict:
     return {"accounts": base}
 
 
-def _real_winners(n: int = 12, wins: int = 9) -> list[dict]:
-    """n resolved real-forecast positions; wins of them are positive."""
-    return [
-        _pos(f"Will Policy {i} happen?", 80.0 if i < wins else -30.0,
-             200.0 if i < wins else -50.0, resolved=True)
+def _real_winners(n: int = 12, wins: int = 9) -> tuple[list[dict], dict]:
+    """n resolved real-forecast positions; `wins` of them actually won."""
+    specs = [
+        _pos(f"Will Policy {i} happen?", i < wins,
+             realized=0.0, initial=100.0, size=200.0 if i < wins else 100.0)
         for i in range(n)
     ]
+    return _build(specs)
 
 
 # ── PART D tests ──────────────────────────────────────────────────────────────
@@ -63,24 +97,25 @@ class TestLuckCaseExcluded(unittest.TestCase):
     """Core regression: open-position P&L does not qualify a wallet."""
 
     def test_open_position_high_pnl_does_not_qualify(self):
-        """Wallet with 20 open positions at +500% each is excluded (resolved_count=0)."""
-        positions = [
-            _pos(f"Open Market {i}", 500.0, 1000.0, resolved=False)
-            for i in range(20)
-        ]
-        stats = _score_wallet(positions)
+        """Wallet with 20 open positions (never resolved) is excluded (resolved_count=0)."""
+        specs = [_pos(f"Open Market {i}", None) for i in range(20)]
+        for p, _ in specs:
+            p["percentPnl"] = 500.0
+        positions, resolutions = _build(specs)
+        stats = _score_wallet(positions, resolutions)
         self.assertIsNotNone(stats)
         self.assertEqual(stats["resolved_count"], 0)
         self.assertFalse(_is_winner(stats, _cfg()))
 
     def test_coinflip_resolved_does_not_count(self):
         """A wallet whose entire resolved history is coinflip titles has resolved_count=0."""
-        positions = [
-            _pos("Bitcoin Up or Down 5m", 200.0, 300.0, resolved=True),
-            _pos("Bitcoin Up or Down 1m", 100.0, 150.0, resolved=True),
-            _pos("ETH up or down", -50.0, -25.0, resolved=True),
+        specs = [
+            _pos("Bitcoin Up or Down 5m", True, realized=200.0, initial=100.0, size=300.0),
+            _pos("Bitcoin Up or Down 1m", True, realized=100.0, initial=50.0, size=150.0),
+            _pos("ETH up or down", False, realized=-50.0, initial=25.0, size=0.0),
         ]
-        stats = _score_wallet(positions)
+        positions, resolutions = _build(specs)
+        stats = _score_wallet(positions, resolutions)
         self.assertIsNotNone(stats)
         self.assertEqual(stats["resolved_count"], 0,
                          "Coinflip resolved positions must not count toward track record")
@@ -88,12 +123,13 @@ class TestLuckCaseExcluded(unittest.TestCase):
 
     def test_sports_game_resolved_does_not_count(self):
         """Positions whose titles match sports-game patterns are excluded from resolved scoring."""
-        positions = [
-            _pos("Will Germany win on 2026-06-25?", 150.0, 200.0, resolved=True),
-            _pos("Will Brazil vs. Argentina end in a draw?", 80.0, 100.0, resolved=True),
-            _pos("FIFA World Cup winner 2026", 120.0, 160.0, resolved=True),
+        specs = [
+            _pos("Will Germany win on 2026-06-25?", True, realized=150.0, initial=100.0, size=250.0),
+            _pos("Will Brazil vs. Argentina end in a draw?", True, realized=80.0, initial=50.0, size=130.0),
+            _pos("FIFA World Cup winner 2026", True, realized=120.0, initial=100.0, size=220.0),
         ]
-        stats = _score_wallet(positions)
+        positions, resolutions = _build(specs)
+        stats = _score_wallet(positions, resolutions)
         self.assertIsNotNone(stats)
         self.assertEqual(stats["resolved_count"], 0,
                          "Sports-game resolved positions must not count toward track record")
@@ -105,8 +141,8 @@ class TestVerifiedTrackRecordQualifies(unittest.TestCase):
 
     def test_twelve_resolved_real_positions_qualifies(self):
         """12 resolved non-coinflip positions with 75% win rate qualifies."""
-        positions = _real_winners(n=12, wins=9)
-        stats = _score_wallet(positions)
+        positions, resolutions = _real_winners(n=12, wins=9)
+        stats = _score_wallet(positions, resolutions)
         self.assertIsNotNone(stats)
         self.assertEqual(stats["resolved_count"], 12)
         self.assertAlmostEqual(stats["win_rate"], 75.0)
@@ -114,30 +150,68 @@ class TestVerifiedTrackRecordQualifies(unittest.TestCase):
 
     def test_below_resolved_count_threshold_excluded(self):
         """5 resolved positions (below threshold of 10) is excluded."""
-        positions = _real_winners(n=5, wins=4)
-        stats = _score_wallet(positions)
+        positions, resolutions = _real_winners(n=5, wins=4)
+        stats = _score_wallet(positions, resolutions)
         self.assertEqual(stats["resolved_count"], 5)
         self.assertFalse(_is_winner(stats, _cfg()))
 
     def test_below_win_rate_threshold_excluded(self):
         """12 resolved positions with 40% win rate (below 55%) is excluded."""
-        positions = _real_winners(n=12, wins=5)
-        stats = _score_wallet(positions)
+        positions, resolutions = _real_winners(n=12, wins=5)
+        stats = _score_wallet(positions, resolutions)
         self.assertEqual(stats["resolved_count"], 12)
         self.assertAlmostEqual(stats["win_rate"], round(5 / 12 * 100, 1))
         self.assertFalse(_is_winner(stats, _cfg()))
 
     def test_below_resolved_cash_pnl_threshold_excluded(self):
-        """12 resolved positions with negative cash PnL excluded even with high win rate."""
-        positions = [
-            _pos(f"Policy {i}", 80.0 if i < 9 else -200.0,
-                 1.0 if i < 9 else -500.0, resolved=True)
+        """12 resolved positions with negative true cash PnL excluded even with high win rate."""
+        specs = [
+            _pos(f"Policy {i}", i < 9,
+                 realized=1.0 if i < 9 else -1.0,
+                 initial=100.0,
+                 size=100.5 if i < 9 else 0.0)  # tiny win payout, big losses
             for i in range(12)
         ]
-        stats = _score_wallet(positions)
+        positions, resolutions = _build(specs)
+        stats = _score_wallet(positions, resolutions)
         self.assertEqual(stats["resolved_count"], 12)
         self.assertLess(stats["resolved_cash_pnl"], 100.0)
         self.assertFalse(_is_winner(stats, _cfg()))
+
+    def test_unknown_resolution_excludes_position_not_misclassifies(self):
+        """A resolved position with no matching entry in `resolutions` (fetch
+        failed, or market genuinely unresolved per CLOB) is excluded from
+        scoring entirely — never silently counted as a loss."""
+        positions, resolutions = _real_winners(n=12, wins=9)
+        # Drop one resolution entry — simulate a failed/missing CLOB fetch
+        dropped_cid = next(iter(resolutions))
+        del resolutions[dropped_cid]
+        stats = _score_wallet(positions, resolutions)
+        self.assertEqual(stats["resolved_count"], 11,
+                         "Position with unknown true resolution must be excluded, not counted as a loss")
+
+    def test_true_pnl_uses_realized_plus_payout_minus_cost_not_broken_fields(self):
+        """
+        Regression for the 2026-09-08 fix: true P&L = realizedPnl + payout -
+        initialValue, where payout = size if won else 0 — NOT percentPnl/
+        cashPnl (which read ~-100% for every resolved position regardless of
+        outcome, per the live-confirmed Data API bug).
+        """
+        # A winner: bought 100 shares for $50 (avgPrice 0.50), sold none
+        # (realizedPnl=0), held to resolution and won -> payout = size = 100.
+        # True P&L = 0 + 100 - 50 = +50 (=100% pct).
+        win_pos, win_res = _pos("Will X happen?", True, realized=0.0, initial=50.0, size=100.0)
+        # A loser: same shape, but resolved False -> payout = 0.
+        # True P&L = 0 + 0 - 50 = -50 (=-100% pct).
+        lose_pos, lose_res = _pos("Will Y happen?", False, realized=0.0, initial=50.0, size=100.0)
+
+        positions, resolutions = _build([(win_pos, win_res), (lose_pos, lose_res)])
+        stats = _score_wallet(positions, resolutions)
+
+        self.assertEqual(stats["resolved_count"], 2)
+        self.assertAlmostEqual(stats["win_rate"], 50.0)
+        self.assertAlmostEqual(stats["resolved_cash_pnl"], 0.0)  # +50 - 50
+        self.assertAlmostEqual(stats["resolved_avg_pct_pnl"], 0.0)  # avg(100%, -100%)
 
 
 class TestRankingOnResolvedMetrics(unittest.TestCase):
@@ -145,32 +219,29 @@ class TestRankingOnResolvedMetrics(unittest.TestCase):
 
     def test_ranking_prefers_higher_resolved_win_rate(self):
         """
-        Wallet A: resolved win_rate=80%, resolved_cash_pnl=$500, open pnl=+10%
-        Wallet B: resolved win_rate=60%, resolved_cash_pnl=$5000, open pnl=+500%
+        Wallet A: resolved win_rate=80%, higher resolved_cash_pnl
+        Wallet B: resolved win_rate=60%, lower resolved_cash_pnl
 
-        Under the old sort (avg_pct_pnl), B would rank first.
-        Under the new sort (win_rate, resolved_cash_pnl), A ranks first.
+        Ranking sorts on (win_rate, resolved_cash_pnl) — A ranks first.
         """
-        # Wallet A: high win rate, moderate cash
-        pos_a = [
-            _pos(f"Policy A{i}", 80.0 if i < 8 else -20.0,
-                 60.0 if i < 8 else -20.0, resolved=True)
+        specs_a = [
+            _pos(f"Policy A{i}", i < 8, realized=0.0, initial=100.0,
+                 size=160.0 if i < 8 else 80.0)
             for i in range(10)
         ]
-        stats_a = _score_wallet(pos_a)
+        positions_a, resolutions_a = _build(specs_a)
+        stats_a = _score_wallet(positions_a, resolutions_a)
         self.assertAlmostEqual(stats_a["win_rate"], 80.0)
 
-        # Wallet B: lower win rate but much larger cash PnL
-        pos_b = [
-            _pos(f"Policy B{i}", 60.0 if i < 6 else -30.0,
-                 800.0 if i < 6 else -100.0, resolved=True)
+        specs_b = [
+            _pos(f"Policy B{i}", i < 6, realized=0.0, initial=100.0,
+                 size=120.0 if i < 6 else 90.0)
             for i in range(10)
         ]
-        stats_b = _score_wallet(pos_b)
+        positions_b, resolutions_b = _build(specs_b)
+        stats_b = _score_wallet(positions_b, resolutions_b)
         self.assertAlmostEqual(stats_b["win_rate"], 60.0)
-        self.assertGreater(stats_b["resolved_cash_pnl"], stats_a["resolved_cash_pnl"])
 
-        # New ranking: A before B because win_rate is primary key
         wallets = [
             {"address": "A", **stats_a},
             {"address": "B", **stats_b},
@@ -182,21 +253,14 @@ class TestRankingOnResolvedMetrics(unittest.TestCase):
         self.assertEqual(wallets[0]["address"], "A",
                          "Higher win_rate wallet should rank first (resolved metric wins)")
 
-    def test_old_pnl_ranking_would_differ(self):
-        """Confirm the old avg_pct_pnl sort would produce the opposite ordering."""
-        pos_a_open = [_pos("Open A", 15.0, 50.0, resolved=False) for _ in range(10)]
-        pos_b_open = [_pos("Open B", 600.0, 5000.0, resolved=False) for _ in range(10)]
-        # A has lower open pnl, B has higher — old sort would put B first
-        # But we have no avg_pct_pnl in the new stats dict, confirming it was removed
-        stats_a = _score_wallet(pos_a_open + [
-            _pos(f"Resolved A{i}", 80.0, 60.0, resolved=True) for i in range(10)
-        ])
-        stats_b = _score_wallet(pos_b_open + [
-            _pos(f"Resolved B{i}", 60.0, 800.0, resolved=True) for i in range(10)
-        ])
-        self.assertNotIn("avg_pct_pnl", stats_a,
-                         "avg_pct_pnl (all-positions) must no longer be in stats dict")
-        self.assertIn("resolved_avg_pct_pnl", stats_a)
+    def test_avg_pct_pnl_key_absent_only_resolved_variant_present(self):
+        """Confirm the stats dict never exposes an all-positions avg_pct_pnl key."""
+        specs = [_pos(f"Resolved {i}", True, realized=0.0, initial=50.0, size=100.0) for i in range(10)]
+        positions, resolutions = _build(specs)
+        stats = _score_wallet(positions, resolutions)
+        self.assertNotIn("avg_pct_pnl", stats,
+                         "avg_pct_pnl (all-positions) must not be in stats dict")
+        self.assertIn("resolved_avg_pct_pnl", stats)
 
 
 class TestEmptyWatchlistDoesNotCrash(unittest.TestCase):
@@ -206,11 +270,16 @@ class TestEmptyWatchlistDoesNotCrash(unittest.TestCase):
         stats = _score_wallet([])
         self.assertIsNone(stats)
 
+    def test_no_resolutions_arg_defaults_to_empty(self):
+        """resolutions=None (unset) must not crash — treated as no known resolutions."""
+        positions, _ = _real_winners(n=3, wins=2)
+        stats = _score_wallet(positions)  # no resolutions arg at all
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["resolved_count"], 0,
+                         "With no resolutions supplied, every resolved position is excluded")
+
     def test_none_stats_is_not_winner(self):
         """_is_winner with None stats is safely handled by the caller check."""
-        # discover_winners calls: if not (stats and _is_winner(stats, config)): continue
-        # So None stats short-circuits. We test that _is_winner itself doesn't crash
-        # if called defensively with a minimal stats dict.
         min_stats = {
             "resolved_count":      0,
             "win_rate":            None,
@@ -381,6 +450,17 @@ class TestDiagnoseDiscoveryEndToEnd(unittest.TestCase):
     stage label and the winner count matches manual computation.
     """
 
+    def setUp(self):
+        # Built once so positions and their resolution entries share the
+        # same conditionIds across every call in this test (regression: a
+        # naive per-call rebuild would mint fresh conditionIds each time,
+        # making positions and resolutions silently fail to line up).
+        win_specs = [_pos(f"Policy {i}", True, realized=0.0, initial=100.0, size=160.0) for i in range(12)]
+        low_specs = [_pos(f"Policy {i}", True, realized=0.0, initial=100.0, size=160.0) for i in range(3)]
+        self.win_positions, win_res = _build(win_specs)
+        self.low_positions, low_res = _build(low_specs)
+        self.all_resolutions = {**win_res, **low_res}
+
     def _fake_trades(self, *_args, **_kwargs):
         return [
             {"proxyWallet": "0xWIN"},   # will pass every gate
@@ -390,17 +470,24 @@ class TestDiagnoseDiscoveryEndToEnd(unittest.TestCase):
 
     def _fake_positions(self, address, *_args, **_kwargs):
         if address == "0xWIN":
-            return [_pos(f"Policy {i}", 80.0, 60.0, resolved=True) for i in range(12)]
+            return self.win_positions
         if address == "0xLOW":
-            return [_pos(f"Policy {i}", 80.0, 60.0, resolved=True) for i in range(3)]
+            return self.low_positions
         return []  # 0xNONE — no positions returned by the API
+
+    def _fake_resolutions(self, positions, cache=None, fetch_new=True):
+        """Stub for fetch_resolutions_for_positions — builds resolutions from
+        the same fixtures directly instead of hitting CLOB."""
+        return self.all_resolutions
 
     def test_end_to_end_with_stubbed_fetch(self):
         config = _cfg()
         config["accounts"]["discovery_sample_size"] = 300
 
         with patch("sources.accounts.fetch_recent_trades", side_effect=self._fake_trades), \
-             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions):
+             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions), \
+             patch("sources.accounts.fetch_resolutions_for_positions", side_effect=self._fake_resolutions), \
+             patch("sources.accounts._load_resolution_cache", return_value={}):
             result = diagnose_discovery(config)
 
         self.assertEqual(result["n_trades_fetched"], 3)
@@ -415,9 +502,238 @@ class TestDiagnoseDiscoveryEndToEnd(unittest.TestCase):
         """fetch_user_positions must be called exactly once per unique wallet."""
         config = _cfg()
         with patch("sources.accounts.fetch_recent_trades", side_effect=self._fake_trades), \
-             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions) as mock_pos:
+             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions) as mock_pos, \
+             patch("sources.accounts.fetch_resolutions_for_positions", side_effect=self._fake_resolutions), \
+             patch("sources.accounts._load_resolution_cache", return_value={}):
             diagnose_discovery(config)
         self.assertEqual(mock_pos.call_count, 3)
+
+
+# ── discover_winners() time budget (2026-09-09) ────────────────────────────────
+# main.py's scheduled task has only a 10-minute ExecutionTimeLimit
+# (scripts/setup_scheduler.ps1), and per-wallet scoring cost is highly
+# variable and unbounded by sample_size alone -- see discover_winners()'s
+# own docstring. discovery_time_budget_s must stop the loop early rather
+# than risk hanging the entire daily pipeline.
+
+class TestDiscoverWinnersTimeBudget(unittest.TestCase):
+
+    def _fake_trades(self, *_args, **_kwargs):
+        return [{"proxyWallet": f"0xW{i}"} for i in range(5)]
+
+    def _fake_positions(self, address, *_args, **_kwargs):
+        specs = [_pos(f"Policy {i}", True, realized=0.0, initial=100.0, size=160.0) for i in range(12)]
+        positions, _ = _build(specs)
+        return positions
+
+    def _fake_resolutions(self, positions, cache=None, fetch_new=True):
+        # Recompute matching resolutions fresh each call since _fake_positions
+        # mints new conditionIds per call -- must line up 1:1 with what it just built.
+        return {p["conditionId"]: {"Yes": True} for p in positions}
+
+    def test_stops_early_once_budget_exceeded(self):
+        from sources import accounts
+        cfg = _cfg()
+        cfg["accounts"]["discovery_time_budget_s"] = 120
+
+        with patch("sources.accounts.fetch_recent_trades", side_effect=self._fake_trades), \
+             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions) as mock_pos, \
+             patch("sources.accounts.fetch_resolutions_for_positions", side_effect=self._fake_resolutions), \
+             patch("sources.accounts.fetch_user_trades", return_value=[]), \
+             patch("sources.accounts._load_resolution_cache", return_value={}), \
+             patch("sources.accounts.time.time", side_effect=[1000, 1000, 1005, 1200, 1200, 1200]):
+            winners = accounts.discover_winners(cfg)
+
+        # t0=1000; wallet0 check 1000-1000=0<=120 (processed);
+        # wallet1 check 1005-1000=5<=120 (processed);
+        # wallet2 check 1200-1000=200>120 -> break before processing.
+        self.assertEqual(mock_pos.call_count, 2)
+        self.assertEqual(len(winners), 2)
+
+    def test_default_budget_used_when_unset(self):
+        """Config with no discovery_time_budget_s key must not crash — default applies."""
+        from sources import accounts
+        cfg = _cfg()  # no discovery_time_budget_s key at all
+
+        with patch("sources.accounts.fetch_recent_trades", return_value=[{"proxyWallet": "0xONE"}]), \
+             patch("sources.accounts.fetch_user_positions", side_effect=self._fake_positions), \
+             patch("sources.accounts.fetch_resolutions_for_positions", side_effect=self._fake_resolutions), \
+             patch("sources.accounts.fetch_user_trades", return_value=[]), \
+             patch("sources.accounts._load_resolution_cache", return_value={}):
+            winners = accounts.discover_winners(cfg)  # real time.time() — must finish fast, well under any real budget
+        self.assertEqual(len(winners), 1)
+
+
+# ── True resolution fetch + cache (2026-09-08) ─────────────────────────────────
+
+class TestFetchMarketResolution(unittest.TestCase):
+    """fetch_market_resolution() — ground truth via CLOB, independent of the
+    Data API's broken post-resolution position fields."""
+
+    def test_closed_market_returns_outcome_winner_map(self):
+        from sources import accounts
+        with patch("sources.accounts.requests.get") as mock_get, \
+             patch("sources.accounts.time.sleep"):
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = {
+                "closed": True,
+                "tokens": [
+                    {"outcome": "Yes", "winner": False},
+                    {"outcome": "No", "winner": True},
+                ],
+            }
+            result = accounts.fetch_market_resolution("0xabc")
+        self.assertEqual(result, {"Yes": False, "No": True})
+
+    def test_unclosed_market_returns_none(self):
+        from sources import accounts
+        with patch("sources.accounts.requests.get") as mock_get, \
+             patch("sources.accounts.time.sleep"):
+            mock_get.return_value.raise_for_status = lambda: None
+            mock_get.return_value.json.return_value = {"closed": False, "tokens": []}
+            result = accounts.fetch_market_resolution("0xabc")
+        self.assertIsNone(result)
+
+    def test_request_failure_returns_none_and_prints(self):
+        from sources import accounts
+        with patch("sources.accounts.requests.get", side_effect=Exception("boom")), \
+             patch("sources.accounts.time.sleep"), \
+             patch("builtins.print") as mock_print:
+            result = accounts.fetch_market_resolution("0xabc")
+        self.assertIsNone(result)
+        mock_print.assert_called_once()
+
+
+class TestFetchResolutionsForPositions(unittest.TestCase):
+    """fetch_resolutions_for_positions() — permanent disk cache, only fetches
+    unresolved-in-cache conditionIds, only for redeemable positions."""
+
+    def test_only_fetches_redeemable_uncached_condition_ids(self):
+        from sources import accounts
+        positions = [
+            {"conditionId": "A", "redeemable": True},
+            {"conditionId": "B", "redeemable": True},
+            {"conditionId": "C", "redeemable": False},  # open — must not be fetched
+        ]
+        cache = {"A": {"Yes": True}}  # A already cached
+
+        with patch("sources.accounts.fetch_market_resolution") as mock_fetch, \
+             patch("sources.accounts._save_resolution_cache") as mock_save:
+            mock_fetch.return_value = {"Yes": False}
+            result = accounts.fetch_resolutions_for_positions(positions, cache=cache)
+
+        mock_fetch.assert_called_once_with("B")
+        self.assertEqual(result["A"], {"Yes": True})
+        self.assertEqual(result["B"], {"Yes": False})
+        mock_save.assert_called_once()
+
+    def test_no_new_fetches_does_not_save(self):
+        from sources import accounts
+        positions = [{"conditionId": "A", "redeemable": True}]
+        cache = {"A": {"Yes": True}}
+
+        with patch("sources.accounts.fetch_market_resolution") as mock_fetch, \
+             patch("sources.accounts._save_resolution_cache") as mock_save:
+            accounts.fetch_resolutions_for_positions(positions, cache=cache)
+
+        mock_fetch.assert_not_called()
+        mock_save.assert_not_called()
+
+    def test_fetch_new_false_skips_live_calls_entirely(self):
+        """diagnose_discovery()'s live-sample path: fetch_new=False must
+        never call fetch_market_resolution, no matter how many uncached
+        conditionIds are present — bounds cost for a fresh, large sample."""
+        from sources import accounts
+        positions = [
+            {"conditionId": f"cond{i}", "redeemable": True} for i in range(50)
+        ]
+        with patch("sources.accounts.fetch_market_resolution") as mock_fetch, \
+             patch("sources.accounts._save_resolution_cache") as mock_save:
+            result = accounts.fetch_resolutions_for_positions(positions, cache={"cond0": {"Yes": True}}, fetch_new=False)
+
+        mock_fetch.assert_not_called()
+        mock_save.assert_not_called()
+        self.assertEqual(result, {"cond0": {"Yes": True}})
+
+    def test_failed_fetch_is_not_cached(self):
+        from sources import accounts
+        positions = [{"conditionId": "A", "redeemable": True}]
+
+        with patch("sources.accounts.fetch_market_resolution", return_value=None), \
+             patch("sources.accounts._save_resolution_cache") as mock_save:
+            result = accounts.fetch_resolutions_for_positions(positions, cache={})
+
+        self.assertNotIn("A", result)
+        mock_save.assert_not_called()
+
+
+# ── gate_checklist() + get_wallet_profile() (2026-09-08, Trader Profile page) ──
+
+class TestGateChecklist(unittest.TestCase):
+    """Plain-language per-gate pass/fail breakdown, in GATE_ORDER."""
+
+    def test_all_pass_labels_true(self):
+        checklist = gate_checklist(_stats(), _cfg())
+        self.assertEqual(len(checklist), 5)
+        self.assertTrue(all(item["passed"] for item in checklist))
+
+    def test_failing_gate_flagged_with_readable_detail(self):
+        checklist = gate_checklist(_stats(win_rate=40.0), _cfg())
+        win_rate_item = checklist[1]
+        self.assertFalse(win_rate_item["passed"])
+        self.assertIn("40.0%", win_rate_item["detail"])
+        self.assertIn("55%", win_rate_item["detail"])
+
+    def test_none_win_rate_does_not_crash_formatting(self):
+        checklist = gate_checklist(_stats(win_rate=None), _cfg())
+        self.assertFalse(checklist[1]["passed"])
+        self.assertIn("no win rate yet", checklist[1]["detail"])
+
+
+class TestGetWalletProfile(unittest.TestCase):
+    """get_wallet_profile() assembles stats + checklist + current/history bets."""
+
+    def test_no_positions_returns_none(self):
+        from sources import accounts
+        with patch("sources.accounts.fetch_user_positions", return_value=[]):
+            profile = accounts.get_wallet_profile("0xabc", _cfg())
+        self.assertIsNone(profile)
+
+    def test_assembles_current_bets_and_history(self):
+        from sources import accounts
+        win_pos, win_entry = _pos("Will X happen?", True, realized=0.0, initial=50.0, size=100.0)
+        open_pos, _ = _pos("Will Z happen?", None)
+        open_pos["percentPnl"] = 25.0
+        positions = [win_pos, open_pos]
+        cid, res = win_entry
+        resolutions = {cid: res}
+
+        with patch("sources.accounts.fetch_user_positions", return_value=positions), \
+             patch("sources.accounts.fetch_resolutions_for_positions", return_value=resolutions):
+            profile = accounts.get_wallet_profile("0xabc", _cfg())
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["address"], "0xabc")
+        self.assertEqual(len(profile["current_bets"]), 1)
+        self.assertEqual(profile["current_bets"][0]["title"], "Will Z happen?")
+        self.assertEqual(len(profile["bet_history"]), 1)
+        self.assertEqual(profile["bet_history"][0]["title"], "Will X happen?")
+        self.assertTrue(profile["bet_history"][0]["won"])
+        self.assertAlmostEqual(profile["bet_history"][0]["pnl"], 50.0)  # 0 + 100 - 50
+        self.assertEqual(len(profile["checklist"]), 5)
+
+    def test_unresolved_outcome_omitted_from_history(self):
+        """A resolved position with no matching resolution entry is omitted
+        from bet_history entirely, never guessed."""
+        from sources import accounts
+        pos, _entry = _pos("Will X happen?", True, realized=0.0, initial=50.0, size=100.0)
+        positions = [pos]
+
+        with patch("sources.accounts.fetch_user_positions", return_value=positions), \
+             patch("sources.accounts.fetch_resolutions_for_positions", return_value={}):
+            profile = accounts.get_wallet_profile("0xabc", _cfg())
+
+        self.assertEqual(profile["bet_history"], [])
 
 
 # ── _get() rate-limit pacing + real-error visibility (2026-08-23) ─────────────

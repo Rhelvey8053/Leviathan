@@ -128,7 +128,8 @@ def _verify_watchlist_trader(
     min_cash     = cfg.get("min_cash_pnl", 100.0)
 
     all_positions = accounts.fetch_user_positions(addr)
-    stats         = accounts._score_wallet(all_positions)
+    resolutions   = accounts.fetch_resolutions_for_positions(all_positions)
+    stats         = accounts._score_wallet(all_positions, resolutions)
 
     if not stats:
         return False, "no positions returned from API", None, []

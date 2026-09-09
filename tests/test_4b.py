@@ -22,17 +22,43 @@ from analysis.smart_money_scan import _verify_watchlist_trader
 
 
 # ── shared helpers ────────────────────────────────────────────────────────────
+#
+# _verify_watchlist_trader() now cross-references true resolution (via
+# accounts.fetch_resolutions_for_positions -> CLOB) rather than the Data
+# API's percentPnl/cashPnl, which read ~-100% for every resolved position
+# regardless of actual outcome (see sources/accounts.py's module note on
+# fetch_market_resolution, added 2026-09-08). These fixtures build a
+# resolution-aware position + a matching resolutions dict; each test mocks
+# fetch_resolutions_for_positions to return it, so no live CLOB call happens.
 
-def _pos(title: str, pct: float, cash: float, resolved: bool = False) -> dict:
-    return {
+_CID_COUNTER = [0]
+
+
+def _pos(title: str, won: bool, realized: float = 0.0,
+         initial: float = 100.0, size: float = 100.0) -> tuple[dict, tuple]:
+    """Resolved-shaped position + its (conditionId, resolution) contribution."""
+    _CID_COUNTER[0] += 1
+    cid = f"cond{_CID_COUNTER[0]}"
+    position = {
         "title":        title,
-        "percentPnl":   pct,
-        "cashPnl":      cash,
-        "redeemable":   resolved,
+        "conditionId":  cid,
+        "outcome":      "Yes",
+        "realizedPnl":  realized,
+        "initialValue": initial,
+        "size":         size,
+        "redeemable":   True,
         "eventSlug":    "",
-        "outcome":      "yes",
-        "currentValue": 1000,
+        "percentPnl":   0.0,
     }
+    return position, (cid, {"Yes": won})
+
+
+def _build(specs: list[tuple]) -> tuple[list[dict], dict]:
+    positions, resolutions = [], {}
+    for position, (cid, res) in specs:
+        positions.append(position)
+        resolutions[cid] = res
+    return positions, resolutions
 
 
 def _cfg(**overrides) -> dict:
@@ -48,17 +74,14 @@ def _cfg(**overrides) -> dict:
     return {"accounts": base}
 
 
-def _winning_resolved(n: int = 12, wins: int = 10) -> list[dict]:
-    """n resolved positions; first `wins` of them are positive."""
-    return [
-        _pos(
-            f"Will Policy {i} pass?",
-            80.0 if i < wins else -30.0,
-            200.0 if i < wins else -50.0,
-            resolved=True,
-        )
+def _winning_resolved(n: int = 12, wins: int = 10) -> tuple[list[dict], dict]:
+    """n resolved positions; first `wins` of them actually won."""
+    specs = [
+        _pos(f"Will Policy {i} pass?", i < wins,
+             realized=0.0, initial=100.0, size=180.0 if i < wins else 70.0)
         for i in range(n)
     ]
+    return _build(specs)
 
 
 _FAKE_ADDR = "0x" + "a" * 40
@@ -207,91 +230,85 @@ class TestEvFloorFilter:
 class TestWatchlistGating:
     """Watchlist traders must clear _is_winner on resolved positions before being promoted."""
 
+    def _run(self, positions, resolutions, cfg=None):
+        with patch("sources.accounts.fetch_user_positions", return_value=positions), \
+             patch("sources.accounts.fetch_resolutions_for_positions",
+                   return_value=resolutions):
+            return _verify_watchlist_trader(_FAKE_ADDR, cfg or _cfg())
+
     def test_too_few_resolved_excluded(self):
         """Trader with 3 resolved positions is excluded (need ≥10)."""
-        positions = _winning_resolved(n=3, wins=3)
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, reason, stats, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        positions, resolutions = _winning_resolved(n=3, wins=3)
+        verified, reason, stats, _ = self._run(positions, resolutions)
         assert not verified
         assert "resolved positions" in reason
         assert "3" in reason
 
     def test_low_win_rate_excluded(self):
         """40% win rate is excluded (threshold 55%)."""
-        positions = _winning_resolved(n=10, wins=4)
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, reason, stats, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        positions, resolutions = _winning_resolved(n=10, wins=4)
+        verified, reason, stats, _ = self._run(positions, resolutions)
         assert not verified
         assert "win rate" in reason
 
     def test_low_cash_pnl_excluded(self):
-        """Sufficient win rate but trivial cash PnL ($36) is excluded (need ≥$100)."""
-        positions = [
-            _pos(
-                f"Will Policy {i} pass?",
-                80.0 if i < 8 else -30.0,
-                5.0 if i < 8 else -2.0,  # total = 8*5 + 2*(-2) = $36
-                resolved=True,
-            )
+        """Sufficient win rate but trivial true cash PnL is excluded (need ≥$100)."""
+        specs = [
+            _pos(f"Will Policy {i} pass?", i < 8,
+                 realized=0.0, initial=100.0,
+                 size=104.5 if i < 8 else 70.0)  # total true pnl = 8*4.5 - 2*30 = $-24
             for i in range(10)
         ]
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, reason, stats, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        positions, resolutions = _build(specs)
+        verified, reason, stats, _ = self._run(positions, resolutions)
         assert not verified
         assert "cash" in reason.lower() or "pnl" in reason.lower()
 
     def test_no_api_positions_excluded(self):
         """Empty API response is excluded with a clear reason."""
-        with patch("sources.accounts.fetch_user_positions", return_value=[]):
-            verified, reason, stats, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        verified, reason, stats, _ = self._run([], {})
         assert not verified
         assert isinstance(reason, str) and len(reason) > 0
 
     def test_no_api_positions_stats_is_none(self):
         """Stats is None when API returns nothing."""
-        with patch("sources.accounts.fetch_user_positions", return_value=[]):
-            _, _, stats, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        _, _, stats, _ = self._run([], {})
         assert stats is None
 
     def test_verified_trader_passes(self):
         """Trader with strong resolved track record passes verification."""
-        positions = _winning_resolved(n=12, wins=10)
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, reason, stats, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        positions, resolutions = _winning_resolved(n=12, wins=10)
+        verified, reason, stats, _ = self._run(positions, resolutions)
         assert verified
         assert reason is None
 
     def test_verified_trader_stats_present(self):
         """Stats dict is returned when trader is verified."""
-        positions = _winning_resolved(n=12, wins=10)
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, _, stats, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        positions, resolutions = _winning_resolved(n=12, wins=10)
+        verified, _, stats, _ = self._run(positions, resolutions)
         assert verified
         assert stats is not None
         assert stats["resolved_count"] == 12
 
     def test_verified_returns_all_positions(self):
         """all_positions is returned for open-position filtering."""
-        positions = _winning_resolved(n=12, wins=10)
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, _, _, returned = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        positions, resolutions = _winning_resolved(n=12, wins=10)
+        verified, _, _, returned = self._run(positions, resolutions)
         assert verified
         assert returned == positions
 
     def test_fail_reason_non_empty_when_excluded(self):
         """fail_reason is always a non-empty string when excluded."""
-        positions = _winning_resolved(n=2, wins=2)
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, reason, _, _ = _verify_watchlist_trader(_FAKE_ADDR, _cfg())
+        positions, resolutions = _winning_resolved(n=2, wins=2)
+        verified, reason, _, _ = self._run(positions, resolutions)
         assert not verified
         assert isinstance(reason, str) and len(reason) > 0
 
     def test_custom_threshold_respected(self):
         """When thresholds are lowered, a trader with 3 resolved positions passes."""
-        positions = _winning_resolved(n=3, wins=3)
+        positions, resolutions = _winning_resolved(n=3, wins=3)
         cfg = _cfg(min_resolved_count=3, min_positions=3, min_cash_pnl=1.0, min_pct_pnl=1.0)
-        with patch("sources.accounts.fetch_user_positions", return_value=positions):
-            verified, reason, _, _ = _verify_watchlist_trader(_FAKE_ADDR, cfg)
+        verified, reason, _, _ = self._run(positions, resolutions, cfg)
         assert verified
         assert reason is None
 
