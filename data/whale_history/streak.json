@@ -16,13 +16,13 @@
   },
   "KXRECOGSOMALI-29-27": {
     "direction": "YES",
-    "streak": 5,
-    "last_updated": "2026-09-07T12:03:36.051443+00:00"
+    "streak": 7,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
   },
   "KXAGICO-COMP-26Q3": {
     "direction": "YES",
-    "streak": 1,
-    "last_updated": "2026-09-07T12:03:36.051443+00:00"
+    "streak": 3,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
   },
   "KXTVSEASONANNOUNCEEUP-JAN-27": {
     "direction": "NO",
@@ -51,8 +51,8 @@
   },
   "KXALBUMRELEASEDATEBEY-NEW-JAN01-27": {
     "direction": "YES",
-    "streak": 3,
-    "last_updated": "2026-09-06T00:41:05.779749+00:00"
+    "streak": 5,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
   },
   "KXCABLEAVE-26MAY22-26SEP": {
     "direction": "YES",
@@ -61,8 +61,8 @@
   },
   "KXVETOOVERRIDE-29JAN20-27": {
     "direction": "NO",
-    "streak": 19,
-    "last_updated": "2026-09-07T12:03:36.051443+00:00"
+    "streak": 21,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
   },
   "KXCHINAEUV-30-27JAN01": {
     "direction": "NO",
@@ -656,8 +656,8 @@
   },
   "KXCABLEAVE-26MAY22-26OCT": {
     "direction": "NO",
-    "streak": 2,
-    "last_updated": "2026-09-07T12:03:36.051443+00:00"
+    "streak": 4,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
   },
   "KXSECPRESSMENTION-26SEP15-SUPR": {
     "direction": "YES",
@@ -696,8 +696,8 @@
   },
   "KXALBUMLENGTH-26SEP18-BAS-65": {
     "direction": "NO",
-    "streak": 1,
-    "last_updated": "2026-09-07T12:03:36.051443+00:00"
+    "streak": 3,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
   },
   "KXCS2GAME-26SEP070700MAITSA-TSA": {
     "direction": "YES",
@@ -708,5 +708,40 @@
     "direction": "YES",
     "streak": 1,
     "last_updated": "2026-09-07T12:03:36.051443+00:00"
+  },
+  "KXRAIN-26SEP08-LAX": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-09-08T12:11:21.995284+00:00"
+  },
+  "KXNCAAFCOACHLEAVE-26BBEL-120126": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-08T12:11:21.995284+00:00"
+  },
+  "KXCS2MAP-26SEP080800FURIAGL-1-FURIA": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-08T12:11:21.995284+00:00"
+  },
+  "KXR6GAME-26SEP090800DEWBG-WBG": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
+  },
+  "KXBTCPRICE-85000-26SEP18": {
+    "direction": "NO",
+    "streak": 1,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
+  },
+  "KXDOTA2GAME-26SEP090800MOUZHUL-MOUZ": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
+  },
+  "KXODIMATCH-26SEP092130HKGUAE-UAE": {
+    "direction": "YES",
+    "streak": 1,
+    "last_updated": "2026-09-09T12:06:54.246246+00:00"
   }
 }

@@ -1,5 +1,5 @@
 {
-  "last_sent": "2026-09-07",
+  "last_sent": "2026-09-09",
   "backlog_snapshot": {
     "trade-reconciliation": {
       "status": "done",
@@ -91,7 +91,7 @@
     },
     "auto-calibration-loop": {
       "status": "ready",
-      "notes_len": 88
+      "notes_len": 1203
     },
     "wallet-tracking-dashboard": {
       "status": "blocked",
@@ -167,7 +167,7 @@
     },
     "methodology-writeup": {
       "status": "ready",
-      "notes_len": 1166
+      "notes_len": 3927
     },
     "multi-sample-scoring": {
       "status": "done",
@@ -227,7 +227,7 @@
     },
     "cross-venue-expansion": {
       "status": "ready",
-      "notes_len": 7068
+      "notes_len": 8949
     },
     "ci-kalshi-auth-env-2026-08": {
       "status": "done",
@@ -359,7 +359,7 @@
     },
     "task-scheduler-manual-trigger-stuck-queued": {
       "status": "ready",
-      "notes_len": 5947
+      "notes_len": 6442
     },
     "smart-money-fills-table-missing": {
       "status": "done",
@@ -367,7 +367,7 @@
     },
     "dailyrun-logontype-interactive": {
       "status": "done",
-      "notes_len": 1363
+      "notes_len": 3132
     },
     "subscriber-report-removed-2026-08": {
       "status": "done",
@@ -386,8 +386,8 @@
       "notes_len": 1868
     },
     "smart-money-fills-persistence-build": {
-      "status": "ready",
-      "notes_len": 166
+      "status": "done",
+      "notes_len": 3863
     },
     "dailyrun-missed-run-2026-08-30-silent-failure-gaps": {
       "status": "done",
@@ -398,8 +398,8 @@
       "notes_len": 679
     },
     "windows-defender-cpu-contention-2026-08-30": {
-      "status": "ready",
-      "notes_len": 1192
+      "status": "done",
+      "notes_len": 2064
     },
     "monday-com-retired-backlog-dashboard-page": {
       "status": "done",
@@ -463,15 +463,59 @@
     },
     "ai-workflow-research-findings-2026-09": {
       "status": "ready",
-      "notes_len": 2150
+      "notes_len": 3582
     },
     "report-ticker-none-vs-missing-audit": {
-      "status": "ready",
-      "notes_len": 0
+      "status": "done",
+      "notes_len": 1557
     },
     "weekly-digest-reskin-and-clip-fix": {
       "status": "done",
       "notes_len": 3344
+    },
+    "entertainment-award-emmy-coverage-gap": {
+      "status": "ready",
+      "notes_len": 660
+    },
+    "political-coup-couples-misfire": {
+      "status": "done",
+      "notes_len": 361
+    },
+    "fda-adcom-broadcom-misfire": {
+      "status": "done",
+      "notes_len": 479
+    },
+    "nasa-mission-hataoka-partial-fix": {
+      "status": "done",
+      "notes_len": 604
+    },
+    "daily-smart-money-commit-scope-fix": {
+      "status": "done",
+      "notes_len": 901
+    },
+    "dynamic-sizing-activated-and-pnl-scaling-bug-fix": {
+      "status": "done",
+      "notes_len": 2222
+    },
+    "per-group-pnl-tables-still-flat-not-stake-weighted": {
+      "status": "ready",
+      "notes_len": 688
+    },
+    "backlog-load-duplicate-key-protection": {
+      "status": "done",
+      "notes_len": 594
+    },
+    "verify-pnl-scheduled-and-alerting": {
+      "status": "done",
+      "notes_len": 955
+    },
+    "runbook-liam-section-pruned": {
+      "status": "done",
+      "notes_len": 437
+    },
+    "monday-com-integration-fully-removed": {
+      "status": "done",
+      "notes_len": 2049
     }
   }
 }
