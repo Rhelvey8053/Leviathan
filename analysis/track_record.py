@@ -41,6 +41,22 @@ def _fmt_pnl(v, per_contract=10.0):
         return "—"
 
 
+def _fmt_dollars(v):
+    """
+    Format an already stake-weighted dollar P&L value (2026-09-10: every
+    logger.get_stats_by_*() function now returns total_pnl in real,
+    confidence-weighted dollars -- see get_stats()'s 2026-09-08 fix and
+    per-group-pnl-tables-still-flat-not-stake-weighted in BACKLOG.md).
+    Unlike _fmt_pnl(), no per_contract multiplier -- that would double-count
+    the stake. Only for get_stats_by_*() output; _print_section()'s raw
+    per-row pnl_if_traded sums still go through _fmt_pnl().
+    """
+    try:
+        return f"${float(v):+.2f}"
+    except Exception:
+        return "—"
+
+
 def _print_section(title: str, rows: list[dict], unit_size: float = 10.0) -> None:
     if not rows:
         print(f"\n  (no {title.lower()} rows)")
@@ -184,7 +200,7 @@ def main(resolve: bool = True):
         print("CONFIDENCE BREAKDOWN  (paper signals, resolved only)")
         print(_rule("-"))
         print()
-        pnl_lbl = f"P&L (${unit_size:.0f})"
+        pnl_lbl = "P&L ($)"
         print(f"  {'Level':<6}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}")
         print(f"  {'-'*6}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
         for lvl in ("HIGH", "MED", "LOW"):
@@ -192,7 +208,7 @@ def main(resolve: bool = True):
             if not d["total"]:
                 continue
             wr_s  = f"{d['win_rate']:.0f}%" if d["win_rate"] is not None else "—"
-            pnl_s = _fmt_pnl(d["total_pnl"], unit_size) if d["total_pnl"] is not None else "—"
+            pnl_s = _fmt_dollars(d["total_pnl"]) if d["total_pnl"] is not None else "—"
             print(f"  {lvl:<6}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
     if flag_stats or sig_stats:
@@ -200,7 +216,7 @@ def main(resolve: bool = True):
         print(_rule("="))
         print("SIGNAL TYPE ANALYSIS  (paper signals, resolved only)")
         print(_rule("-"))
-        pnl_lbl = f"P&L (${unit_size:.0f})"
+        pnl_lbl = "P&L ($)"
 
         if flag_stats:
             resolved_fp = [r for r in flag_stats if r.get("total", 0) > 0]
@@ -211,7 +227,7 @@ def main(resolve: bool = True):
                 print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}")
                 for r in resolved_fp:
                     wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
-                    pnl_s = _fmt_pnl(r["total_pnl"], unit_size) if r["total_pnl"] is not None else "—"
+                    pnl_s = _fmt_dollars(r["total_pnl"]) if r["total_pnl"] is not None else "—"
                     print(f"  {r['flag_path']:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
         if sig_stats:
@@ -231,7 +247,7 @@ def main(resolve: bool = True):
                     if not r.get("total"):
                         continue
                     wr_s  = f"{r['win_rate']:.0f}%" if r["win_rate"] is not None else "—"
-                    pnl_s = _fmt_pnl(r["total_pnl"], unit_size) if r["total_pnl"] is not None else "—"
+                    pnl_s = _fmt_dollars(r["total_pnl"]) if r["total_pnl"] is not None else "—"
                     print(f"  {label:<16}  {r['total']:>5}  {r['wins']:>4}  {wr_s:>6}  {pnl_s:>10}")
 
     # ── Time-horizon breakdown ────────────────────────────────────────────────
@@ -243,7 +259,7 @@ def main(resolve: bool = True):
         print("TIME HORIZON BREAKDOWN  (paper signals, resolved only)")
         print(_rule("-"))
         print()
-        pnl_lbl = f"P&L (${unit_size:.0f})"
+        pnl_lbl = "P&L ($)"
         print(f"  {'Horizon':<12}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}  {'Avg Edge':>8}")
         print(f"  {'-'*12}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
         for bucket in ("INTRADAY", "WEEKLY", "MONTHLY", "QUARTERLY", "LONG"):
@@ -251,7 +267,7 @@ def main(resolve: bool = True):
             if not d["total"]:
                 continue
             wr_s   = f"{d['win_rate']:.0f}%"   if d["win_rate"]  is not None else "—"
-            pnl_s  = _fmt_pnl(d["total_pnl"], unit_size)  if d["total_pnl"] is not None else "—"
+            pnl_s  = _fmt_dollars(d["total_pnl"])  if d["total_pnl"] is not None else "—"
             edge_s = f"{d['avg_edge']*100:.1f}pp" if d["avg_edge"] is not None else "—"
             print(f"  {bucket:<12}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
 
@@ -266,7 +282,7 @@ def main(resolve: bool = True):
         print()
         print("  Does Claude's direction agree with the heuristic base-rate lean?")
         print()
-        pnl_lbl = f"P&L (${unit_size:.0f})"
+        pnl_lbl = "P&L ($)"
         print(f"  {'Group':<16}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}  {'Avg Edge':>8}")
         print(f"  {'-'*16}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
         labels = {
@@ -279,7 +295,7 @@ def main(resolve: bool = True):
             if not d["total"]:
                 continue
             wr_s   = f"{d['win_rate']:.0f}%"   if d["win_rate"]  is not None else "—"
-            pnl_s  = _fmt_pnl(d["total_pnl"], unit_size)  if d["total_pnl"] is not None else "—"
+            pnl_s  = _fmt_dollars(d["total_pnl"])  if d["total_pnl"] is not None else "—"
             edge_s = f"{d['avg_edge']*100:.1f}pp" if d["avg_edge"] is not None else "—"
             print(f"  {label:<16}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
         if align_stats["override"]["total"] > 0 and align_stats["aligned"]["total"] > 0:
@@ -288,7 +304,7 @@ def main(resolve: bool = True):
             delta = ov_wr - al_wr
             verdict = "overrides outperform" if delta > 5 else (
                 "overrides underperform" if delta < -5 else "no meaningful difference")
-            print(f"\n  Override vs Aligned: {delta:+.0f}pp  → {verdict}")
+            print(f"\n  Override vs Aligned: {delta:+.0f}pp  --> {verdict}")
 
     # ── Net-of-spread edge breakdown ──────────────────────────────────────────
     ne_stats = logger.get_stats_by_net_edge()
@@ -308,7 +324,7 @@ def main(resolve: bool = True):
             "strong":          ">10pp net edge",
             "no_data":         "no spread data",
         }
-        pnl_lbl = f"P&L (${unit_size:.0f})"
+        pnl_lbl = "P&L ($)"
         print(f"  {'Bucket':<18}  {'Total':>5}  {'Wins':>4}  {'Win%':>6}  {pnl_lbl:>10}  {'Avg Edge':>8}")
         print(f"  {'-'*18}  {'-'*5}  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}")
         for b in ("spread_dominant", "thin", "good", "strong", "no_data"):
@@ -317,7 +333,7 @@ def main(resolve: bool = True):
                 continue
             label  = bucket_labels[b]
             wr_s   = f"{d['win_rate']:.0f}%"      if d["win_rate"]  is not None else "--"
-            pnl_s  = _fmt_pnl(d["total_pnl"], unit_size)     if d["total_pnl"] is not None else "--"
+            pnl_s  = _fmt_dollars(d["total_pnl"])     if d["total_pnl"] is not None else "--"
             edge_s = f"{d['avg_edge']*100:.1f}pp"  if d["avg_edge"]  is not None else "--"
             print(f"  {label:<18}  {d['total']:>5}  {d['wins']:>4}  {wr_s:>6}  {pnl_s:>10}  {edge_s:>8}")
         thin_plus = sum(ne_stats[b]["total"] for b in ("thin", "good", "strong"))

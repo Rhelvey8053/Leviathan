@@ -1513,6 +1513,10 @@ def get_stats_by_sig() -> dict:
     Win rate broken down by which mode-independent signal fired on each paper signal.
     Returns a dict keyed by signal type: sig_edge / sig_drift / sig_br_none.
     Only includes resolved paper signals.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix -- see per-group-pnl-tables-
+    still-flat-not-stake-weighted in BACKLOG.md).
     """
     result = {}
     for sig_col in ("sig_edge", "sig_drift", "sig_br_none"):
@@ -1524,7 +1528,7 @@ def get_stats_by_sig() -> dict:
                         COUNT(*) AS total,
                         SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) AS wins,
                         AVG(edge) AS avg_edge,
-                        SUM(pnl_if_traded) AS total_pnl
+                        SUM(pnl_if_traded * COALESCE(stake_size_hypothetical, 10.0)) AS total_pnl
                     FROM signals
                     WHERE ({_PAPER})
                       AND outcome != '' AND outcome IS NOT NULL
@@ -1551,6 +1555,9 @@ def get_stats_by_flag_path() -> list[dict]:
     Win rate and P&L broken down by flag_path (EDGE / BR_NONE / DRIFT / HEURISTIC / WATCHLIST).
     Only includes paper signals with a resolved outcome.
     Returns a list of dicts sorted by win_rate descending.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     try:
         with _db() as conn:
@@ -1561,7 +1568,7 @@ def get_stats_by_flag_path() -> list[dict]:
                     COUNT(*) AS total,
                     SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) AS wins,
                     AVG(edge) AS avg_edge,
-                    SUM(pnl_if_traded) AS total_pnl
+                    SUM(pnl_if_traded * COALESCE(stake_size_hypothetical, 10.0)) AS total_pnl
                 FROM signals
                 WHERE ({_PAPER})
                   AND outcome != '' AND outcome IS NOT NULL
@@ -2162,6 +2169,9 @@ def get_stats_by_time_horizon() -> dict:
 
     Returns a dict keyed by bucket name (INTRADAY/WEEKLY/MONTHLY/QUARTERLY/LONG/None),
     each with: total, wins, losses, win_rate, total_pnl, avg_edge.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     BUCKETS = ("INTRADAY", "WEEKLY", "MONTHLY", "QUARTERLY", "LONG")
     result = {b: {"total": 0, "wins": 0, "losses": 0, "win_rate": None,
@@ -2171,7 +2181,7 @@ def get_stats_by_time_horizon() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT time_horizon, result, pnl_if_traded, edge
+                SELECT time_horizon, result, pnl_if_traded, edge, stake_size_hypothetical
                 FROM signals
                 WHERE ({_PAPER})
                   AND result IS NOT NULL AND result != ''
@@ -2194,7 +2204,8 @@ def get_stats_by_time_horizon() -> dict:
         elif r["result"] == "LOSS":
             result[th]["losses"] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[th] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[th] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[th] += float(r["edge"])
             edge_n[th]   += 1
@@ -2219,6 +2230,9 @@ def get_stats_by_heuristic_alignment() -> dict:
     Only includes paper signals with a resolved outcome.
     Returns a dict with those three keys; each value has:
       total, wins, losses, win_rate (float|None), total_pnl (float|None), avg_edge (float|None)
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     result = {grp: {"total": 0, "wins": 0, "losses": 0,
                     "win_rate": None, "total_pnl": None, "avg_edge": None}
@@ -2227,7 +2241,8 @@ def get_stats_by_heuristic_alignment() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT direction, heuristic_direction, result, pnl_if_traded, edge
+                SELECT direction, heuristic_direction, result, pnl_if_traded, edge,
+                       stake_size_hypothetical
                 FROM signals
                 WHERE ({_PAPER})
                   AND result IS NOT NULL AND result != ''
@@ -2261,7 +2276,8 @@ def get_stats_by_heuristic_alignment() -> dict:
         elif r["result"] == "LOSS":
             losses_d[grp] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[grp] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[grp] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[grp] += float(r["edge"])
             edge_n[grp]   += 1
@@ -2284,6 +2300,9 @@ def get_stats_by_confidence() -> dict:
 
     Returns a dict keyed by "HIGH" / "MED" / "LOW", each with:
       total, wins, losses, win_rate (float|None), total_pnl (float|None)
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     result = {lvl: {"total": 0, "wins": 0, "losses": 0, "win_rate": None, "total_pnl": None}
               for lvl in ("HIGH", "MED", "LOW")}
@@ -2291,7 +2310,7 @@ def get_stats_by_confidence() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT confidence, result, pnl_if_traded
+                SELECT confidence, result, pnl_if_traded, stake_size_hypothetical
                 FROM signals
                 WHERE ({_PAPER})
                   AND result IS NOT NULL AND result != ''
@@ -2311,8 +2330,9 @@ def get_stats_by_confidence() -> dict:
         elif r["result"] == "LOSS":
             result[lvl]["losses"] += 1
         if r["pnl_if_traded"] is not None:
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
             prev = result[lvl]["total_pnl"] or 0.0
-            result[lvl]["total_pnl"] = prev + float(r["pnl_if_traded"])
+            result[lvl]["total_pnl"] = prev + float(r["pnl_if_traded"]) * stake
 
     for lvl, d in result.items():
         if d["total"] > 0:
@@ -2335,6 +2355,9 @@ def get_stats_by_net_edge() -> dict:
     Only includes paper signals with a resolved outcome.
     Returns a dict keyed by those bucket names; each value has:
       total, wins, losses, win_rate (float|None), total_pnl (float|None), avg_edge (float|None)
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     buckets = ("spread_dominant", "thin", "good", "strong", "no_data")
     result  = {b: {"total": 0, "wins": 0, "losses": 0,
@@ -2344,7 +2367,7 @@ def get_stats_by_net_edge() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT net_edge, result, pnl_if_traded, edge
+                SELECT net_edge, result, pnl_if_traded, edge, stake_size_hypothetical
                 FROM signals
                 WHERE ({_PAPER})
                   AND result IS NOT NULL AND result != ''
@@ -2377,7 +2400,8 @@ def get_stats_by_net_edge() -> dict:
         elif r["result"] == "LOSS":
             result[b]["losses"] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[b] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[b] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[b] += float(r["edge"])
             edge_n[b]   += 1
@@ -2405,6 +2429,9 @@ def get_stats_by_close_horizon() -> dict:
       no_close — close_time not recorded
 
     Returns dict keyed by bucket name; each value: total, wins, win_rate, total_pnl, avg_edge.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     BUCKETS = ("urgent", "short", "medium", "long", "no_close")
     result = {b: {"total": 0, "wins": 0, "win_rate": None,
@@ -2414,7 +2441,8 @@ def get_stats_by_close_horizon() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT timestamp, close_time, result, pnl_if_traded, edge
+                SELECT timestamp, close_time, result, pnl_if_traded, edge,
+                       stake_size_hypothetical
                 FROM signals
                 WHERE ({_PAPER})
                   AND result IS NOT NULL AND result != ''
@@ -2453,7 +2481,8 @@ def get_stats_by_close_horizon() -> dict:
         if r["result"] == "WIN":
             result[b]["wins"] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[b] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[b] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[b] += float(r["edge"])
             edge_n[b]   += 1
@@ -2475,6 +2504,9 @@ def get_stats_by_whale() -> dict:
     Returns dict with keys 'whale' and 'no_whale'; each has:
       total, wins, win_rate, total_pnl, avg_edge
     Only includes resolved paper signals with direction YES or NO.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     result = {k: {"total": 0, "wins": 0, "win_rate": None,
                   "total_pnl": None, "avg_edge": None}
@@ -2483,7 +2515,7 @@ def get_stats_by_whale() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT whale_detected, result, pnl_if_traded, edge
+                SELECT whale_detected, result, pnl_if_traded, edge, stake_size_hypothetical
                 FROM signals
                 WHERE ({_NO_PASS})
                   AND result IS NOT NULL AND result != ''
@@ -2503,7 +2535,8 @@ def get_stats_by_whale() -> dict:
         if r["result"] == "WIN":
             result[k]["wins"] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[k] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[k] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[k] += float(r["edge"])
             edge_n[k]   += 1
@@ -2525,6 +2558,9 @@ def get_stats_by_watchlist() -> dict:
     Returns dict with keys 'watchlist' and 'no_watchlist'; each has:
       total, wins, win_rate, total_pnl, avg_edge
     Only includes resolved paper signals with direction YES or NO.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     result = {k: {"total": 0, "wins": 0, "win_rate": None,
                   "total_pnl": None, "avg_edge": None}
@@ -2533,7 +2569,7 @@ def get_stats_by_watchlist() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT watchlist_signal, result, pnl_if_traded, edge
+                SELECT watchlist_signal, result, pnl_if_traded, edge, stake_size_hypothetical
                 FROM signals
                 WHERE ({_NO_PASS})
                   AND result IS NOT NULL AND result != ''
@@ -2553,7 +2589,8 @@ def get_stats_by_watchlist() -> dict:
         if r["result"] == "WIN":
             result[k]["wins"] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[k] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[k] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[k] += float(r["edge"])
             edge_n[k]   += 1
@@ -2586,6 +2623,9 @@ def get_stats_by_confluence() -> dict:
     Returns dict with keys '0', '1', '2+'; each has:
       total, wins, win_rate, total_pnl, avg_edge, brier
     Only includes resolved paper signals with direction YES or NO.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     result = {k: {"total": 0, "wins": 0, "win_rate": None,
                   "total_pnl": None, "avg_edge": None, "brier": None}
@@ -2595,7 +2635,7 @@ def get_stats_by_confluence() -> dict:
             rows = conn.execute(
                 f"""
                 SELECT confluence_count, our_estimate, direction, result,
-                       pnl_if_traded, edge
+                       pnl_if_traded, edge, stake_size_hypothetical
                 FROM signals
                 WHERE ({_NO_PASS})
                   AND result IS NOT NULL AND result != ''
@@ -2619,7 +2659,8 @@ def get_stats_by_confluence() -> dict:
         if r["result"] == "WIN":
             result[k]["wins"] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[k] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[k] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[k] += float(r["edge"])
             edge_n[k]   += 1
@@ -2695,6 +2736,9 @@ def get_stats_by_leviathan_score() -> dict:
       unscored — leviathan_score IS NULL (logged before this feature)
 
     Returns dict keyed by band; each value: total, wins, win_rate, total_pnl, avg_edge.
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     BANDS = ("A", "B", "C", "D", "unscored")
     result = {b: {"total": 0, "wins": 0, "win_rate": None,
@@ -2704,7 +2748,7 @@ def get_stats_by_leviathan_score() -> dict:
         with _db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT leviathan_score, result, pnl_if_traded, edge
+                SELECT leviathan_score, result, pnl_if_traded, edge, stake_size_hypothetical
                 FROM signals
                 WHERE ({_NO_PASS})
                   AND result IS NOT NULL AND result != ''
@@ -2734,7 +2778,8 @@ def get_stats_by_leviathan_score() -> dict:
         if r["result"] == "WIN":
             result[b]["wins"] += 1
         if r["pnl_if_traded"] is not None:
-            pnl_sum[b] += float(r["pnl_if_traded"])
+            stake = r["stake_size_hypothetical"] if r["stake_size_hypothetical"] is not None else 10.0
+            pnl_sum[b] += float(r["pnl_if_traded"]) * stake
         if r["edge"] is not None:
             edge_sum[b] += float(r["edge"])
             edge_n[b]   += 1
@@ -2807,6 +2852,9 @@ def get_stats_by_heuristic_label() -> list[dict]:
     Returns list of dicts sorted by win_rate descending:
       heuristic_label, total, wins, losses, win_rate (float|None),
       total_pnl (float|None), avg_edge (float|None)
+
+    total_pnl is stake-weighted dollars (2026-09-10 fix, same COALESCE(.., 10.0)
+    convention as get_stats()'s own 2026-09-08 fix).
     """
     try:
         with _db() as conn:
@@ -2818,7 +2866,7 @@ def get_stats_by_heuristic_label() -> list[dict]:
                     SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) AS wins,
                     SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END) AS losses,
                     AVG(edge) AS avg_edge,
-                    SUM(pnl_if_traded) AS total_pnl
+                    SUM(pnl_if_traded * COALESCE(stake_size_hypothetical, 10.0)) AS total_pnl
                 FROM signals
                 WHERE ({_PAPER})
                   AND outcome != '' AND outcome IS NOT NULL

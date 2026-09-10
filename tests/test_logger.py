@@ -2677,11 +2677,14 @@ def test_conf_stats_accumulates_wins_and_losses(tmp_db):
 
 
 def test_conf_stats_pnl_sums_correctly(tmp_db):
-    """total_pnl sums across all signals for a confidence level."""
+    """total_pnl sums across all signals for a confidence level, stake-weighted
+    (2026-09-10 fix) -- _insert_conf doesn't set stake_size_hypothetical, so
+    both rows fall back to the legacy $10 flat unit_size: (0.70-0.30)*10 = 4.0,
+    NOT the raw 0.40 ratio sum (the old bug, once asserted here directly)."""
     _insert_conf("a1", "HIGH", "WIN",  0.70, tmp_db)
     _insert_conf("a2", "HIGH", "LOSS", -0.30, tmp_db)
     stats = logger.get_stats_by_confidence()
-    assert abs(stats["HIGH"]["total_pnl"] - 0.40) < 0.001
+    assert abs(stats["HIGH"]["total_pnl"] - 4.0) < 0.001
 
 
 # ─── get_stats_by_heuristic_alignment ─────────────────────────────────────────
@@ -3673,6 +3676,90 @@ def test_get_stats_pnl_falls_back_to_ten_for_legacy_null_stake(tmp_db):
     _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
     stats = logger.get_stats()
     assert stats["total_hypothetical_pnl"] == pytest.approx(7.0)  # 0.70 * 10
+
+
+# ─── get_stats_by_*() dollar P&L (2026-09-10 fix) ──────────────────────────────
+#
+# Same bug pattern as get_stats() (2026-09-08 fix) existed identically in
+# every get_stats_by_*() breakdown feeding report.py's daily/weekly email
+# tables and analysis/calibration.py + analysis/track_record.py: total_pnl
+# was the raw SUM(pnl_if_traded) ratio, never multiplied by stake. Now every
+# one of them uses the same COALESCE(stake_size_hypothetical, 10.0)
+# convention. Coverage below spans both structural shapes this module uses:
+# SQL-aggregated (flag_path, sig, heuristic_label) and Python-loop-aggregated
+# (confidence, time_horizon, whale) -- the remaining six sibling functions
+# (heuristic_alignment, net_edge, close_horizon, watchlist, confluence,
+# leviathan_score) share the identical loop-aggregation shape and COALESCE
+# fallback (verified by inspection), not independently re-tested here.
+
+def test_get_stats_by_flag_path_pnl_is_stake_weighted(tmp_db):
+    cid1, cid2 = str(uuid.uuid4())[:8], str(uuid.uuid4())[:8]
+    _insert(cid1, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    _insert(cid2, "T2", "NO", 0.30, outcome="NO", result="WIN", pnl=0.30)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET flag_path='DRIFT', stake_size_hypothetical=75.0 WHERE call_id=?", (cid1,))
+        conn.execute("UPDATE signals SET flag_path='DRIFT', stake_size_hypothetical=25.0 WHERE call_id=?", (cid2,))
+    rows = logger.get_stats_by_flag_path()
+    drift = next(r for r in rows if r["flag_path"] == "DRIFT")
+    # 0.70*75 + 0.30*25 = 60.0, NOT 1.0 (the old bug)
+    assert drift["total_pnl"] == pytest.approx(60.0)
+
+
+def test_get_stats_by_sig_pnl_is_stake_weighted(tmp_db):
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET sig_edge=1, stake_size_hypothetical=75.0 WHERE call_id=?", (cid,))
+    stats = logger.get_stats_by_sig()
+    assert stats["sig_edge"]["total_pnl"] == pytest.approx(52.5)  # 0.70 * 75
+
+
+def test_get_stats_by_heuristic_label_pnl_is_stake_weighted(tmp_db):
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    with logger._db() as conn:
+        conn.execute(
+            "UPDATE signals SET heuristic_label='weather', stake_size_hypothetical=75.0 WHERE call_id=?",
+            (cid,),
+        )
+    rows = logger.get_stats_by_heuristic_label()
+    weather = next(r for r in rows if r["heuristic_label"] == "weather")
+    assert weather["total_pnl"] == pytest.approx(52.5)  # 0.70 * 75
+
+
+def test_get_stats_by_confidence_pnl_is_stake_weighted(tmp_db):
+    cid1, cid2 = str(uuid.uuid4())[:8], str(uuid.uuid4())[:8]
+    _insert(cid1, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    _insert(cid2, "T2", "NO", 0.30, outcome="NO", result="WIN", pnl=0.30)
+    with logger._db() as conn:
+        conn.execute("UPDATE signals SET confidence='HIGH', stake_size_hypothetical=75.0 WHERE call_id=?", (cid1,))
+        conn.execute("UPDATE signals SET confidence='HIGH', stake_size_hypothetical=25.0 WHERE call_id=?", (cid2,))
+    stats = logger.get_stats_by_confidence()
+    assert stats["HIGH"]["total_pnl"] == pytest.approx(60.0)  # 0.70*75 + 0.30*25
+
+
+def test_get_stats_by_time_horizon_pnl_is_stake_weighted(tmp_db):
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    with logger._db() as conn:
+        conn.execute(
+            "UPDATE signals SET time_horizon='WEEKLY', stake_size_hypothetical=75.0 WHERE call_id=?",
+            (cid,),
+        )
+    stats = logger.get_stats_by_time_horizon()
+    assert stats["WEEKLY"]["total_pnl"] == pytest.approx(52.5)  # 0.70 * 75
+
+
+def test_get_stats_by_whale_pnl_is_stake_weighted(tmp_db):
+    cid = str(uuid.uuid4())[:8]
+    _insert(cid, "T1", "YES", 0.30, outcome="YES", result="WIN", pnl=0.70)
+    with logger._db() as conn:
+        conn.execute(
+            "UPDATE signals SET whale_detected=1, stake_size_hypothetical=75.0 WHERE call_id=?",
+            (cid,),
+        )
+    stats = logger.get_stats_by_whale()
+    assert stats["whale"]["total_pnl"] == pytest.approx(52.5)  # 0.70 * 75
 
 
 # ─── backfill_stake_sizes() (2026-09-08) ───────────────────────────────────────

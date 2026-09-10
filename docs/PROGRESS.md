@@ -2,6 +2,78 @@
 
 ---
 
+## 2026-09-10 — HANDOFF: read this first if picking up a new session
+
+**Supersedes the 09-01/02 handoff below** (kept for narrative continuity,
+but its two open threads are both closed now — see below). User is away
+for the weekend (through approx. 2026-09-14); Claude is operating in
+"advance when opened" PM mode, not a standing scheduled check-in (declined
+deliberately -- see [[feedback_leviathan_pm_role_boundaries]]).
+
+### What actually happened 09-09 through 09-10 (not previously logged here)
+
+- **Wallet win/loss scoring bug fixed** (`d5f236b`, 2026-09-09). Polymarket's
+  Data API zeroes PnL fields on every resolved position, so `_score_wallet`
+  could never detect a real win. Fixed by cross-referencing the CLOB API's
+  settlement data. Result: 0/20 curated watchlist wallets show a real win;
+  a broader unbiased sample found exactly one genuine winner (64.5% win
+  rate, 397 resolved bets, +$11,233 P&L), now wired into paper-fill
+  tracking. Added a wall-clock time budget to `discover_winners()` (runs
+  synchronously inside main.py's 10-minute window).
+- **Replay-corpus build (09-01/02 handoff's item 1): COMPLETE.** Reached
+  312/300 target in `replay_signals`. `export_and_report()` already ran
+  (`reports/replay_backtest_report.txt`, `data/replay_export/*.csv`).
+  Final blended hit rate 47.4% -- notably different from the 88.9% seen at
+  the n=210 checkpoint that flagged look-ahead contamination; still
+  instrument-validation only, not a profitability read. Confidence split
+  is bimodal: HIGH n=153 -> 85.0%, MED n=44 -> 38.6%, LOW n=115 -> 0.9% --
+  that LOW-confidence near-zero rate is unexplained and worth a look before
+  trusting the corpus further.
+- **Opus-vs-Sonnet trial (09-01/02 handoff's item 2): COMPLETE, correctly
+  reset.** `cli_model_override` back to `null`; run history shows 4 Opus
+  runs (09-02 through 09-05) then reverted to `claude-sonnet-4-6` from
+  09-06 onward.
+- **per-group-pnl-tables-still-flat-not-stake-weighted: DONE (2026-09-10).**
+  All 12 sibling `get_stats_by_*()` functions in `core/logger.py` had the
+  same bug `get_stats()` had until its 09-08 fix: `total_pnl` was the raw
+  `SUM(pnl_if_traded)` ratio, never multiplied by stake, even though
+  `core/report.py` (the actual daily/weekly email) prints it directly as
+  `f"${...:.2f}"` with **zero** scaling -- worse than the flat-but-correct
+  `unit_size` scaling `analysis/calibration.py`/`analysis/track_record.py`
+  were doing at display time. All 12 functions now use the same
+  `COALESCE(stake_size_hypothetical, 10.0)` convention as `get_stats()`;
+  both downstream scripts updated to stop re-multiplying (which would have
+  double-counted). Verified `core/scorer.py`'s live calibration-feedback
+  loop only reads `total`/`win_rate`/`wins`, never `total_pnl` -- this was
+  a pure reporting/display fix, zero effect on live scoring. Added
+  representative test coverage (6 of the 12 functions, spanning both the
+  SQL-aggregated and Python-loop-aggregated code shapes) and fixed one
+  pre-existing test (`test_conf_stats_pnl_sums_correctly`) that had
+  encoded the old bug as its expected value. Also fixed an unrelated
+  pre-existing crash in `analysis/track_record.py` (a unicode arrow
+  character that dies under Windows' cp1252 console codepage) hit while
+  verifying this end-to-end.
+- **auto-calibration-loop: re-checked, still correctly not actionable.**
+  n=40 now (was 37); still only `weather` (n=16) clears the per-category
+  floor and its 95% CI still straddles neutral -> suggested delta $0.00.
+  No change from last check; shadow-mode preview remains the right state.
+- **entertainment-award-emmy-coverage-gap: deliberately untouched.** Its
+  own notes say re-check only after the real 2026-09-14 Emmy ceremony has
+  passed (settled_markets should pick up genuine winner rows then) -- that
+  date falls inside this weekend, so this is correctly still pending, not
+  stalled.
+- **task-scheduler-manual-trigger-stuck-queued: passively re-checked, not
+  touched.** All 13 `Leviathan-*` scheduled tasks show `State=Ready` (or
+  `Running` for the always-on `Leviathan-Litestream` replication task,
+  code 0x41301 = normal) with `LastTaskResult=0` and sane
+  LastRunTime/NextRunTime pairs -- no evidence of the stuck-Queued bug on
+  natural (non-manual) triggers right now. Did not manually trigger
+  anything to test further, since that's the exact action that reproduces
+  the bug and touching Task Scheduler/service internals was already
+  flagged in this item's own notes as needing the user's own say.
+
+---
+
 ## 2026-09-01/02 — HANDOFF: read this first if picking up a new session
 
 **Start here for continuity.** This entry exists specifically so a fresh
