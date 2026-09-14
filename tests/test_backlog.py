@@ -596,8 +596,15 @@ def test_parses_and_96_items(backlog_data):
     133, not 132: added ai-github-research-scan (2026-09-14, done at
     filing) for the new weekly Leviathan-AIResearchScan capability --
     see scripts/ai_research_scan.py.
+
+    134, not 133: Leviathan-AIResearchScan's first live run (2026-09-14)
+    surfaced polymarket-outcomes-field-deprecation-check -- a possible
+    gamma-api field deprecation (outcomes/outcomePrices) that
+    sources/polymarket.py and sources/accounts.py both actually depend
+    on; unresolved, filed for a human/PM to verify against a live API
+    response rather than more doc-reading.
     """
-    assert len(backlog_data["items"]) == 133
+    assert len(backlog_data["items"]) == 134
 
 
 def test_all_ids_unique(backlog_data):

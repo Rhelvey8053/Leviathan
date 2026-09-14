@@ -32,7 +32,14 @@ PROMPT_FILE = ROOT / "scripts" / "ai_research_scan_prompt.md"
 
 ALLOWED_TOOLS = (
     "Read Grep Glob WebSearch WebFetch "
-    "Write(reports/ai_research/*) "
+    # Edit(path), not Write(path) -- the CLI's own permission-check error on
+    # the 2026-09-14 first live run: "Permission allow rule (--allowed-
+    # tools): Write(reports/ai_research/*) is not matched by file permission
+    # checks -- only Edit(path) rules are." Edit(path) rules cover all
+    # file-editing tools, Write included. That run's report never got saved
+    # to disk because of this -- had to be recovered from the CLI's own
+    # stdout/log and written by hand.
+    "Edit(reports/ai_research/*) "
     "Bash(git status) Bash(git log*) Bash(git diff*) Bash(git show*)"
 )
 DISALLOWED_TOOLS = (
