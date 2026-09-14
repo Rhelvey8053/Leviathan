@@ -1839,6 +1839,19 @@
       "depends_on": [],
       "action": "Found 2026-09-13 while investigating a transient SSL blip in that day's main.py run (unrelated -- litestream itself logs only local 'replica sync' INFO lines every ~2s, no errors, no network calls, so it was ruled out as the cause). logs/litestream.log has grown to ~100MB with no rotation or cleanup in place. Not urgent -- doesn't affect pipeline correctness -- but will keep growing indefinitely. Add log rotation (size- or age-based) for litestream's log output, or reduce its log level/verbosity if litestream supports it.",
       "notes": "Filed at user's request after being surfaced as an aside during a weekend catch-up review."
+    },
+    {
+      "id": "health-check-is-presence-not-outcome",
+      "title": "Automation health checks verify a run happened, not that it succeeded",
+      "area": "infra",
+      "priority": 3,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Found 2026-09-13 while diagnosing that day's SSL blip and failed weekly digest. get_pipeline_health()/automation_health_check.py check 'hours since last run' per scheduled task, and heartbeat_check.py (which is explicitly the substitute for monitoring Leviathan-DailyRun -- see automation_health_check.py's own comment) only alerts on absence of a recent run_id in the runs table. Neither checks the CONTENT of a run. On 2026-09-13, main.py's Claude-scoring step failed on all 3 retry attempts (RuntimeError, caught and swallowed) and the weekly digest send raised an SSLError (caught and swallowed) -- but because a run_id was still logged, every health signal read 100% green. The degraded day was only found by manually reading the raw scheduler log line-by-line; no alert fired. Add outcome-level checks: e.g. alert (or at least flag in the health/gate-notifier report) when a run logs 0 signals despite markets_scanned>0 and whale_flags>0 (a strong hint the scorer step failed rather than genuinely finding nothing), when cost_usd/tokens_used is 0 on a non-Sunday-only-flagged run, or when a Sunday run doesn't have a corroborating 'Weekly digest sent' log line. Bar for 'healthy' should be 'did the pipeline do its job', not just 'did main.py exit and write a row'.",
+      "notes": "Filed as part of a PM-level weekend retrospective at the user's request. This is a design/scope decision (what counts as 'healthy', how noisy vs. useful new alerts would be) -- flagged as ready but not started; needs a priority call from the user before building."
     }
   ]
 }
