@@ -25,8 +25,22 @@ scripts/setup_ai_research_scan_scheduler.ps1. Output also captured to
 logs/ai_research_scan.log for debugging a failed run, and surfaced (as a
 tail excerpt) by scripts/daily_digest.py's WEEKLY_LOGS section the same
 way weekly_audit.log / weekly_code_audit.log already are.
+
+2026-09-14: also emails the written report directly (user asked for a
+dedicated email rather than only the WEEKLY_LOGS tail excerpt, which
+truncates and is buried inside the daily digest). Reuses core.report.
+send_report exactly like gate_notifier.py/heartbeat_check.py/
+automation_health_check.py do -- same plain-text-body, subject_override
+call shape, same try/except-and-log-not-crash on send failure. No new
+state file: unlike gate_notifier's fire-once dedup, this just emails
+whatever reports/ai_research/<today>.md contains after each run: the
+scan is scheduled at most twice a week, so a same-day rerun (manual,
+during dev) double-emailing is an acceptable, rare cost against the
+complexity of tracking "already sent today" state for it.
 """
 
+import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -35,7 +49,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+
+from core.report import send_report
+
 PROMPT_FILE = ROOT / "scripts" / "ai_research_scan_prompt.md"
+REPORTS_DIR = ROOT / "reports" / "ai_research"
 
 ALLOWED_TOOLS = (
     "Read Grep Glob WebSearch WebFetch "
@@ -90,7 +109,76 @@ def run_scan(claude_path: str, prompt: str, clean_env: dict) -> int:
     return 0
 
 
+def load_config() -> dict:
+    cfg_path = ROOT / "config.json"
+    if not cfg_path.exists():
+        cfg_path = ROOT / "config.example.json"
+    with open(cfg_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def compose_email(report_text: str, date_str: str) -> tuple[str, str]:
+    """Returns (body, subject) for today's report email. The report is
+    already written for a human to read start to finish (see
+    ai_research_scan_prompt.md's own structure) -- send it as-is rather
+    than re-summarizing it a second time."""
+    subject = f"Leviathan — AI Research Scan — {date_str}"
+    return report_text, subject
+
+
+def email_report(report_path: Path, config: dict, dry_run: bool = False) -> bool:
+    """Emails the report at report_path. Returns True if sent (or if
+    dry_run printed successfully), False on any failure -- never raises,
+    matching gate_notifier/heartbeat_check/automation_health_check's own
+    send-failure handling (log it, don't crash a run that otherwise
+    succeeded)."""
+    date_str = report_path.stem
+    report_text = report_path.read_text(encoding="utf-8")
+    body, subject = compose_email(report_text, date_str)
+
+    if dry_run:
+        print(subject)
+        print()
+        print(body)
+        return True
+
+    try:
+        send_report(body, signals=[], whale_flags=0, config=config, subject_override=subject)
+    except Exception as e:
+        print(f"[ai_research_scan] email send FAILED (report was still written to disk): {e}",
+              file=sys.stderr)
+        return False
+
+    # relative_to(ROOT) raises ValueError for a path outside ROOT (e.g. a
+    # tmp_path in tests, or any future caller passing an arbitrary path) --
+    # found by this function's own tests. Falls back to the absolute path
+    # rather than let a cosmetic log line crash an otherwise-successful send.
+    try:
+        shown_path = report_path.relative_to(ROOT)
+    except ValueError:
+        shown_path = report_path
+    print(f"[ai_research_scan] emailed report ({shown_path})")
+    return True
+
+
 def main():
+    # Windows' console codepage (cp1252) can't encode characters the
+    # research report/CLI output routinely contain (em dashes, arrows --
+    # found 2026-09-14 testing email_report's own dry-run print, which
+    # crashed with UnicodeEncodeError on '→'). This also silently
+    # protected run_scan()'s pre-existing print(result.stdout) below, which
+    # had the identical exposure and just hadn't been hit by an unlucky
+    # character yet. errors="replace" over a stricter reconfigure: a
+    # mangled character in a log/console is recoverable, a crashed run
+    # that skips emailing an otherwise-good report is not.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+    parser = argparse.ArgumentParser(description="Leviathan AI/GitHub research scan")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print the email subject+body instead of sending")
+    args = parser.parse_args()
+
     claude_path = shutil.which("claude")
     if not claude_path:
         print("[ai_research_scan] claude CLI not found in PATH", file=sys.stderr)
@@ -107,7 +195,22 @@ def main():
     # Prompt via stdin, not a positional CLI argument -- same reason as
     # weekly_audit.py: this prompt is long enough to risk Windows' command-
     # line length limit.
-    sys.exit(run_scan(claude_path, prompt, clean_env))
+    exit_code = run_scan(claude_path, prompt, clean_env)
+
+    # Email whatever today's report contains, independent of exit_code --
+    # a report can exist even after a non-fatal issue is logged elsewhere,
+    # and existence (not exit_code) is the actual signal that there's
+    # something to send. No file for today just means no email, silently.
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    report_path = REPORTS_DIR / f"{today_str}.md"
+    if report_path.exists():
+        config = load_config()
+        if not email_report(report_path, config, dry_run=args.dry_run):
+            exit_code = exit_code or 1
+    else:
+        print(f"[ai_research_scan] no report at {report_path.relative_to(ROOT)} -- nothing to email")
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
