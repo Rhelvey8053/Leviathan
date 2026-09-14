@@ -946,6 +946,73 @@ class TestTier23Columns(unittest.TestCase):
         self.assertEqual(blank_row["smart_money_dir"], "")
 
 
+def _make_downgrade_reason_db(path: str) -> None:
+    """DB covering the 2026-09-14 downgrade_reason addition."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            direction TEXT, confidence TEXT, confidence_downgraded INTEGER DEFAULT 0,
+            downgrade_reason TEXT
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY, timestamp TEXT, markets_scanned INTEGER,
+            signals_generated INTEGER, model_used TEXT
+        );
+    """)
+    conn.executemany(
+        "INSERT INTO signals (call_id,timestamp,ticker,title,direction,confidence,"
+        "confidence_downgraded,downgrade_reason) VALUES (?,?,?,?,?,?,?,?)",
+        [
+            ("dg_reason", "2026-09-14T10:00:00Z", "KXDGREASON", "Downgraded market",
+             "YES", "MED", 1, "short_horizon_uncorroborated"),
+            ("dg_blank", "2026-09-14T10:00:00Z", "KXDGBLANK", "Never downgraded",
+             "YES", "MED", 0, None),
+        ]
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestDowngradeReasonColumn(unittest.TestCase):
+    """backlog: downgrade-reason-field (2026-09-14) -- which of main.py's
+    three HIGH-confidence downgrade rules fired."""
+
+    def _rows(self, tmpdir):
+        import csv
+        db  = os.path.join(tmpdir, "downgrade_reason.db")
+        out = os.path.join(tmpdir, "export")
+        _make_downgrade_reason_db(db)
+        export_csvs(db_path=db, export_dir=out)
+        with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+            return {r["call_id"]: r for r in csv.DictReader(f)}
+
+    def test_downgrade_reason_column_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import csv
+            db  = os.path.join(tmpdir, "downgrade_reason.db")
+            out = os.path.join(tmpdir, "export")
+            _make_downgrade_reason_db(db)
+            export_csvs(db_path=db, export_dir=out)
+            with open(os.path.join(out, "signals.csv"), newline="", encoding="utf-8") as f:
+                headers = next(csv.reader(f))
+        self.assertIn("downgrade_reason", headers)
+
+    def test_downgrade_reason_passes_through(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["dg_reason"]["downgrade_reason"], "short_horizon_uncorroborated")
+        self.assertEqual(rows["dg_reason"]["confidence_downgraded"], "1")
+
+    def test_downgrade_reason_blank_not_none_string(self):
+        """A never-downgraded row must export an empty string, not the
+        literal 'None'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = self._rows(tmpdir)
+        self.assertEqual(rows["dg_blank"]["downgrade_reason"], "")
+        self.assertEqual(rows["dg_blank"]["confidence_downgraded"], "0")
+
+
 def _make_strategy_review_db(path: str) -> None:
     """
     DB covering the 2026-08-16 strategy-review additions: volume/

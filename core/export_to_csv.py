@@ -41,7 +41,7 @@ _STRING_COLS = frozenset({
     "whale_direction", "ticker", "title", "run_id", "call_id",
     "close_time", "lv_band", "date", "timestamp", "resolved_at",
     "category", "ob_direction", "consensus_dir", "smart_money_dir",
-    "event_ticker", "series_ticker", "kalshi_url",
+    "event_ticker", "series_ticker", "kalshi_url", "downgrade_reason",
 })
 
 # Sentinel strings that SQLite/Python can produce for missing data.
@@ -84,7 +84,8 @@ WHITELIST = [
 
     # Scoring / decision
     "leviathan_score", "lv_band", "sig_edge", "sig_drift", "sig_br_none",
-    "watchlist_signal", "short_horizon", "confidence_downgraded", "second_pass",
+    "watchlist_signal", "short_horizon", "confidence_downgraded", "downgrade_reason",
+    "second_pass",
 
     # Sub-signals: whale_direction/whale_max_trade_size, net_edge_after_fee/
     # ev_after_fee_per_contract, heuristic_direction, and category were

@@ -278,6 +278,21 @@ def _init_db() -> None:
             # non-fatal and never costs the pick anything, same discipline
             # as ground_citations's own try/except.
             "cross_model_opinion   TEXT",
+            # Which of main.py's three HIGH-confidence downgrade rules fired,
+            # when confidence_downgraded=1 -- found live 2026-09-14: without
+            # this, "which rule actually did it" had to be reconstructed by
+            # hand from edge/short_horizon/liquidity_thin on a case-by-case
+            # basis every time the question came up. One of "edge_below_min"
+            # (edge < config.scoring.min_high_confidence_edge), "short_
+            # horizon_uncorroborated" (closes <7d, no whale/watchlist/
+            # Polymarket-gap corroboration), or "thin_liquidity" (order-book
+            # depth below unit_size on the needed side) -- see main.py's
+            # three downgrade blocks, same order. NULL when
+            # confidence_downgraded=0. Purely observational, same discipline
+            # as confidence_downgraded/second_pass/liquidity_thin above --
+            # never read by any scoring/direction/edge logic, so adding it
+            # is not a confidence-scoring change.
+            "downgrade_reason      TEXT",
         ]:
             _add_col(conn, col)
         # Tag all pre-existing rows (source IS NULL) as paper signals.
@@ -410,9 +425,9 @@ def log_signal(signal: dict) -> None:
                  poly_price,poly_price_gap,poly_net_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
                  ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
-                 cross_model_opinion)
+                 cross_model_opinion,downgrade_reason)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -477,6 +492,7 @@ def log_signal(signal: dict) -> None:
                 1 if signal.get("liquidity_thin") else 0,
                 json.dumps(signal.get("citations") or []),
                 json.dumps(signal["cross_model_opinion"]) if signal.get("cross_model_opinion") else None,
+                signal.get("downgrade_reason"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log signal: {e}")
@@ -507,9 +523,9 @@ def log_pass(signal: dict) -> None:
                  poly_price,poly_price_gap,poly_net_price_gap,consensus_gap,consensus_dir,
                  smart_money_count,smart_money_dir,reasoning,sources,
                  ob_bid_depth,ob_ask_depth,liquidity_checked,liquidity_thin,citations,
-                 cross_model_opinion)
+                 cross_model_opinion,downgrade_reason)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 str(uuid.uuid4())[:8],
                 datetime.now(timezone.utc).isoformat(),
@@ -580,6 +596,7 @@ def log_pass(signal: dict) -> None:
                 1 if signal.get("liquidity_thin") else 0,
                 json.dumps(signal.get("citations") or []),
                 json.dumps(signal["cross_model_opinion"]) if signal.get("cross_model_opinion") else None,
+                signal.get("downgrade_reason"),
             ))
     except Exception as e:
         print(f"  [logger] Failed to log pass: {e}")

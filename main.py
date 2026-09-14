@@ -31,6 +31,21 @@ def _fmt_usd(value) -> str:
         return "$—"
 
 
+def _append_downgrade_reason(signal: dict, reason: str) -> None:
+    """
+    Records which confidence-downgrade rule fired, comma-appending rather
+    than overwriting -- a signal can theoretically be hit by more than one
+    of the three downgrade rules in sequence (e.g. HIGH -> MED via the
+    edge-floor rule, then MED -> LOW via the thin-liquidity rule, since
+    that third rule's own condition checks confidence in (HIGH, MED) and
+    runs after the first two). Never observed in the data as of 2026-09-14
+    (only one downgrade has ever occurred, single-reason), but overwriting
+    would silently lose the first reason if it ever does happen.
+    """
+    existing = signal.get("downgrade_reason")
+    signal["downgrade_reason"] = f"{existing},{reason}" if existing else reason
+
+
 def _save_weekly_digest_state(now_local: datetime, ok: bool, note: str | None) -> None:
     """
     Persists the Sunday digest block's outcome so daily_digest.py can flag
@@ -1053,6 +1068,7 @@ def main():
         if signal.get("confidence") == "HIGH" and abs(float(signal.get("edge") or 0)) < min_high_edge:
             signal["confidence"] = "MED"
             signal["confidence_downgraded"] = True
+            _append_downgrade_reason(signal, "edge_below_min")
 
         # Short-horizon HIGH confidence gate: downgrade to MED when market closes within 7 days
         # and no strong corroborating signal exists (no whale, no watchlist, no Polymarket divergence).
@@ -1066,6 +1082,7 @@ def main():
             if not _has_corroboration:
                 signal["confidence"] = "MED"
                 signal["confidence_downgraded"] = True
+                _append_downgrade_reason(signal, "short_horizon_uncorroborated")
 
         # Fee-adjusted EV per unit — computed here since direction is now known from Claude.
         _dir_ev  = signal.get("direction", "PASS")
@@ -1089,6 +1106,7 @@ def main():
         if _liq["liquidity_thin"] and signal.get("confidence") in ("HIGH", "MED"):
             signal["confidence"] = "MED" if signal["confidence"] == "HIGH" else "LOW"
             signal["confidence_downgraded"] = True
+            _append_downgrade_reason(signal, "thin_liquidity")
 
         # Extremizing: when ≥2 independent sources agree with Claude's direction,
         # the true probability is more extreme than any single estimate suggests.

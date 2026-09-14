@@ -640,8 +640,14 @@ def test_parses_and_96_items(backlog_data):
     terms until a post-mortem (gated on the not-yet-run price-blind arm)
     exists. See docs/PREREGISTRATION.md's Amendment Log for the full
     computation.
+
+    140, not 139: added downgrade-reason-field (2026-09-14, done at
+    filing) -- new downgrade_reason column recording which of main.py's
+    three HIGH-confidence downgrade rules fired. Pure observability, not
+    a confidence-scoring change, so not affected by the checkpoint halt.
+    See core/logger.py, main.py's _append_downgrade_reason().
     """
-    assert len(backlog_data["items"]) == 139
+    assert len(backlog_data["items"]) == 140
 
 
 def test_all_ids_unique(backlog_data):

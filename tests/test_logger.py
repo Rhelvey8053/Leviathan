@@ -3489,6 +3489,91 @@ def test_log_signal_stores_methodology_flags(tmp_db):
     assert row["second_pass"] == 1
 
 
+# ─── downgrade_reason (backlog: downgrade-reason-field, 2026-09-14) ──────────
+#
+# Which of main.py's three HIGH-confidence downgrade rules fired, when
+# confidence_downgraded=1. Purely observational -- never read by any
+# scoring/direction/edge logic.
+
+def test_schema_includes_downgrade_reason_column(tmp_db):
+    with logger._db() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+    assert "downgrade_reason" in cols
+
+
+def test_migration_adds_downgrade_reason_without_corrupting_existing_rows(tmp_path):
+    import sqlite3
+    db_file = str(tmp_path / "old_schema_dg.db")
+    conn = sqlite3.connect(db_file)
+    conn.executescript("""
+        CREATE TABLE signals (
+            call_id TEXT PRIMARY KEY, timestamp TEXT, ticker TEXT, title TEXT,
+            market_price REAL, our_estimate REAL, edge REAL, direction TEXT,
+            confidence TEXT, whale_detected INTEGER DEFAULT 0, whale_direction TEXT,
+            outcome TEXT, result TEXT, pnl_if_traded REAL, run_id TEXT,
+            event_ticker TEXT DEFAULT ''
+        );
+    """)
+    conn.execute("INSERT INTO signals (call_id, ticker, direction, event_ticker) "
+                 "VALUES ('olddg', 'KXOLDDG', 'YES', 'KXOLDDG-EVT')")
+    conn.commit()
+    conn.close()
+
+    old_db_path = logger.DB_PATH
+    try:
+        logger.DB_PATH = db_file
+        logger._init_db()
+        with logger._db() as c:
+            cols = {row[1] for row in c.execute("PRAGMA table_info(signals)").fetchall()}
+            assert "downgrade_reason" in cols
+            row = c.execute("SELECT * FROM signals WHERE call_id='olddg'").fetchone()
+            assert row["ticker"] == "KXOLDDG"
+            assert row["downgrade_reason"] is None
+    finally:
+        logger.DB_PATH = old_db_path
+
+
+def test_log_signal_stores_downgrade_reason(tmp_db):
+    sig = {
+        "ticker": "KXDG1", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "confidence_downgraded": True, "downgrade_reason": "edge_below_min",
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT confidence_downgraded, downgrade_reason FROM signals WHERE ticker='KXDG1'"
+        ).fetchone()
+    assert row["confidence_downgraded"] == 1
+    assert row["downgrade_reason"] == "edge_below_min"
+
+
+def test_log_signal_downgrade_reason_none_when_not_downgraded(tmp_db):
+    sig = {
+        "ticker": "KXDG2", "direction": "YES", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+    }
+    logger.log_signal(sig)
+    with logger._db() as conn:
+        row = conn.execute("SELECT downgrade_reason FROM signals WHERE ticker='KXDG2'").fetchone()
+    assert row["downgrade_reason"] is None
+
+
+def test_log_pass_stores_downgrade_reason(tmp_db):
+    sig = {
+        "ticker": "KXDG3", "confidence": "MED", "run_id": "test",
+        "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "confidence_downgraded": True, "downgrade_reason": "thin_liquidity",
+    }
+    logger.log_pass(sig)
+    with logger._db() as conn:
+        row = conn.execute(
+            "SELECT direction, downgrade_reason FROM signals WHERE ticker='KXDG3'"
+        ).fetchone()
+    assert row["direction"] == "PASS"
+    assert row["downgrade_reason"] == "thin_liquidity"
+
+
 def test_log_signal_stores_extremizing_fields(tmp_db):
     sig = {
         "ticker": "KXEXT1", "direction": "YES", "confidence": "HIGH", "run_id": "test",
