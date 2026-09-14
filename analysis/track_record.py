@@ -33,12 +33,26 @@ def _pct(v, default="—"):
         return default
 
 
-def _fmt_pnl(v, per_contract=10.0):
-    """Convert per-$1 PnL fraction to dollar-based P&L at the configured unit size."""
-    try:
-        return f"${float(v) * per_contract:+.2f}"
-    except Exception:
-        return "—"
+def _row_pnl_dollars(row: dict, default_stake: float = 10.0) -> float | None:
+    """
+    A single row's stake-weighted dollar P&L: pnl_if_traded (a per-$1
+    fraction) times that row's own stake_size_hypothetical, falling back
+    to default_stake when the row predates that field's 2026-09-08
+    backfill. Same COALESCE(stake_size_hypothetical, 10.0) convention as
+    get_stats() and all 12 get_stats_by_*() functions (see
+    per-group-pnl-tables-still-flat-not-stake-weighted in BACKLOG.md) --
+    this file's own _print_section()/COMBINED SUMMARY totals were never
+    covered by that fix (they compute independently from raw DB rows,
+    not via those functions) and still used a flat, ignore-the-real-stake
+    unit_size until this fix. Returns None when pnl_if_traded is missing,
+    same as its absence in a SUM().
+    """
+    pnl = row.get("pnl_if_traded")
+    if pnl is None:
+        return None
+    stake = row.get("stake_size_hypothetical")
+    stake = float(stake) if stake is not None else default_stake
+    return float(pnl) * stake
 
 
 def _fmt_dollars(v):
@@ -47,9 +61,7 @@ def _fmt_dollars(v):
     logger.get_stats_by_*() function now returns total_pnl in real,
     confidence-weighted dollars -- see get_stats()'s 2026-09-08 fix and
     per-group-pnl-tables-still-flat-not-stake-weighted in BACKLOG.md).
-    Unlike _fmt_pnl(), no per_contract multiplier -- that would double-count
-    the stake. Only for get_stats_by_*() output; _print_section()'s raw
-    per-row pnl_if_traded sums still go through _fmt_pnl().
+    No per_contract multiplier -- that would double-count the stake.
     """
     try:
         return f"${float(v):+.2f}"
@@ -57,7 +69,7 @@ def _fmt_dollars(v):
         return "—"
 
 
-def _print_section(title: str, rows: list[dict], unit_size: float = 10.0) -> None:
+def _print_section(title: str, rows: list[dict], default_stake: float = 10.0) -> None:
     if not rows:
         print(f"\n  (no {title.lower()} rows)")
         return
@@ -66,7 +78,8 @@ def _print_section(title: str, rows: list[dict], unit_size: float = 10.0) -> Non
     unresolved = [r for r in rows if not r.get("outcome")]
     wins       = [r for r in resolved if r.get("result") == "WIN"]
     losses     = [r for r in resolved if r.get("result") == "LOSS"]
-    total_pnl  = sum(float(r["pnl_if_traded"] or 0) for r in resolved if r.get("pnl_if_traded") is not None)
+    total_pnl  = sum(p for r in resolved
+                      if (p := _row_pnl_dollars(r, default_stake)) is not None)
     win_rate   = (len(wins) / len(resolved) * 100) if resolved else None
 
     print(f"\n  Total:       {len(rows)}")
@@ -74,7 +87,7 @@ def _print_section(title: str, rows: list[dict], unit_size: float = 10.0) -> Non
     print(f"  Wins:        {len(wins)}")
     print(f"  Losses:      {len(losses)}")
     print(f"  Win rate:    {f'{win_rate:.1f}%' if win_rate is not None else '— (none resolved)'}")
-    print(f"  Net PnL:     {_fmt_pnl(total_pnl, unit_size)} (at ${unit_size:.0f}/contract)")
+    print(f"  Net PnL:     {_fmt_dollars(total_pnl)} (confidence-weighted stake per signal)")
 
     if resolved:
         print()
@@ -86,7 +99,8 @@ def _print_section(title: str, rows: list[dict], unit_size: float = 10.0) -> Non
             price   = _pct(r.get("market_price") or r.get("market_price_at_probe"), "—")
             out     = (r.get("outcome") or "?")[:3]
             result  = (r.get("result") or "?")[:4]
-            pnl     = _fmt_pnl(r.get("pnl_if_traded"), unit_size)
+            row_pnl = _row_pnl_dollars(r, default_stake)
+            pnl     = _fmt_dollars(row_pnl) if row_pnl is not None else "—"
             conf    = (r.get("confidence") or "")[:4]
             print(f"  {ticker:<30}  {dir_:<3}  {price:>6}  {out:<3}  {result:<4}  {pnl:>8}  {conf}")
 
@@ -349,8 +363,8 @@ def main(resolve: bool = True):
 
     # ── Combined summary ──────────────────────────────────────────────────────
     all_resolved = [r for r in all_rows if r.get("outcome")]
-    all_pnl      = sum(float(r["pnl_if_traded"] or 0) for r in all_resolved
-                       if r.get("pnl_if_traded") is not None)
+    all_pnl      = sum(p for r in all_resolved
+                        if (p := _row_pnl_dollars(r, unit_size)) is not None)
     all_wins     = sum(1 for r in all_resolved if r.get("result") == "WIN")
     all_wr       = (all_wins / len(all_resolved) * 100) if all_resolved else None
 
@@ -364,7 +378,7 @@ def main(resolve: bool = True):
     print(f"  Total rows:   {len(all_rows)}")
     print(f"  Resolved:     {len(all_resolved)}")
     print(f"  Win rate:     {f'{all_wr:.1f}%' if all_wr is not None else '— (none resolved)'}")
-    print(f"  Net PnL:      {_fmt_pnl(all_pnl, unit_size)} (at ${unit_size:.0f}/contract)")
+    print(f"  Net PnL:      {_fmt_dollars(all_pnl)} (confidence-weighted stake per signal)")
     bs = brier.get("brier_score")
     bs_n = brier.get("n", 0)
     bs_label = brier.get("label", "")

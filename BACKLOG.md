@@ -3,7 +3,7 @@ Last updated: 2026-09-14 | Metrics: resolved=54, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (13)
+## Ready (12)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -12,7 +12,6 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | entertainment-award-emmy-coverage-gap | The same systematic sweep that produced political-coup-couples-misfire / fda-adcom-broadcom-misfire / nasa-mission-hataoka-partial-fix also flagged "entertainment award" (grammy/oscar/academy… | calibration |
-| 4 | per-group-pnl-tables-still-flat-not-stake-weighted | Found alongside dynamic-sizing-activated-and-pnl-scaling-bug-fix (2026-09-08): core.logger.get_stats() had a real bug where its headline total_hypothetical_pnl was displayed as dollars everywhere but… | infra |
 | 4 | polymarket-outcomes-field-deprecation-check | Found 2026-09-14 via the new weekly AI/GitHub research scan (reports/ai_research/2026-09-13.md): docs.polymarket.us/changelog (v0.0.57) states Subjects endpoints removed 2026-06-29 and… | data-quality |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 5 | polymarket-us-tuning-for-real-value | Follow-up to polymarket-us-integration's 2026-09-14 review. | data-quality |
@@ -34,7 +33,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (118)
+## Done (119)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -128,6 +127,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | kalshi-sdk-migration-implementation | Built the adapter, but not the field-by-field typed-model remapping the Ready-item scope note called for. | infra |
 | 4 | monday-com-integration-fully-removed | User (2026-09-08): 'Monday.com is no longer being used please remove any feature or link that use them.' The 2026-08-30 retirement had removed the scheduled sync task and moved backlog browsing to… | infra |
 | 4 | net-edge-fee-depth-model | net_edge_after_fee priced a trade off the top-of-book quote only -- it had no idea whether the visible order book could actually fill unit_size contracts on the side the picked direction needed. | execution |
+| 4 | per-group-pnl-tables-still-flat-not-stake-weighted | Found alongside dynamic-sizing-activated-and-pnl-scaling-bug-fix (2026-09-08): core.logger.get_stats() had a real bug where its headline total_hypothetical_pnl was displayed as dollars everywhere but… | infra |
 | 4 | per-heuristic-scorecard | get_stats_by_heuristic_label() (core/logger.py) already existed -- win rate/P&L/avg_edge grouped by heuristic_label -- and was already wired into a real display in analysis/calibration.py's "BY… | reporting |
 | 4 | polymarket-us-integration | User-provided Polymarket US developer API key (POLYMARKET_KEY_ID/POLYMARKET_SECRET_KEY, added to .env 2026-09-14) turned out to be unnecessary for this: Polymarket US's Markets API at… | data-quality |
 | 4 | position-reconciliation-job | Automate daily reconciliation of open paper signals against the Kalshi position API. | execution |
