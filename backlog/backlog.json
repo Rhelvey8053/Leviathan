@@ -1844,7 +1844,7 @@
       "id": "health-check-is-presence-not-outcome",
       "title": "Automation health checks verify a run happened, not that it succeeded",
       "area": "infra",
-      "priority": 3,
+      "priority": 1,
       "status": "ready",
       "trigger": {
         "all": []
