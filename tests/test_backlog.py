@@ -623,8 +623,14 @@ def test_parses_and_96_items(backlog_data):
     finding item -- calibration-curve-dashboard also auto-unlocked
     blocked->ready as a side effect of calibration-curve going done, but
     that's a status transition on an existing item, not a new one).
+
+    138, not 137: added dashboard-palette-accessibility-fix (2026-09-14,
+    done at filing) -- dashboard/theme.py's categorical/status palette
+    failed 4/5 colorblind-safety and contrast checks (dataviz skill's
+    validator, not eyeballed), replaced with the skill's validated
+    reference values. See dashboard/theme.py.
     """
-    assert len(backlog_data["items"]) == 137
+    assert len(backlog_data["items"]) == 138
 
 
 def test_all_ids_unique(backlog_data):

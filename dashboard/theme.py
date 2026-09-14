@@ -12,16 +12,26 @@ each page inventing its own wording.
 
 import streamlit as st
 
-# Categorical palette -- used for win/loss, category, and flag_path charts
-# so the same value always gets the same color across pages.
-WIN_COLOR = "#2E7D32"
-LOSS_COLOR = "#C62828"
-NEUTRAL_COLOR = "#546E7A"
-ACCENT_COLOR = "#1565C0"
+# Categorical + status palette -- used for win/loss, category, and
+# flag_path charts so the same value always gets the same color across
+# pages. Replaced 2026-09-14 (backlog: dashboard-palette-accessibility-fix):
+# the original 8-color set failed colorblind-safety and normal-vision
+# distinguishability checks (run `node scripts/validate_palette.js` from
+# the dataviz skill against any hex list to verify -- don't eyeball it).
+# These are the skill's validated reference values instead of hand-picked
+# ones: status pair from its fixed status palette (never themed, chosen
+# to be distinct from any categorical slot), categorical sequence from
+# its reference palette (validated for adjacent-pair use -- stacks, bars,
+# lines, which is how this dashboard actually uses color; only scatter/
+# choropleth-style all-pairs comparisons would need the stricter 3-slot cap).
+WIN_COLOR = "#0ca30c"       # status: good
+LOSS_COLOR = "#d03b3b"      # status: critical
+NEUTRAL_COLOR = "#546E7A"   # unchanged -- not a categorical/status slot, not part of this fix
+ACCENT_COLOR = "#2a78d6"    # categorical slot 1 (blue) -- kept in sync with CATEGORICAL_SEQUENCE[0]
 
 CATEGORICAL_SEQUENCE = [
-    "#1565C0", "#2E7D32", "#EF6C00", "#6A1B9A",
-    "#00838F", "#AD1457", "#5D4037", "#616161",
+    "#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+    "#e87ba4", "#008300", "#4a3aa7", "#e34948",
 ]
 
 PLOTLY_TEMPLATE = {
