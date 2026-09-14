@@ -641,13 +641,15 @@ def test_parses_and_96_items(backlog_data):
     exists. See docs/PREREGISTRATION.md's Amendment Log for the full
     computation.
 
-    140, not 139: added downgrade-reason-field (2026-09-14, done at
-    filing) -- new downgrade_reason column recording which of main.py's
-    three HIGH-confidence downgrade rules fired. Pure observability, not
-    a confidence-scoring change, so not affected by the checkpoint halt.
-    See core/logger.py, main.py's _append_downgrade_reason().
+    141, not 140: added dashboard-layout-sanity-pass (2026-09-14, done at
+    filing) -- 4 dashboard layout/contrast bugs found and fixed during a
+    full page-by-page sanity pass (sidebar pill truncation, Backlog filter
+    column imbalance, Overview KPI label/value truncation, unreadable
+    dark-on-dark chart text/annotations). See dashboard/theme.py,
+    dashboard/app.py, dashboard/pages/5_Backlog.py,
+    dashboard/pages/2_Signal_Breakdown.py.
     """
-    assert len(backlog_data["items"]) == 140
+    assert len(backlog_data["items"]) == 141
 
 
 def test_all_ids_unique(backlog_data):

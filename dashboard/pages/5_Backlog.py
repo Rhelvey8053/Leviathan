@@ -107,7 +107,17 @@ st.divider()
 # ── Full backlog -- filterable ───────────────────────────────────────────
 
 st.subheader("Full backlog")
-f1, f2, f3 = st.columns([2, 2, 3])
+# Column widths matched to actual content, not split evenly -- found
+# 2026-09-14: Status (4 short words: blocked/done/locked/ready) and Area
+# (8 longer words: backtesting/data-quality/smart-money/etc.) got equal
+# width, so Area's pills wrapped across 4 rows with a big empty gap below
+# while Status looked cramped in 2. Area gets the most room now. A [1, 3, 2]
+# split (tried first) starved Status enough that its longest pill,
+# "blocked", still truncated -- widened to [2, 3, 2] so every Status pill
+# fits at its natural width (see the flex-shrink:0 fix in theme.py, which
+# stops pills from silently shrinking to unreadable slivers instead of
+# wrapping/truncating visibly).
+f1, f2, f3 = st.columns([2, 3, 2])
 status_opts = sorted(df["status"].unique())
 picked_status = f1.multiselect("Status", status_opts, default=status_opts)
 area_opts = sorted(df["area"].dropna().unique())

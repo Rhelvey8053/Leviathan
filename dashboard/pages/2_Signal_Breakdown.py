@@ -10,7 +10,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data import CONFIDENCE_ORDER, DataLoadError, load_signals
-from theme import LOSS_COLOR, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header, small_n_badge
+from theme import CHART_TEXT_COLOR, LOSS_COLOR, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header, small_n_badge
 
 st.set_page_config(page_title="Leviathan -- Signal Breakdown", layout="wide")
 inject_css()
@@ -278,7 +278,8 @@ else:
             fig.update_layout(PLOTLY_TEMPLATE["layout"], height=320,
                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
             fig.update_traces(marker_color=PLOTLY_TEMPLATE["layout"]["colorway"][0], textposition="outside",
-                               selector=dict(type="bar"))
+                               textfont_color=CHART_TEXT_COLOR, selector=dict(type="bar"))
+            fig.update_yaxes(range=[0, max(105, cal_stats["win_rate_pct"].max() + 15)])
             st.plotly_chart(fig, use_container_width=True)
 
             thin_buckets = cal_stats[cal_stats["n"] < 5]
@@ -334,7 +335,9 @@ else:
     )
     fig.add_hline(y=50, line_dash="dot", line_color="#9E9E9E")
     fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=300)
-    fig.update_traces(marker_color=PLOTLY_TEMPLATE["layout"]["colorway"][0], textposition="outside")
+    fig.update_traces(marker_color=PLOTLY_TEMPLATE["layout"]["colorway"][0], textposition="outside",
+                       textfont_color=CHART_TEXT_COLOR)
+    fig.update_yaxes(range=[0, max(105, band_stats["win_rate_pct"].max() + 15)])
     st.plotly_chart(fig, use_container_width=True)
     thin = int(band_stats["n"].lt(10).sum())
     if thin:

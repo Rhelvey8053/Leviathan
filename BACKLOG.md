@@ -30,7 +30,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (125)
+## Done (126)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -143,6 +143,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | ai-github-research-scan | User-requested (2026-09-14) standing capability: a new weekly scheduled Claude-CLI research pass (scripts/ai_research_scan.py, Leviathan-AIResearchScan, Sundays 12:20pm) that searches… | infra |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
 | 5 | calibration-curve | Plot predicted probabilities against actual win rates in decile buckets. | calibration |
+| 5 | dashboard-layout-sanity-pass | User asked (2026-09-14) for a graphs-and-layout pass across every dashboard page, calling out that Backlog's filter sidebar/columns didn't fit well. | reporting |
 | 5 | dashboard-palette-accessibility-fix | User asked (2026-09-14) for research on dashboard visual-design limits (Streamlit customization ceiling vs. | reporting |
 | 5 | downgrade-reason-field | User-requested (2026-09-14) observability addition, found while investigating why 82 of 83 MED-confidence signals were genuinely MED rather than downgraded HIGH calls. | infra |
 | 5 | edge-decay-analysis | Measure how quickly identified edges decay as markets approach their resolution date. | validation |

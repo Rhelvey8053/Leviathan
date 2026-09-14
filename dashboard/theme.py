@@ -34,6 +34,15 @@ CATEGORICAL_SEQUENCE = [
     "#e87ba4", "#008300", "#4a3aa7", "#e34948",
 ]
 
+# Bar data-labels (e.g. "n=30") and hline/vline annotation text render with
+# an explicit trace/annotation-level font color, which Streamlit's dark-theme
+# auto-styling does NOT repaint the way it does for axis ticks and legends --
+# found 2026-09-14, where PLOTLY_TEMPLATE's font.color (#263238, a dark
+# slate meant for a light background) made every "n=NN" bar label and
+# hline annotation nearly invisible against the dark plot background.
+# Matches the light ink color Streamlit itself uses for ticks/legends here.
+CHART_TEXT_COLOR = "#E6EAF1"
+
 PLOTLY_TEMPLATE = {
     "layout": {
         "colorway": CATEGORICAL_SEQUENCE,
@@ -60,8 +69,62 @@ def inject_css():
             border-radius: 10px;
             padding: 14px 16px 10px 16px;
         }
-        div[data-testid="stMetricLabel"] { font-size: 0.8rem; opacity: 0.75; }
-        div[data-testid="stMetricValue"] { font-size: 1.6rem; }
+        /* Longer KPI labels (e.g. "Markets Scanned (Kalshi)") and values
+           (e.g. a "Last Run" timestamp) were being silently ellipsis-
+           truncated -- found 2026-09-14 during a full page sanity pass.
+           The text is there (confirmed via the accessibility tree), just
+           visually cut off. The actual nowrap/ellipsis rules live on
+           Streamlit's *inner* wrapper div+p (auto-generated emotion
+           classes), not on the stMetricLabel/stMetricValue element itself
+           -- targeting only the outer element (an earlier attempt used a
+           `div[data-testid=...]` selector, but stMetricLabel is a <label>,
+           which that tag-qualified selector never matches) silently did
+           nothing. `*` reaches every generated wrapper regardless of its
+           class name. Wrap onto a second line instead of truncating --
+           the container/card height already has room via its own padding. */
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetricLabel"] * {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: unset !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.8rem;
+            opacity: 0.75;
+            overflow-wrap: break-word;
+        }
+        [data-testid="stMetricValue"],
+        [data-testid="stMetricValue"] * {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: unset !important;
+        }
+        [data-testid="stMetricValue"] { font-size: 1.6rem; }
+
+        /* Default Streamlit sidebar (~244px) truncates longer multiselect
+           pill labels (e.g. "superseded_paper" -> "superse...") -- found
+           2026-09-14 on Signal Breakdown/Signal Log's Source filter.
+           Widened rather than shortening the labels themselves, since the
+           labels are real data values (source column contents), not free
+           text to abbreviate. */
+        section[data-testid="stSidebar"] {
+            min-width: 320px !important;
+            max-width: 340px !important;
+        }
+
+        /* Multiselect pills (BaseWeb tags) default to flex-shrink: 1 --
+           in a narrow column (e.g. Backlog's "Status" filter, ~120px)
+           every pill shrinks equally to fit the row instead of wrapping,
+           so "blocked" etc render as an unreadable ~36px sliver with no
+           visible text at all. Found 2026-09-14, worse than plain
+           truncation: nothing was readable, not even an ellipsis.
+           flex-shrink: 0 keeps each pill at its natural content width and
+           lets the row wrap onto more lines instead -- same fix class as
+           the sidebar width fix above, applied generally since this widget
+           appears outside the sidebar too (Backlog's filter row). */
+        span[data-baseweb="tag"] {
+            flex-shrink: 0 !important;
+        }
 
         .lv-header-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
         .lv-title { font-size: 1.9rem; font-weight: 650; margin: 0; }

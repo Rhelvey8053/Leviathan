@@ -18,7 +18,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from data import CONFIDENCE_ORDER, DataLoadError, data_freshness, load_runs, load_signals
-from theme import CATEGORICAL_SEQUENCE, LOSS_COLOR, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header
+from theme import CATEGORICAL_SEQUENCE, CHART_TEXT_COLOR, LOSS_COLOR, PLOTLY_TEMPLATE, WIN_COLOR, inject_css, page_header
 
 st.set_page_config(page_title="Leviathan Dashboard", page_icon=":material/query_stats:", layout="wide")
 inject_css()
@@ -241,9 +241,15 @@ else:
         text=cat_stats["n"].astype(int).map(lambda n: f"n={n}"),
     )
     fig.add_hline(y=50, line_dash="dot", line_color="#9E9E9E",
-                  annotation_text="50% = coin flip", annotation_position="top left")
+                  annotation_text="50% = coin flip", annotation_position="top left",
+                  annotation_font_color=CHART_TEXT_COLOR)
     fig.update_layout(PLOTLY_TEMPLATE["layout"], showlegend=False, height=320)
-    fig.update_traces(marker_color=CATEGORICAL_SEQUENCE[0], textposition="outside")
+    fig.update_traces(marker_color=CATEGORICAL_SEQUENCE[0], textposition="outside",
+                       textfont_color=CHART_TEXT_COLOR)
+    # A 100% win-rate bar leaves the "n=NN" label with no headroom above it --
+    # found 2026-09-14, where it got clipped by the plot's top edge. Pad the
+    # axis so an outside label always has room to render, whatever the max bar.
+    fig.update_yaxes(range=[0, max(105, cat_stats["win_rate_pct"].max() + 15)])
     st.plotly_chart(fig, use_container_width=True)
     thin = int(cat_stats["n"].lt(10).sum())
     if thin:
