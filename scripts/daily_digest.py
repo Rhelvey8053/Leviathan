@@ -62,11 +62,12 @@ nothing here re-runs a scan or hits a live API:
     COUNT(*) FROM replay_signals) -- pure reporting, never launches a
     build batch itself; see section_replay_corpus()'s own docstring for
     why auto-launching stays a human decision.
-  - Weekly audits: logs/weekly_audit.log / logs/weekly_code_audit.log,
-    included only when modified in roughly the last 20h (i.e. an actual
-    Monday run happened), as a raw tail excerpt -- both are free-form
-    Claude-CLI narrative output, not structured data, so no attempt is
-    made to parse a one-line summary out of them
+  - Weekly audits: logs/weekly_audit.log / logs/weekly_code_audit.log /
+    logs/ai_research_scan.log (added 2026-09-14, see
+    scripts/ai_research_scan.py), included only when modified in roughly
+    the last 20h (i.e. an actual run happened), as a raw tail excerpt --
+    all three are free-form Claude-CLI narrative output, not structured
+    data, so no attempt is made to parse a one-line summary out of them
 
 Sends once daily, unconditionally -- not alert-only. For a digest,
 "nothing wrong" is itself useful information (it confirms the whole
@@ -122,6 +123,7 @@ SMART_MONEY_LATEST = ROOT / "data" / "smart_money" / "latest_signals.json"
 WEEKLY_LOGS = {
     "Weekly project audit": ROOT / "logs" / "weekly_audit.log",
     "Weekly code audit":    ROOT / "logs" / "weekly_code_audit.log",
+    "AI/GitHub research scan": ROOT / "logs" / "ai_research_scan.log",
 }
 WEEKLY_LOG_FRESHNESS_HOURS = 20.0
 WEEKLY_LOG_TAIL_LINES = 15

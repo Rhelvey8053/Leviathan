@@ -592,8 +592,12 @@ def test_parses_and_96_items(backlog_data):
     run happened, not that it succeeded -- the same day's scorer failure
     and weekly-digest send failure both went undetected because of it;
     since built, see scripts/daily_digest.py's section_run_outcome()).
+
+    133, not 132: added ai-github-research-scan (2026-09-14, done at
+    filing) for the new weekly Leviathan-AIResearchScan capability --
+    see scripts/ai_research_scan.py.
     """
-    assert len(backlog_data["items"]) == 132
+    assert len(backlog_data["items"]) == 133
 
 
 def test_all_ids_unique(backlog_data):

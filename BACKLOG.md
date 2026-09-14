@@ -32,7 +32,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (115)
+## Done (116)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -139,6 +139,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | verify-liam-post-context-doc-alignment | Liam's most recent monday.com report as of 2026-08-22 (timestamped 2026-08-20 08:00 AM CT) recommended moving auto-calibration-loop and replay-instrument-validation to Ready -- both wrong per… | infra |
 | 4 | verify-pnl-scheduled-and-alerting | PM workflow audit (2026-09-08): verify_pnl.py is a real, working, self-healing PnL integrity check (dry-run by default, backs up and fixes drift with --apply) that had existed since Goal 5b Part A… | infra |
 | 4 | whale-actionability-scorecard | User asked what we're actually doing with whale-flag data beyond identifying it -- the report's WHALE ACTIVITY table just lists sightings (a market a whale traded, no track record attached), so there… | reporting |
+| 5 | ai-github-research-scan | User-requested (2026-09-14) standing capability: a new weekly scheduled Claude-CLI research pass (scripts/ai_research_scan.py, Leviathan-AIResearchScan, Sundays 12:20pm) that searches… | infra |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
 | 5 | edge-decay-analysis | Measure how quickly identified edges decay as markets approach their resolution date. | validation |
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
