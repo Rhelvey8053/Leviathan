@@ -69,20 +69,40 @@ def fetch_markets(limit: int = 300) -> list[dict]:
 
 
 def _yes_price(market: dict) -> float | None:
-    """Extract the YES probability (0.0–1.0) from a Polymarket US market object."""
+    """
+    Extract the YES probability (0.0–1.0) from a Polymarket US market object.
+
+    Confirmed live 2026-09-14: a side's own "price" key is sometimes
+    entirely absent/null on one side while present on the other (e.g. Yes
+    price=None, No price="0.02") -- not a malformed response, just how
+    this API represents some markets. Falls back to 1 - No's price before
+    giving up, rather than dropping the market from the index outright.
+    """
     try:
         sides = market.get("marketSides")
         if not sides:
             return None
 
+        yes_price, no_price = None, None
         for side in sides:
             desc = str(side.get("description", "")).lower()
+            price = side.get("price")
+            if price is None:
+                continue
             if desc in ("yes", "true", "1"):
-                return float(side["price"])
+                yes_price = float(price)
+            elif desc in ("no", "false", "0"):
+                no_price = float(price)
+
+        if yes_price is not None:
+            return yes_price
+        if no_price is not None:
+            return round(1.0 - no_price, 4)
 
         # Fallback: assume first side is YES (matches international
         # Polymarket's _yes_price() convention for non-Yes/No outcomes,
-        # e.g. team-vs-team sports moneylines).
+        # e.g. team-vs-team sports moneylines) -- only reached when
+        # neither side is labeled Yes/No at all.
         return float(sides[0]["price"])
     except Exception:
         return None
@@ -112,10 +132,30 @@ def build_index(poly_markets: list[dict]) -> list[dict]:
     """
     Pre-processes the Polymarket US market list into a lean index for fast matching.
     Extracts the YES price up front so we don't re-parse per comparison.
+
+    Confirmed live 2026-09-14: Polymarket US repeats the identical
+    `question` string across every market in a "family" -- every
+    temperature-band market for a given city/date shares one `question`
+    ("Highest temperature in Los Angeles on September 13?"), and every
+    per-candidate election market shares one too ("Kansas Governor
+    Election Winner"). Only `title`/`titleShort` (e.g. "75 or below",
+    "Cindy Holscher (D)") identifies which specific market it is. Using
+    `question` alone (the original, unreviewed version of this function)
+    meant every market in a family scored identically against any given
+    Kalshi title, so find_match() would silently return an arbitrary
+    band/candidate rather than a real match -- caught in review before
+    this was ever enabled, not live. Combining question + title fixes
+    this the same way Kalshi's own titles for equivalent ladder markets
+    already embed the band directly in the title text.
     """
     index = []
     for m in poly_markets:
-        question = (m.get("question") or "").strip()
+        base_question = (m.get("question") or "").strip()
+        title         = (m.get("title") or "").strip()
+        if title and title.lower() not in base_question.lower():
+            question = f"{base_question} — {title}" if base_question else title
+        else:
+            question = base_question
         if not question:
             continue
         price = _yes_price(m)

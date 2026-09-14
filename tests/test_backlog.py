@@ -606,8 +606,15 @@ def test_parses_and_96_items(backlog_data):
 
     135, not 134: added polymarket-us-integration (2026-09-14, done at
     filing, built but disabled) -- see sources/polymarket_us.py.
+
+    136, not 135: added polymarket-us-tuning-for-real-value (2026-09-14),
+    the follow-up filed alongside polymarket-us-integration's own review
+    -- shipped fix is safe (0 false matches on 286 real recent signals at
+    the production threshold) but near-zero value as configured (sports-
+    dominated default feed); needs category-restricted fetching and/or a
+    higher match-score floor before it's worth enabling live.
     """
-    assert len(backlog_data["items"]) == 135
+    assert len(backlog_data["items"]) == 136
 
 
 def test_all_ids_unique(backlog_data):
