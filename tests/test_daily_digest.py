@@ -65,6 +65,24 @@ def _item(id_, status="ready", priority=3, action="Do the thing.", notes=""):
             "trigger": {"all": []}, "depends_on": [], "action": action, "notes": notes}
 
 
+def _insert_run(db_path, run_id, markets_scanned, whale_flags, tokens_used, cost_usd,
+                 signals_generated=0, now=NOW):
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO runs (run_id, timestamp, markets_scanned, signals_generated, "
+        "whale_flags, model_used, tokens_used, cost_usd, runtime_ms) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (run_id, now.isoformat(), markets_scanned, signals_generated, whale_flags,
+         "claude-sonnet-4-6", tokens_used, cost_usd, 500000),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _write_digest_state(path, date, ok=True, note=None):
+    path.write_text(json.dumps({"date": date, "ok": ok, "note": note}), encoding="utf-8")
+
+
 _EMPTY_METRICS = {
     "resolved_count": 0,
     "resolved_count_per_category_max": 0,
@@ -235,6 +253,84 @@ def test_section_resolve_first_counts_recent_only(_isolate_db):
     assert "YES=1" in text and "NO=1" in text
 
 
+# ─── section_run_outcome ────────────────────────────────────────────────
+
+def test_section_run_outcome_no_runs(_isolate_db, tmp_path):
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", tmp_path / "nope.json"):
+        text, problems = dd.section_run_outcome(now=NOW)
+    assert "No runs recorded yet." in text
+    # No runs to judge the scorer on -- only the (missing) weekly-digest
+    # check can contribute a problem here.
+    assert all("scorer step" not in p for p in problems)
+
+
+def test_section_run_outcome_healthy_run(_isolate_db, tmp_path):
+    _insert_run(_isolate_db, "run-1", markets_scanned=3000, whale_flags=10,
+                tokens_used=14000, cost_usd=0.21)
+    digest_state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(digest_state_path, "2026-08-23", ok=True)
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", digest_state_path):
+        text, problems = dd.section_run_outcome(now=NOW)
+    assert "[x] Scorer ran normally" in text
+    assert problems == []
+
+
+def test_section_run_outcome_quiet_day_not_flagged(_isolate_db, tmp_path):
+    """0 whale flags -> a legitimately quiet day, $0 cost is not a failure signal."""
+    _insert_run(_isolate_db, "run-1", markets_scanned=3000, whale_flags=0,
+                tokens_used=0, cost_usd=0)
+    digest_state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(digest_state_path, "2026-08-23", ok=True)
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", digest_state_path):
+        text, problems = dd.section_run_outcome(now=NOW)
+    assert "[x] Scorer ran normally" in text
+    assert problems == []
+
+
+def test_section_run_outcome_flags_scorer_failure(_isolate_db, tmp_path):
+    _insert_run(_isolate_db, "baf41150", markets_scanned=3004, whale_flags=6,
+                tokens_used=0, cost_usd=0)
+    digest_state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(digest_state_path, "2026-08-23", ok=True)
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", digest_state_path):
+        text, problems = dd.section_run_outcome(now=NOW)
+    assert "[!]" in text
+    assert any("baf41150" in p and "scorer step appears to have failed" in p for p in problems)
+
+
+def test_section_run_outcome_digest_confirmed_ok(_isolate_db, tmp_path):
+    state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(state_path, "2026-08-23", ok=True)
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", state_path):
+        text, problems = dd.section_run_outcome(now=NOW)  # NOW is Monday 2026-08-24
+    assert "Weekly digest for 2026-08-23 confirmed ok" in text
+    assert problems == []
+
+
+def test_section_run_outcome_digest_missing_state_flagged(_isolate_db, tmp_path):
+    state_path = tmp_path / "weekly_digest_state.json"  # never written
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", state_path):
+        text, problems = dd.section_run_outcome(now=NOW)
+    assert any("Weekly digest for 2026-08-23 was not confirmed sent" in p for p in problems)
+
+
+def test_section_run_outcome_digest_explicit_failure_flagged(_isolate_db, tmp_path):
+    state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(state_path, "2026-08-23", ok=False, note="SSLError")
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", state_path):
+        text, problems = dd.section_run_outcome(now=NOW)
+    assert any("Weekly digest for 2026-08-23 was not confirmed sent" in p for p in problems)
+
+
+def test_section_run_outcome_skips_digest_check_on_sunday_itself(_isolate_db, tmp_path):
+    sunday = datetime(2026, 8, 23, 12, 0, 0, tzinfo=timezone.utc)
+    state_path = tmp_path / "weekly_digest_state.json"  # never written
+    with patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", state_path):
+        text, problems = dd.section_run_outcome(now=sunday)
+    assert "Weekly digest" not in text
+    assert problems == []
+
+
 # ─── section_weekly_logs ────────────────────────────────────────────────
 
 def test_section_weekly_logs_none_fresh(tmp_path):
@@ -269,30 +365,36 @@ def test_section_weekly_logs_excludes_old(tmp_path):
 
 def test_compose_digest_clean_subject_has_no_attention_flag(tmp_path):
     backlog_path = _write_backlog(tmp_path, [])
+    digest_state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(digest_state_path, "2026-08-23", ok=True)
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}), \
          patch.object(dd, "RECONCILIATION_DIR", tmp_path), \
          patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"), \
          patch.object(dd, "WEEKLY_LOGS", {}), \
+         patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", digest_state_path), \
          patch.object(dd, "BACKLOG_PATH", backlog_path):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" not in subject
     assert "NEEDS YOUR ATTENTION" in body
     assert "Nothing --" in body
-    assert "TASK CHECKLIST" in body and "RECONCILIATION" in body
+    assert "TASK CHECKLIST" in body and "RECONCILIATION" in body and "RUN OUTCOME" in body
 
 
 def test_compose_digest_flags_attention_in_subject(tmp_path):
     results = _healthy_task_results()
     results[0]["problem"] = "no run in 40.0h (threshold 30h)"
     backlog_path = _write_backlog(tmp_path, [])
+    digest_state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(digest_state_path, "2026-08-23", ok=True)
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=results), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}), \
          patch.object(dd, "RECONCILIATION_DIR", tmp_path), \
          patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"), \
          patch.object(dd, "WEEKLY_LOGS", {}), \
+         patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", digest_state_path), \
          patch.object(dd, "BACKLOG_PATH", backlog_path):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" in subject
@@ -308,12 +410,15 @@ def test_compose_digest_attention_aggregates_reconciliation_too(tmp_path):
             "unplaced": [], "unexpected": []}
     (tmp_path / "2026-08-24.json").write_text(json.dumps(data), encoding="utf-8")
     backlog_path = _write_backlog(tmp_path, [])
+    digest_state_path = tmp_path / "weekly_digest_state.json"
+    _write_digest_state(digest_state_path, "2026-08-23", ok=True)
     with patch.object(dd._ahc, "check_scheduled_tasks", return_value=_healthy_task_results()), \
          patch.object(dd._ahc, "check_litestream_replica", return_value={"problem": None, "lag_hours": 0.1}), \
          patch.object(dd._hb, "get_last_run", return_value={"run_id": "run-1", "timestamp": NOW.isoformat()}), \
          patch.object(dd, "RECONCILIATION_DIR", tmp_path), \
          patch.object(dd, "SMART_MONEY_LATEST", tmp_path / "nope.json"), \
          patch.object(dd, "WEEKLY_LOGS", {}), \
+         patch.object(dd, "WEEKLY_DIGEST_STATE_PATH", digest_state_path), \
          patch.object(dd, "BACKLOG_PATH", backlog_path):
         body, subject = dd.compose_digest(now=NOW)
     assert "[ATTENTION]" in subject

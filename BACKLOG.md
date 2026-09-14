@@ -3,10 +3,9 @@ Last updated: 2026-09-13 | Metrics: resolved=49, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (10)
+## Ready (9)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
-| 1 | health-check-is-presence-not-outcome | Found 2026-09-13 while diagnosing that day's SSL blip and failed weekly digest. | infra |
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
@@ -33,7 +32,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (114)
+## Done (115)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -43,6 +42,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 1 | down-ballot-election-recalibration | "down-ballot election" (n=43, gap +0.287, predicted 52% vs actual 23.3%) was a mixed population, not a single miscalibration. | calibration |
 | 1 | export-validation-pass-exclusion | core.export_to_csv._print_validation's Resolved/Wins/Losses/Win-Rate counts included PASS-direction rows, which resolve_outcomes() always grades LOSS by construction (direction == outcome can never… | data-quality |
 | 1 | ext-signal-activation | Investigated: ext_estimate/ext_edge/ext_n_signals/ext_alpha are 100% blank not due to a bug but because their >=2-agreeing-signals trigger has never once been met -- reconstructed… | calibration |
+| 1 | health-check-is-presence-not-outcome | Found 2026-09-13 while diagnosing that day's SSL blip and failed weekly digest. | infra |
 | 1 | heuristic-backtest-tool | New analysis/heuristic_backtest.py: free (no LLM/API cost) calibration study of core.scanner's title-keyword heuristic table against the settled_markets corpus (12,600 real Kalshi resolutions) --… | calibration |
 | 1 | heuristic_label-vs-base_rate-desync | core.scanner.estimate_base_rate() and get_heuristic_label() were two independently-ordered pattern lists (195 vs 479 entries) that had drifted apart. | data-quality |
 | 1 | hurricane-recalibration | Investigated: unlike the three prior ladder/many-way fixes, "hurricane" (n=29, gap +0.416, predicted 45% vs actual 3.4%) was a genuine MIXED bag of two structurally distinct sub-patterns, confirmed… | calibration |

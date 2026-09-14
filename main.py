@@ -21,6 +21,7 @@ from sources import polymarket, external_markets, accounts
 from analysis.smart_money_scan import run_smart_money_scan, save_report as save_sm_report
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+WEEKLY_DIGEST_STATE_PATH = os.path.join(os.path.dirname(__file__), "data", "weekly_digest_state.json")
 
 
 def _fmt_usd(value) -> str:
@@ -28,6 +29,25 @@ def _fmt_usd(value) -> str:
         return f"${float(value):.4f}"
     except (TypeError, ValueError):
         return "$—"
+
+
+def _save_weekly_digest_state(now_local: datetime, ok: bool, note: str | None) -> None:
+    """
+    Persists the Sunday digest block's outcome so daily_digest.py can flag
+    a failure the next time it runs, instead of it only ever appearing as
+    a swallowed exception in logs/leviathan_scheduler.log. ok=True covers
+    both "sent" and "legitimately skipped, no signals this week" -- only a
+    real exception sets ok=False. Found 2026-09-13: the digest's send call
+    can raise (that day it was an SSL error) and main.py already caught it
+    and kept going, but nothing durable recorded that it happened, so it
+    went unnoticed until the user asked why the email never arrived.
+    """
+    try:
+        os.makedirs(os.path.dirname(WEEKLY_DIGEST_STATE_PATH), exist_ok=True)
+        with open(WEEKLY_DIGEST_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"date": now_local.strftime("%Y-%m-%d"), "ok": ok, "note": note}, f, indent=2)
+    except Exception as e:
+        print(f"      [warn] Could not persist weekly digest state (non-fatal): {e}")
 
 
 def load_config() -> dict:
@@ -1245,8 +1265,12 @@ def main():
                                    subject_override=f"Leviathan Weekly — {now_local.strftime('%b %d, %Y')}",
                                    html_body=weekly_html)
                 print("      Weekly digest sent")
+            else:
+                print("      Weekly digest skipped (no signals this week)")
+            _save_weekly_digest_state(now_local, ok=True, note=None)
         except Exception as e:
             print(f"      Weekly digest failed: {e}")
+            _save_weekly_digest_state(now_local, ok=False, note=str(e))
 
     # Step 7b — Smart money watchlist scan
     smart_money_result = None

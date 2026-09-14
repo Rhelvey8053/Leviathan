@@ -1,0 +1,5 @@
+{
+  "date": "2026-09-13",
+  "ok": true,
+  "note": "Original main.py send failed with an SSL error (transient network blip); resent manually via scripts/resend_weekly_digest.py same day."
+}

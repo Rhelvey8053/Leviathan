@@ -31,6 +31,16 @@ nothing here re-runs a scan or hits a live API:
     analysis/resolve_first.py carries its own HARD FREEZE note against
     new logging/scoring changes, so this reads its existing shape as-is
     rather than adding a dedicated marker column.
+  - Run outcome (added 2026-09-13, backlog: health-check-is-presence-not-
+    outcome): the most recent runs-table row, flagged if it shows 0
+    tokens/cost despite whale flags on scanned markets (scorer step
+    likely failed silently, not "found nothing"); plus, on any day after
+    a Sunday, whether that Sunday's weekly digest confirmed ok in
+    data/weekly_digest_state.json (written by main.py's own digest
+    block). Both checks exist because a run that fails at either step
+    still logs a normal runs row and reads green on every presence-only
+    check (heartbeat_check, automation_health_check) -- see section_run_
+    outcome()'s own docstring for the full incident this was found from.
   - Backlog (added 2026-08-27): every `ready` item, priority-ordered, plus
     what changed in backlog.json since the last digest (new items, status
     transitions, and notes-only updates -- most days' real backlog work is
@@ -116,6 +126,7 @@ WEEKLY_LOGS = {
 WEEKLY_LOG_FRESHNESS_HOURS = 20.0
 WEEKLY_LOG_TAIL_LINES = 15
 RESOLVE_FIRST_LOOKBACK_HOURS = 20.0
+WEEKLY_DIGEST_STATE_PATH = ROOT / "data" / "weekly_digest_state.json"
 # format_report()'s own `compact` flag is accepted but currently a no-op
 # (doesn't actually shorten per-ticker listings) -- truncated here instead
 # so a day with many unplaced/aligned tickers doesn't blow up the digest.
@@ -227,6 +238,77 @@ def section_resolve_first(now: datetime | None = None,
     parts = ", ".join(f"{r['direction']}={r['n']}" for r in rows)
     total = sum(r["n"] for r in rows)
     return f"{header}\n  {total} signal(s) logged: {parts}"
+
+
+def section_run_outcome(now: datetime | None = None) -> tuple[str, list[str]]:
+    """
+    Returns (section text, problems). Complements section_task_health()'s
+    presence check (did main.py run at all) with an outcome check (did it
+    actually do its job) -- see backlog: health-check-is-presence-not-outcome.
+
+    Found 2026-09-13: main.py's Claude-CLI scoring call and its Sunday
+    digest send are each wrapped in their own try/except so a failure at
+    either step doesn't crash the whole pipeline -- but that also means a
+    run that failed at one of those steps still logs a normal `runs` row
+    and passes every existing health check (heartbeat_check, automation
+    health check) untouched. Two checks added here:
+
+    1. Scorer failure: a legitimate zero-signal day still calls the
+       scorer on every edge-flagged market and accrues nonzero
+       tokens/cost -- whale detection only runs on markets that already
+       cleared the edge filter, so whale_flags>0 alongside exactly
+       $0/0 tokens means the scorer step never actually completed, not
+       that it ran and found nothing. (Confirmed against get_run_history:
+       every other 0-signal run in history has nonzero tokens_used.)
+    2. Weekly digest confirmation: reads data/weekly_digest_state.json,
+       written by main.py's Sunday digest block (ok=True covers both
+       "sent" and "legitimately skipped, no signals that week"; only a
+       real exception sets ok=False). Only checked once the Sunday it
+       covers has fully passed -- never on the Sunday itself, since that
+       day's digest block may simply not have run yet.
+    """
+    now = now or datetime.now(timezone.utc)
+    lines = ["RUN OUTCOME"]
+    problems: list[str] = []
+
+    runs = logger.get_run_history(limit=1)
+    if not runs:
+        lines.append("  No runs recorded yet.")
+    else:
+        r = runs[0]
+        markets = r.get("markets_scanned") or 0
+        whales  = r.get("whale_flags") or 0
+        tokens  = r.get("tokens_used") or 0
+        cost    = r.get("cost_usd") or 0
+        sigs    = r.get("signals_generated") or 0
+        run_id  = r.get("run_id", "?")
+
+        lines.append(f"  Last run {run_id}: {markets} scanned, {sigs} signal(s), "
+                     f"{whales} whale flag(s), ${cost:.4f} cost")
+
+        if markets > 0 and whales > 0 and tokens == 0 and cost == 0:
+            msg = (f"Run {run_id}: scorer step appears to have failed entirely "
+                   f"(0 tokens/cost despite {whales} whale flag(s) on {markets} scanned "
+                   f"markets) -- check logs/leviathan_scheduler.log for that run_id")
+            lines.append(f"  [!] {msg}")
+            problems.append(msg)
+        else:
+            lines.append("  [x] Scorer ran normally (or had no candidates to score)")
+
+    days_since_sunday = (now.weekday() - 6) % 7
+    if days_since_sunday > 0:
+        target_sunday = (now - timedelta(days=days_since_sunday)).strftime("%Y-%m-%d")
+        state = load_state(WEEKLY_DIGEST_STATE_PATH)
+        if state.get("date") != target_sunday or not state.get("ok"):
+            msg = (f"Weekly digest for {target_sunday} was not confirmed sent "
+                   f"(state on disk: {state or 'none recorded'}) -- resend with "
+                   f"scripts/resend_weekly_digest.py")
+            lines.append(f"  [!] {msg}")
+            problems.append(msg)
+        else:
+            lines.append(f"  [x] Weekly digest for {target_sunday} confirmed ok")
+
+    return "\n".join(lines), problems
 
 
 # backlog: replay-instrument-validation. 300 isn't a schema-enforced
@@ -408,13 +490,14 @@ def compose_digest(now: datetime | None = None,
 
     task_text, task_problems = section_task_health(now)
     recon_text, recon_problem = section_reconciliation(now)
+    run_outcome_text, run_outcome_problems = section_run_outcome(now)
     backlog_text, _ = section_backlog(prev_backlog_snapshot)
 
-    problems = list(task_problems)
+    problems = list(task_problems) + run_outcome_problems
     if recon_problem:
         problems.append("Reconciliation: misaligned signal(s) found -- see RECONCILIATION section below")
 
-    sections = [_attention_section(problems), task_text, recon_text,
+    sections = [_attention_section(problems), task_text, recon_text, run_outcome_text,
                 section_smart_money(now), section_resolve_first(now),
                 section_replay_corpus()]
 

@@ -584,8 +584,16 @@ def test_parses_and_96_items(backlog_data):
     the resolved-position win/loss measurement fix, the watchlist finding
     (0/20 real winners), the broad-scan finding (1 genuine winner,
     Poligarch), and the discover_winners() time-budget operational fix.
+
+    132, not 130: PM-level weekend retro (2026-09-13) filed two items --
+    litestream-log-unbounded-growth (~100MB with no rotation, found while
+    diagnosing that day's SSL blip) and health-check-is-presence-not-
+    outcome (heartbeat_check.py/automation_health_check.py only verify a
+    run happened, not that it succeeded -- the same day's scorer failure
+    and weekly-digest send failure both went undetected because of it;
+    since built, see scripts/daily_digest.py's section_run_outcome()).
     """
-    assert len(backlog_data["items"]) == 130
+    assert len(backlog_data["items"]) == 132
 
 
 def test_all_ids_unique(backlog_data):
