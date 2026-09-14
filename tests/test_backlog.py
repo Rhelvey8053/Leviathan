@@ -603,8 +603,11 @@ def test_parses_and_96_items(backlog_data):
     sources/polymarket.py and sources/accounts.py both actually depend
     on; unresolved, filed for a human/PM to verify against a live API
     response rather than more doc-reading.
+
+    135, not 134: added polymarket-us-integration (2026-09-14, done at
+    filing, built but disabled) -- see sources/polymarket_us.py.
     """
-    assert len(backlog_data["items"]) == 134
+    assert len(backlog_data["items"]) == 135
 
 
 def test_all_ids_unique(backlog_data):

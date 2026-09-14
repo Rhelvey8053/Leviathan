@@ -17,7 +17,7 @@ load_dotenv()
 
 from core import kalshi, scanner, whales, scorer, logger, report, cross_model
 from core.fees import kalshi_fee
-from sources import polymarket, external_markets, accounts
+from sources import polymarket, polymarket_us, external_markets, accounts
 from analysis.smart_money_scan import run_smart_money_scan, save_report as save_sm_report
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
@@ -558,6 +558,68 @@ def main():
 
     for m in flagged_markets:
         m["poly"] = poly_data.get(m.get("ticker"))
+
+    # Step 4b — Polymarket US cross-reference (separate, CFTC-regulated
+    # product from international Polymarket above -- different domain/
+    # schema, see sources/polymarket_us.py). Off by default
+    # (config.polymarket_us.enabled=false) -- built and tested 2026-09-14,
+    # left disabled pending a live review before it can affect real signal
+    # generation. Mirrors the international Polymarket block's structure
+    # exactly, including cross-market promotion, so enabling it later is a
+    # config flip, not new code.
+    print("[4b/8] Cross-referencing with Polymarket US...")
+    poly_us_data = {}
+    try:
+        if config.get("polymarket_us", {}).get("enabled", False):
+            poly_us_index = polymarket_us.fetch_and_build_index(config)
+
+            if flagged_markets:
+                poly_us_data = polymarket_us.match_markets(flagged_markets, poly_us_index, config)
+                matched = sum(1 for v in poly_us_data.values() if v.get("price_gap") is not None)
+                gaps    = [v for v in poly_us_data.values() if v.get("price_gap") and abs(v["price_gap"]) >= 0.05]
+                print(f"      {matched} Polymarket US matches found, {len(gaps)} with gap ≥5%")
+
+            poly_us_cfg     = config.get("polymarket_us", {})
+            cross_on        = poly_us_cfg.get("cross_market_promote", False)
+            cross_gap       = poly_us_cfg.get("cross_market_min_gap", 0.15)
+            cross_min_score = poly_us_cfg.get("cross_market_min_match_score", 0.65)
+            cross_max       = poly_us_cfg.get("cross_market_max_candidates", 50)
+            if cross_on and unflagged_markets and poly_us_index:
+                candidates = sorted(
+                    unflagged_markets,
+                    key=lambda m: -float(m.get("volume_fp") or m.get("volume") or 0),
+                )[:cross_max]
+                cross_matches = polymarket_us.match_markets(
+                    candidates, poly_us_index, config,
+                    min_gap=cross_gap, min_match_score=cross_min_score,
+                )
+                n_promoted = 0
+                for m in candidates:
+                    ticker = m.get("ticker", "")
+                    if ticker in cross_matches and not m.get("flag"):
+                        cd             = cross_matches[ticker]
+                        m["flag"]      = True
+                        m["flag_path"] = "CROSS_MARKET_US"
+                        m["poly_us"]   = cd
+                        _poly_gap = abs(cd.get("price_gap") or 0)
+                        _bid = float(m.get("yes_bid_dollars") or 0)
+                        _ask = float(m.get("yes_ask_dollars") or 0)
+                        if _poly_gap > 0 and _bid > 0 and _ask > 0:
+                            m["net_edge"] = round(_poly_gap - (_ask - _bid) / 2, 6)
+                        flagged_markets.append(m)
+                        poly_us_data[ticker] = cd
+                        n_promoted += 1
+                if n_promoted:
+                    print(f"      Cross-market US: {n_promoted} unflagged market(s) promoted "
+                          f"(Polymarket US gap ≥{cross_gap:.0%})")
+        else:
+            print("      Skipped (disabled)")
+    except Exception as e:
+        print(f"      FAILED: {e}")
+        traceback.print_exc()
+
+    for m in flagged_markets:
+        m["poly_us"] = poly_us_data.get(m.get("ticker"))
 
     # External market cross-reference (Manifold + PredictIt)
     ext_data = {}

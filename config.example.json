@@ -136,6 +136,17 @@
     "cross_market_min_match_score": 0.65,
     "cross_market_max_candidates": 50
   },
+  "polymarket_us": {
+    "enabled": false,
+    "max_fetch": 300,
+    "min_match_score": 0.5,
+    "min_price_gap": 0.0,
+    "cross_market_promote": false,
+    "cross_market_min_gap": 0.15,
+    "cross_market_min_match_score": 0.65,
+    "cross_market_max_candidates": 50,
+    "_polymarket_us_notes": "Polymarket US (gateway.polymarket.us) is a separate, CFTC-regulated product from international Polymarket (gamma-api.polymarket.com) -- different domain, different market schema (marketSides[] instead of outcomes/outcomePrices). Public market data, no API key needed; POLYMARKET_KEY_ID/POLYMARKET_SECRET_KEY in .env (if present) authenticate only trading/portfolio/WebSocket endpoints, unused by sources/polymarket_us.py. Off by default -- built and tested 2026-09-14, left disabled pending a live review before it can affect real signal generation."
+  },
   "blind_arm": {
     "enabled": false,
     "sample_size": 3,
