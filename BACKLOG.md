@@ -6,13 +6,13 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 ## Ready (9)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
+| 1 | preregistered-checkpoint-failed-2026-09-14 | The pre-registered kill criterion (docs/PREREGISTRATION.md, registered 2026-07-25) reached its n>=50 checkpoint on 2026-09-14 (paired n=54) and was evaluated per its own exact formula:… | calibration |
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | calibration-systematic-overconfidence-2026-09 | Finding from calibration-curve's first real run (2026-09-14, n=54 resolved): Expected Calibration Error 22.4pp, verdict POOR. | calibration |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | entertainment-award-emmy-coverage-gap | The same systematic sweep that produced political-coup-couples-misfire / fda-adcom-broadcom-misfire / nasa-mission-hataoka-partial-fix also flagged "entertainment award" (grammy/oscar/academy… | calibration |
-| 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 5 | polymarket-us-tuning-for-real-value | Follow-up to polymarket-us-integration's 2026-09-14 review. | data-quality |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
 
@@ -30,7 +30,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (123)
+## Done (124)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -149,6 +149,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | heuristic-sunsetting | Ran analysis/heuristic_backtest.py fresh and screened every label with n>=10 for underperformance -- but the correct comparison isn't raw Brier vs. | calibration |
 | 5 | high-price-filter | Filter out markets at or above 0.85 market price before writing to DB | data-quality |
 | 5 | metaculus-community-prediction-inaccessible | Found 2026-08-25 while setting up the (previously dormant, missing-token) Metaculus integration at the owner's request. | data-quality |
+| 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 5 | report-ticker-none-vs-missing-audit | Found and fixed 2026-09-06 while removing the daily report's whale/smart-money sections (daily-report-drop-whale-smart-money): _week_whale_rows(), compile_weekly_digest()'s 'MARKETS FLAGGED THIS… | infra |
 | 5 | runbook-liam-section-pruned | PM workflow audit (2026-09-08): docs/RUNBOOK.md still had a full "Triaging Liam (monday.com's built-in PM agent) reports" section (confirmed failure modes, a documented process invoking… | infra |
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |

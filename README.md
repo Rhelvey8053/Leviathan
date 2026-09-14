@@ -14,10 +14,10 @@ Leviathan is an automated signal detection system for [Kalshi](https://kalshi.co
 
 ## System Status
 
-- **Phase:** Data accumulation — 38 resolved paper signals confirmed current as of 2026-09-08 (next gate: the pre-registered n=50 checkpoint, see [`docs/PREREGISTRATION.md`](docs/PREREGISTRATION.md) — 12 signals away)
+- **Phase:** Pre-registered checkpoint reached and evaluated 2026-09-14 — **FAIL** (n=54, past the n=50 checkpoint; see [`docs/PREREGISTRATION.md`](docs/PREREGISTRATION.md)'s Amendment Log for the full computation and [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) Section 5 for the write-up). Per the pre-registered terms, new heuristic categories, new confidence-scoring logic, and any `core/scorer.py` change aimed at improving edge are halted pending a written post-mortem; infrastructure, validation, bug fixes, and reporting are not.
 - **Mode:** Read-only — no trade execution. All signals are paper.
-- **Test suite:** 2,419 tests, 0 failures (1 skipped — requires `--network`)
-- **Verified track record (2026-09-08):** win rate 34%, scorer Brier score 0.2169 ("FAIR, near random"), market-baseline Brier 0.1152 ("GOOD") — the scorer is currently **worse** than just reading the market price, the same anchoring risk this project flags on itself elsewhere. Hypothetical P&L +$64.50, confidence-weighted stake sizing ($50 base unit; 1.5x/1.0x/0.5x for HIGH/MED/LOW confidence, applied to every resolved signal, past and future). PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record — n=38 is still below the pre-registered n=50 checkpoint, so read them as a progress update, not a pass/fail verdict; the checkpoint decides that, not this line.
+- **Test suite:** 2,461 tests, 0 failures (1 skipped — requires `--network`)
+- **Verified track record (2026-09-14):** win rate 35%, scorer Brier score 0.2374 ("FAIR, near random"), market-baseline Brier 0.1299 ("GOOD") — the scorer is currently **worse** than just reading the market price, the same anchoring risk this project flags on itself elsewhere. The paired, checkpoint-formal comparison (n=54): mean delta -0.107, 95% CI [-0.175, -0.040] — entirely negative, a confident FAIL, not a borderline one. Hypothetical P&L +$111.00, confidence-weighted stake sizing ($50 base unit; 1.5x/1.0x/0.5x for HIGH/MED/LOW confidence, applied to every resolved signal, past and future). PnL integrity confirmed via `scripts/verify_pnl.py` (0 deltas across all 538 resolved rows — no backfill needed). Source: `analysis/calibration.py`. These are the only figures cited anywhere as the current track record.
 
 ### Validation approach
 

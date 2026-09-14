@@ -6,9 +6,15 @@ falsification test it has pre-committed to. Written for review, not for
 promotion — if the design is wrong, the fastest way to find out is to let
 someone else look at it.
 
-Last updated: 2026-09-04. Current numbers below are live at time of writing,
+Last updated: 2026-09-14. Current numbers below are live at time of writing,
 not cherry-picked for this document — see "Current state" for exactly how to
 reproduce them.
+
+**2026-09-14 update: the pre-registered n≥50 checkpoint (Section 4) has been
+reached and evaluated. Result: FAIL.** See the rewritten Section 5 below and
+`docs/PREREGISTRATION.md`'s Amendment Log for the full computation. This is
+not a preliminary or softened result — the entire 95% confidence interval is
+negative, not merely failing to clear zero.
 
 ---
 
@@ -135,22 +141,23 @@ loosened after seeing an unfavorable result.
 
 ---
 
-## 5. Current state (not a checkpoint result)
+## 5. Current state — checkpoint reached and evaluated: FAIL
 
-As of this writing (2026-09-08): **38 resolved paper signals**, 12 away
-from the n=50 checkpoint. These numbers are recorded for transparency, not
-as a verdict — no PASS/FAIL evaluation has occurred, and none is claimed
-here.
+As of this writing (2026-09-14): **54 resolved paper signals**, past the
+n=50 checkpoint registered in Section 4. The checkpoint was evaluated the
+same day the paired population crossed 50, using the exact pre-committed
+formula — no threshold was adjusted after seeing the result, which is the
+entire point of pre-registering it.
 
 | Metric | Value |
 |---|---|
-| Total paper signals logged | 59 |
-| Resolved | 38 |
-| Win rate | 34% |
-| Scorer Brier score | 0.2169 — "FAIR (near random)" |
-| Market-baseline Brier score | 0.1152 — "GOOD" |
-| Scorer vs. baseline | Scorer is **worse** than the market-price baseline (delta +0.1017) |
-| Hypothetical P&L (paper only) | +$64.50 |
+| Total paper signals logged | 80 |
+| Resolved | 54 |
+| Win rate | 35% |
+| Scorer Brier score | 0.2374 — "FAIR (near random)" |
+| Market-baseline Brier score | 0.1299 — "GOOD" |
+| Scorer vs. baseline (aggregate) | Scorer is **worse** than the market-price baseline (delta +0.1075) |
+| Hypothetical P&L (paper only) | +$111.00 |
 
 Reproduce with:
 
@@ -158,31 +165,51 @@ Reproduce with:
 python -m analysis.calibration
 ```
 
-The hypothetical P&L figure changed method as of 2026-09-08: it's now
-confidence-weighted stake sizing ($50 base unit; 1.5x/1.0x/0.5x for
-HIGH/MED/LOW confidence — see `core/sizing.py`) applied to every resolved
-signal, past and future, rather than a flat $10-per-contract multiply. The
-win rate and both Brier scores are sizing-independent and directly
-comparable to the earlier n=25 snapshot below; the P&L figure alone is not,
-since it's now measuring a different bet-sizing policy, not just a bigger
-sample under the old one.
+**Checkpoint result (paired, per Section 3/`docs/PREREGISTRATION.md`):**
 
-This is the same anchoring risk described in Section 2, still visible at a
-larger (though still not-yet-checkpoint) sample: the scorer is currently
-tracking the market price worse than the market price tracks itself. This
-is recorded here, unedited, because a methodology document that only shows
-favorable numbers isn't one.
+```
+paired n     = 54
+mean_delta   = -0.107466      (brier_market - brier_scorer; negative = scorer worse)
+se           = 0.034478
+ci_95        = [-0.175044, -0.039888]
+```
 
-Two things are true at once: (a) n=38 is still below the pre-registered
-n=50 checkpoint — the checkpoint exists precisely because smaller samples
-are noisy — and (b) the direction of the current evidence has not improved
-since the n=25 snapshot below, and pretending otherwise would defeat the
-purpose of publishing this.
+`ci_95_low = -0.175 <= 0` → **FAIL** per the pre-registered criterion
+(Section 4). This is not a borderline call: the entire 95% CI sits below
+zero, not merely failing to clear it — a confident result that the scorer
+underperforms the market-price baseline at this checkpoint, not an
+inconclusive one. Full computation in `docs/PREREGISTRATION.md`'s Amendment
+Log, dated 2026-09-14.
 
-**n=25 snapshot (2026-09-05, preserved for comparison, not current):**
-total signals 47, resolved 25, win rate 32%, scorer Brier 0.2173 ("FAIR,
-near random"), market-baseline Brier 0.0935 ("EXCELLENT"), hypothetical
-P&L -$2.46 at the old flat $10/contract sizing.
+**What this means going forward, per Section 4's own pre-committed terms:**
+new heuristic categories, new confidence-scoring logic, new scoring rubric
+dimensions, and any `core/scorer.py` change aimed at improving edge are
+halted. Infrastructure, validation, bug fixes, and reporting are not.
+Resuming requires a written post-mortem addressing whether the price-blind
+scoring arm (Section 3) — not yet run, since it requires metered API spend
+not yet authorized — shows the anchored scorer adds any measurable value
+over blind estimation. That post-mortem does not exist yet; this entry is
+the checkpoint result, not the post-mortem.
+
+A same-day, independently-computed decile calibration curve (buckets every
+resolved bet by predicted win probability, checks actual win rate per
+bucket) found Expected Calibration Error 22.4pp, "POOR," with the
+miscalibration specifically *systematic overconfidence* — 8 of 9 populated
+buckets underperformed their own predicted rate — rather than scattered
+noise. This is corroborating evidence from a different instrument on the
+same underlying population, not a restatement of the same number.
+
+**Prior snapshots (preserved for comparison, not current):**
+- n=38 (2026-09-08): 59 signals, 38 resolved, win rate 34%, scorer Brier
+  0.2169, market-baseline Brier 0.1152, delta +0.1017, P&L +$64.50 —
+  below the checkpoint, evidence already pointing the same direction.
+- n=25 (2026-09-05): 47 signals, 25 resolved, win rate 32%, scorer Brier
+  0.2173 ("FAIR"), market-baseline Brier 0.0935 ("EXCELLENT"), P&L -$2.46
+  at the old flat $10/contract sizing.
+
+The direction of the evidence has been consistent since the first n=8
+comparison in Section 2 — the market-price baseline has out-forecast the
+scorer at every measured point, not just at this checkpoint.
 
 ---
 
@@ -202,7 +229,13 @@ This document is being shared for scrutiny, specifically on:
   thing that "survived months of solo review" the first time, by
   construction, since one person checking their own work has a blind spot
   for exactly the mistakes they'd naturally make.
+- **Now that the checkpoint has actually failed:** is the halt scope in
+  `docs/PREREGISTRATION.md` ("What signal development halts means if FAIL")
+  the right boundary, or does it stop too little / too much? Is a written
+  post-mortem gated on the still-unrun price-blind arm the right resumption
+  condition, or is there a faster way to distinguish "anchoring artifact"
+  from "the scorer genuinely isn't adding value" without spending the
+  metered API budget that arm requires?
 
-Repository: `github.com/Rhelvey8053/Leviathan` — the current publication
-venue and how to route feedback (issue, PR, direct message) is a decision
-still open at the time of writing this document, not resolved here.
+Repository: `github.com/Rhelvey8053/Leviathan` (public). Route feedback via
+a GitHub issue or PR on that repository.

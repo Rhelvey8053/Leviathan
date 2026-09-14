@@ -629,8 +629,19 @@ def test_parses_and_96_items(backlog_data):
     failed 4/5 colorblind-safety and contrast checks (dataviz skill's
     validator, not eyeballed), replaced with the skill's validated
     reference values. See dashboard/theme.py.
+
+    139, not 138: methodology-writeup went done (repo confirmed already
+    public; docs/METHODOLOGY.md and README.md refreshed with live
+    numbers) -- net item count unchanged by that alone, but added
+    preregistered-checkpoint-failed-2026-09-14 (priority 1) recording
+    that the pre-registered n>=50 checkpoint was reached and evaluated
+    the same day: paired n=54, 95% CI entirely negative, FAIL. Signal
+    development halted per docs/PREREGISTRATION.md's own pre-committed
+    terms until a post-mortem (gated on the not-yet-run price-blind arm)
+    exists. See docs/PREREGISTRATION.md's Amendment Log for the full
+    computation.
     """
-    assert len(backlog_data["items"]) == 138
+    assert len(backlog_data["items"]) == 139
 
 
 def test_all_ids_unique(backlog_data):

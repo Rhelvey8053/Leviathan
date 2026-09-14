@@ -1,7 +1,7 @@
 # Pre-Registered Kill Criterion — Scorer Edge vs. Market-Price Baseline
 
 **Registered:** 2026-07-25
-**Status:** ACTIVE — not yet evaluated
+**Status:** CHECKPOINT EVALUATED 2026-09-14 — FAIL. See Amendment Log.
 **Append-only.** Once a checkpoint below is evaluated, the result is appended
 with its own date; no earlier entry in this file is edited or deleted, the
 same discipline `docs/IDEAS.md` applies to scope instead of results.
@@ -165,3 +165,47 @@ needed to be written now rather than closer to n=50.
 
 *(Append-only. Each checkpoint evaluation gets a new, dated entry below this
 line. Nothing above this line is ever edited once committed.)*
+
+---
+
+### 2026-09-14 — Checkpoint evaluated: FAIL
+
+The paired population reached n=54 (crossed the n≥50 checkpoint) on the
+2026-09-14 daily run. Evaluated per the exact formula in "Metric" above,
+using `core.logger.brier_component()` directly (not reimplemented) so this
+result can never disagree with `get_brier_score()`/
+`get_market_baseline_brier_score()` about the underlying computation:
+
+```
+paired n     = 54
+mean_delta   = -0.107466
+stdev        = 0.253364     (sample stdev, n-1 denominator)
+se           = 0.034478
+ci_95        = [-0.175044, -0.039888]
+```
+
+**ci_95_low = -0.175 <= 0 → FAIL.** Not a borderline result: the entire 95%
+CI is negative, not merely not-clearing-zero — this is a confident result
+that the scorer is *worse* than the market-price baseline at this
+checkpoint, not an inconclusive one. `mean_delta` itself is negative
+(-0.107), so this fails on both the point estimate and the CI condition.
+
+Per "What signal development halts means if FAIL" above: new heuristic
+categories, new confidence-scoring logic, new scoring rubric dimensions,
+and any `core/scorer.py` change intended to increase edge are halted as of
+this entry. Infrastructure, validation, bug fixes, and reporting are not
+halted. Resuming requires the written post-mortem described above,
+addressing `price-blind-arm`'s result once it exists — `price-blind-arm`
+itself has not yet been run for real (see `docs/METHODOLOGY.md` Section 3;
+it requires metered Anthropic API spend, not yet authorized), so the
+post-mortem cannot be completed yet either. This entry records the
+checkpoint result only; it is not the post-mortem.
+
+Corroborating evidence from the same day, independent of this specific
+test: a decile-bucket calibration curve (`core.logger.get_calibration_curve()`,
+backlog: `calibration-curve`) run against the same-shaped population found
+Expected Calibration Error 22.4pp, verdict POOR, with the miscalibration
+specifically systematic overconfidence (8 of 9 populated buckets under-
+performed their own predicted rate) rather than random noise — consistent
+with, not just coincidentally alongside, this checkpoint's own result.
+See backlog: `calibration-systematic-overconfidence-2026-09`.
