@@ -1,9 +1,9 @@
 # Leviathan Backlog
-Last updated: 2026-09-09 | Metrics: resolved=39, fills=7
+Last updated: 2026-09-13 | Metrics: resolved=49, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (8)
+## Ready (9)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -14,6 +14,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | per-group-pnl-tables-still-flat-not-stake-weighted | Found alongside dynamic-sizing-activated-and-pnl-scaling-bug-fix (2026-09-08): core.logger.get_stats() had a real bug where its headline total_hypothetical_pnl was displayed as dollars everywhere but… | infra |
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
+| 6 | litestream-log-unbounded-growth | Found 2026-09-13 while investigating a transient SSL blip in that day's main.py run (unrelated -- litestream itself logs only local 'replica sync' INFO lines every ~2s, no errors, no network calls,… | infra |
 
 ## Locked (5)
 | Priority | ID | Gate | Area |
