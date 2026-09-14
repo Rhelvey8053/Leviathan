@@ -270,7 +270,7 @@
       "title": "Calibration Curve Dashboard",
       "area": "reporting",
       "priority": 6,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": [
           {
@@ -284,7 +284,7 @@
         "calibration-curve"
       ],
       "action": "Add the calibration curve chart to the Streamlit dashboard (dashboard/) -- targets Power BI until 2026-08-19, when the project moved off Power BI entirely (Streamlit already covers the same ground for free; see BACKLOG.md's streamlit-dashboard-2026-08).",
-      "notes": "Depends on calibration-curve analysis being complete before the visual can be built."
+      "notes": "Depends on calibration-curve analysis being complete before the visual can be built.\n\nDONE 2026-09-14: added to dashboard/pages/2_Signal_Breakdown.py, right where the page already computed the same predicted_p_win quantity for its individual-outcomes strip plot (previously captioned \"too few for binning to mean anything\" -- no longer true at n=54). Decile bar chart with predicted-vs-actual overlay, ECE summary, thin-bucket caveat. Found and fixed a real bucket-boundary precision bug along the way: pandas pd.cut default binning disagreed with core.logger.get_calibration_curve()'s floor-based convention (same n=54, but ECE 26.6pp vs the correct 22.4pp) -- fixed to match bit-for-bit, verified via AppTest with an exact numeric match against the CLI report. All 6 dashboard pages verified clean via AppTest.\n"
     },
     {
       "id": "per-heuristic-scorecard",

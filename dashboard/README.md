@@ -137,6 +137,25 @@ a real, honest zero, not a bug, and the empty state says so) and
 synthetic populated data (to exercise the leaderboard/live-picks tables,
 which real data can't currently cover).
 
+Added 2026-09-14: **Calibration Curve** chart on Signal Breakdown
+(backlog: calibration-curve, unlocked once resolved_count crossed 50).
+Buckets every resolved bet's `predicted_p_win` (same quantity the page's
+existing strip plot already computed -- `our_estimate` if direction is
+YES, else `1-our_estimate`) into deciles and shows actual win rate per
+bucket as bars, with predicted-vs-actual overlaid, plus an Expected
+Calibration Error summary and a thin-bucket caveat. Must match
+`core.logger.get_calibration_curve()`'s exact floor-based bucket-boundary
+convention (`min(int(p_call * 10), 9)`), not pandas' `pd.cut` default
+right-inclusive bins -- found live: the two conventions gave the same
+n=54 but different ECE (26.6pp via `pd.cut` vs. the correct 22.4pp)
+for the identical population, since a few points near bucket boundaries
+land in different buckets under each convention. Fixed to compute the
+bucket index the same way, verified via `AppTest` (drove the sidebar's
+Source filter to paper-only and confirmed an exact n=54/ECE=22.4pp match
+against the CLI report). Reflects whichever Source(s) are checked in the
+sidebar, same as every other chart on this page -- the backlog's own
+22.4pp figure is paper-only, a caption on the chart says so.
+
 ## Structure
 
 ```

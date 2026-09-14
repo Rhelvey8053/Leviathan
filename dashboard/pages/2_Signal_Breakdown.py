@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -170,8 +171,8 @@ else:
     n_resolved = len(resolved)
     st.markdown(
         f"n={n_resolved} resolved bets in this filter. {small_n_badge(n_resolved)} "
-        "Individual outcomes shown, not a binned calibration curve -- too few resolved "
-        "bets yet for binning to mean anything.",
+        "Individual outcomes shown below; a binned calibration curve (backlog: "
+        "calibration-curve) follows further down this page.",
         unsafe_allow_html=True,
     )
     outcome_colors = {"WIN": WIN_COLOR, "LOSS": LOSS_COLOR}
@@ -213,6 +214,87 @@ else:
 
     win_rate = resolved["is_win"].mean() * 100
     st.markdown(f"Win rate: **{win_rate:.1f}%** (n={n_resolved}) {small_n_badge(n_resolved)} -- secondary read, not the primary credibility metric above.", unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("Calibration Curve")
+    st.caption(
+        "backlog: calibration-curve (unlocked at resolved_count>=50; mirrors "
+        "core.logger.get_calibration_curve(), see analysis/calibration.py for the "
+        "same analysis run against the live DB rather than this CSV export). Buckets "
+        "every resolved bet by how confident Leviathan was that its specific call "
+        "(YES or NO) would win, then checks whether that bucket's bets actually won "
+        "that often. The dotted line is what Leviathan predicted for each bucket; "
+        "bars falling below it mean that bucket was overconfident, above means "
+        "underconfident."
+    )
+    st.caption(
+        "Reflects whichever Source(s) are checked in the sidebar (defaults to all -- "
+        "paper, real_fill, research_probe, superseded_paper). The ECE=22.4pp figure "
+        "recorded in the backlog was computed paper-only (n=54); narrow Source to just "
+        "'paper' here to reproduce that exact number."
+    )
+    cal = resolved.dropna(subset=["our_estimate", "direction"]).copy()
+    if cal.empty:
+        st.info("No our_estimate data among resolved bets in this filter.")
+    else:
+        cal["predicted_p_win"] = cal.apply(
+            lambda r: r["our_estimate"] if r["direction"] == "YES" else 1 - r["our_estimate"],
+            axis=1,
+        ).clip(0.0, 1.0)
+        bin_edges  = [i / 10 for i in range(11)]
+        bin_labels = [f"{int(bin_edges[i]*100)}-{int(bin_edges[i+1]*100)}%" for i in range(10)]
+        # Floor-based bucketing (left-inclusive/right-exclusive, top bucket closed
+        # at 1.0), NOT pd.cut's default right-inclusive bins -- must match
+        # core.logger.get_calibration_curve()'s exact convention
+        # (idx = min(int(p_call * n_buckets), n_buckets - 1)) bit-for-bit, or this
+        # chart's numbers silently disagree with the backlog-documented ECE/analysis.py
+        # report for the identical population (found live 2026-09-14: pd.cut's
+        # right=True gave n=54/ECE=26.6pp here vs the CLI report's n=54/ECE=22.4pp --
+        # same rows, different bucket-boundary rounding).
+        bucket_idx = (cal["predicted_p_win"] * 10).apply(lambda x: min(int(x), 9))
+        cal["bucket"] = bucket_idx.map(dict(enumerate(bin_labels)))
+        cal_stats = cal.groupby("bucket", observed=True).agg(
+            n=("is_win", "size"), win_rate=("is_win", "mean"), avg_predicted=("predicted_p_win", "mean"),
+        ).reindex(bin_labels).dropna(subset=["n"])
+
+        if cal_stats.empty:
+            st.info("No bucketed calibration data for the current filter.")
+        else:
+            cal_stats["win_rate_pct"] = cal_stats["win_rate"] * 100
+            cal_stats["avg_predicted_pct"] = cal_stats["avg_predicted"] * 100
+            n_cal = int(cal_stats["n"].sum())
+            ece = (cal_stats["win_rate_pct"] - cal_stats["avg_predicted_pct"]).abs().mul(cal_stats["n"]).sum() / n_cal
+
+            fig = px.bar(
+                cal_stats, x=cal_stats.index, y="win_rate_pct",
+                labels={"x": "predicted probability of winning", "win_rate_pct": "actual win rate %"},
+                text=cal_stats["n"].astype(int).map(lambda n: f"n={n}"),
+            )
+            fig.add_trace(go.Scatter(
+                x=cal_stats.index, y=cal_stats["avg_predicted_pct"],
+                mode="lines+markers", line=dict(color="#9E9E9E", dash="dot"),
+                marker=dict(size=7), name="predicted",
+            ))
+            fig.update_layout(PLOTLY_TEMPLATE["layout"], height=320,
+                               legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
+            fig.update_traces(marker_color=PLOTLY_TEMPLATE["layout"]["colorway"][0], textposition="outside",
+                               selector=dict(type="bar"))
+            st.plotly_chart(fig, use_container_width=True)
+
+            thin_buckets = cal_stats[cal_stats["n"] < 5]
+            st.markdown(
+                f"n={n_cal} resolved bets across {len(cal_stats)} populated bucket(s). "
+                f"Expected Calibration Error (n-weighted average gap): **{ece:.1f}pp**. "
+                f"{small_n_badge(n_cal, threshold=50)}",
+                unsafe_allow_html=True,
+            )
+            if not thin_buckets.empty:
+                st.caption(
+                    f"{len(thin_buckets)} of {len(cal_stats)} bucket(s) have fewer than 5 points "
+                    f"({', '.join(f'{b} n={int(r.n)}' for b, r in thin_buckets.iterrows())}) -- "
+                    "read those as noise, not signal; weight the larger buckets and the overall "
+                    "ECE more heavily."
+                )
 
 st.divider()
 st.subheader("Win Rate by Market-Price Band")

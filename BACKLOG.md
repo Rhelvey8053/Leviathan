@@ -3,7 +3,7 @@ Last updated: 2026-09-14 | Metrics: resolved=54, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (10)
+## Ready (9)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
@@ -15,7 +15,6 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 5 | polymarket-us-tuning-for-real-value | Follow-up to polymarket-us-integration's 2026-09-14 review. | data-quality |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
-| 6 | calibration-curve-dashboard | Add the calibration curve chart to the Streamlit dashboard (dashboard/) -- targets Power BI until 2026-08-19, when the project moved off Power BI entirely (Streamlit already covers the same ground… | reporting |
 
 ## Locked (4)
 | Priority | ID | Gate | Area |
@@ -31,7 +30,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (122)
+## Done (123)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -155,4 +154,5 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | subscriber-hosting-billing-decision | User asked this session about turning the subscriber digest into an actual paid-subscription product, then explicitly sidelined it to focus on token-usage reduction instead. | reporting |
 | 5 | subscriber-report-removed-2026-08 | User question: if the strategy is proven profitable, why send picks to subscribers instead of trading it directly? Investigated before acting -- found neither justification for the feature actually… | infra |
 | 5 | walk-forward-validation | Run rolling out-of-sample validation on the scoring model using the backtest harness. | backtesting |
+| 6 | calibration-curve-dashboard | Add the calibration curve chart to the Streamlit dashboard (dashboard/) -- targets Power BI until 2026-08-19, when the project moved off Power BI entirely (Streamlit already covers the same ground… | reporting |
 | 6 | litestream-log-unbounded-growth | Found 2026-09-13 while investigating a transient SSL blip in that day's main.py run (unrelated -- litestream itself logs only local 'replica sync' INFO lines every ~2s, no errors, no network calls,… | infra |
