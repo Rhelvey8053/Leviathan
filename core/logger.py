@@ -1859,6 +1859,76 @@ def get_market_baseline_brier_score() -> dict:
     return {"brier_score": round(brier, 4), "n": len(rows), "label": label}
 
 
+def get_calibration_curve(n_buckets: int = 10) -> list[dict]:
+    """
+    backlog: calibration-curve. Decile-bucket reliability diagram:
+    predicted probability that the CALLED direction is correct
+    (our_estimate if direction=='YES', else 1-our_estimate) vs the actual
+    win rate within that bucket. A well-calibrated scorer has win_rate
+    roughly tracking each bucket's own range (the 70-80% bucket should
+    win about 70-80% of the time) -- systematic over/under-confidence
+    shows up as bucket win_rate consistently above/below the bucket's
+    own predicted range.
+
+    Same source rows and filter as get_brier_score() (_PAPER, resolved,
+    direction in YES/NO, our_estimate present) so this can never disagree
+    with the headline Brier score about which signals are in scope --
+    this is a different view of the identical population, not a
+    separately-filtered one.
+
+    Returns n_buckets dicts, always all of them (even n=0 buckets, so a
+    caller can see which probability ranges have zero coverage rather
+    than having them silently vanish from a shorter list):
+      {"bucket": "50-60%", "lo": 0.5, "hi": 0.6, "n": int, "wins": int,
+       "avg_predicted": float|None, "win_rate": float|None}
+    avg_predicted/win_rate are None only when n==0 for that bucket.
+    """
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT our_estimate, direction, result
+                FROM signals
+                WHERE ({_PAPER})
+                  AND result IS NOT NULL AND result != ''
+                  AND our_estimate IS NOT NULL
+                  AND direction IN ('YES','NO')
+                """
+            ).fetchall()
+    except Exception:
+        rows = []
+
+    buckets = [{"lo": i / n_buckets, "hi": (i + 1) / n_buckets, "n": 0, "sum_p": 0.0, "wins": 0}
+               for i in range(n_buckets)]
+
+    for r in rows:
+        est, direction, result = r["our_estimate"], r["direction"], r["result"]
+        if est is None or direction not in ("YES", "NO") or result not in ("WIN", "LOSS"):
+            continue
+        p_call = float(est) if direction == "YES" else 1.0 - float(est)
+        p_call = min(max(p_call, 0.0), 1.0)
+        idx = min(int(p_call * n_buckets), n_buckets - 1)  # p_call==1.0 lands in the top bucket
+        b = buckets[idx]
+        b["n"] += 1
+        b["sum_p"] += p_call
+        if result == "WIN":
+            b["wins"] += 1
+
+    out = []
+    for b in buckets:
+        n = b["n"]
+        out.append({
+            "bucket":        f"{int(round(b['lo']*100))}-{int(round(b['hi']*100))}%",
+            "lo":            b["lo"],
+            "hi":            b["hi"],
+            "n":             n,
+            "wins":          b["wins"],
+            "avg_predicted": round(b["sum_p"] / n, 4) if n else None,
+            "win_rate":      round(b["wins"] / n * 100, 1) if n else None,
+        })
+    return out
+
+
 def get_brier_history() -> list[dict]:
     """
     backlog: brier-tracking. Returns the per-run cumulative Brier snapshots

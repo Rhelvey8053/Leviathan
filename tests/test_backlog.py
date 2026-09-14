@@ -613,8 +613,18 @@ def test_parses_and_96_items(backlog_data):
     the production threshold) but near-zero value as configured (sports-
     dominated default feed); needs category-restricted fetching and/or a
     higher match-score floor before it's worth enabling live.
+
+    137, not 136: calibration-curve's gate cleared (resolved_count=54>=50)
+    2026-09-14, built and run for real (core.logger.get_calibration_curve(),
+    analysis/calibration.py) -- POOR/systematic overconfidence, ECE=22.4pp.
+    Added calibration-systematic-overconfidence-2026-09 to carry that
+    finding forward (calibration-curve itself is now status=done, not a
+    new ready item, so the net Ready count only grew by the one new
+    finding item -- calibration-curve-dashboard also auto-unlocked
+    blocked->ready as a side effect of calibration-curve going done, but
+    that's a status transition on an existing item, not a new one).
     """
-    assert len(backlog_data["items"]) == 136
+    assert len(backlog_data["items"]) == 137
 
 
 def test_all_ids_unique(backlog_data):

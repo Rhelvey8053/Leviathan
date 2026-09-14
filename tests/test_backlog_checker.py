@@ -292,12 +292,35 @@ def test_evaluate_triggers_stays_locked_with_undone_dependency():
     assert results["gated-item"] is False
 
 
-def test_evaluate_triggers_blocked_stays_locked_even_if_trigger_passes(backlog_data):
-    # calibration-curve-dashboard depends on calibration-curve (locked, not done)
+def test_evaluate_triggers_blocked_stays_locked_even_if_trigger_passes():
+    """
+    A blocked item's own trigger being trivially true must not unlock it
+    while its depends_on dependency is still incomplete -- depends_on and
+    trigger are two independent gates, both must clear.
+
+    Uses synthetic data, not the live backlog_data fixture: this test
+    originally hardcoded calibration-curve-dashboard (blocked on
+    calibration-curve), which broke the moment calibration-curve's own
+    real gate legitimately cleared (2026-09-14, resolved_count>=50) and
+    it went to status=done -- the exact kind of real-world state drift
+    this file's neighboring test_compare_statuses_returns_newly_unlocked()
+    already avoids by using inline synthetic data instead of live fixture
+    state.
+    """
+    backlog = {
+        "items": [
+            {"id": "dep-not-done", "status": "locked",
+             "trigger": {"all": [{"metric": "resolved_count", "op": ">=", "value": 999999}]},
+             "depends_on": []},
+            {"id": "blocked-item", "status": "blocked",
+             "trigger": {"all": []},  # trivially true on its own
+             "depends_on": ["dep-not-done"]},
+        ]
+    }
     metrics = {"resolved_count": 999, "resolved_count_per_category_max": 999,
                "resolved_count_per_wallet_max": 999, "fills_count": 999}
-    results = evaluate_triggers(backlog_data, metrics)
-    assert results["calibration-curve-dashboard"] is False
+    results = evaluate_triggers(backlog, metrics)
+    assert results["blocked-item"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -251,7 +251,7 @@
       "title": "Calibration Curve",
       "area": "calibration",
       "priority": 5,
-      "status": "locked",
+      "status": "done",
       "trigger": {
         "all": [
           {
@@ -263,14 +263,14 @@
       },
       "depends_on": [],
       "action": "Plot predicted probabilities against actual win rates in decile buckets.",
-      "notes": "50 resolved signals needed to populate all decile buckets with meaningful counts."
+      "notes": "50 resolved signals needed to populate all decile buckets with meaningful counts.\n\nDONE 2026-09-14: built core.logger.get_calibration_curve(n_buckets=10) -- decile-bucket reliability diagram: predicted probability the CALLED direction is correct (our_estimate if direction==YES else 1-our_estimate) vs actual win rate in that bucket. Same source rows/filter as get_brier_score() so it can never disagree with the headline Brier number about scope. Wired into analysis/calibration.py's standard report with an Expected Calibration Error (ECE) summary and a thin-bucket caveat (flags any covered bucket with n<5 by name rather than silently averaging noise into the headline). 10 new tests in tests/test_logger.py.\n\nREAL RESULT run against live data (n=54 resolved, 2026-09-14): Expected Calibration Error = 22.4pp, verdict POOR. Pattern is systematic OVERCONFIDENCE across nearly the entire range, not random noise -- 8 of 9 covered buckets have a negative gap (actual win rate below predicted). Most statistically meaningful data point: the 40-50% bucket, the single largest by far (n=20, 37% of all resolved signals), predicted 40.0% avg but actually won only 15.0% of the time (-25.0pp gap). The 90-100% bucket (n=8, the highest-conviction calls) predicted 95.3% avg but won only 62.5% of the time (-32.8pp gap) -- even Leviathan's most confident calls are well short of their stated reliability. Only the 60-70% bucket (n=11, second-largest) is close to well-calibrated (-8.0pp). Thin buckets (n<5: 0-10%, 10-20%, 30-40%, 50-60%, 70-80%) are individually noisy and excluded from the headline read.\n\nThis corroborates, with much finer granularity, the standing finding that brier_scorer has been worse than brier_market (the market-price baseline) in every recorded run to date (see get_run_history) -- it is not just worse in aggregate, it is systematically overconfident across almost the whole probability range. Filed as its own finding: calibration-systematic-overconfidence-2026-09, cross-referenced to auto-calibration-loop as the natural next step this evidence would inform -- did not attempt a recalibration fix myself, matching this project's own established discipline that a scoring-methodology change needs a human decision, not an unattended one.\n"
     },
     {
       "id": "calibration-curve-dashboard",
       "title": "Calibration Curve Dashboard",
       "area": "reporting",
       "priority": 6,
-      "status": "blocked",
+      "status": "ready",
       "trigger": {
         "all": [
           {
@@ -1904,6 +1904,19 @@
       "depends_on": [],
       "action": "Follow-up to polymarket-us-integration's 2026-09-14 review. The module is correctness-fixed and safe at its shipped default (0 false matches against 286 real recent flagged-signal titles at the production min_match_score=0.5), but also near-zero value at that default: Polymarket US's uncategorized market feed is sports-dominated (a 200-market uncategorized sample was 100% sports), which barely overlaps with what Leviathan actually flags (weather, esports, entertainment, niche politics). Raising max_fetch 300->1500 did not surface genuine matches -- it added 3 spurious ones instead (short/generic titles like 'Both Teams To Score' colliding with unrelated MLB markets on word overlap alone). Two candidate directions, not yet tried: (1) category-restricted fetching (climate/politics/economics only, skip sports) where genuine Kalshi topical overlap is plausible -- confirmed live that Polymarket US has real current NYC/LA/Chicago daily weather markets and House/Senate/governor election markets; (2) a higher match-score floor and/or a minimum-title-length gate specifically for polymarket_us (international Polymarket's _match_score was tuned against its own market phrasing, which may not transfer cleanly to Polymarket US's terser team/candidate-name titles). Needs real before/after testing against live signals table data the same way the initial review did, not just unit tests.",
       "notes": "Filed alongside polymarket-us-integration's review (2026-09-14). Not started."
+    },
+    {
+      "id": "calibration-systematic-overconfidence-2026-09",
+      "title": "Scorer is systematically overconfident, not just noisy (calibration curve, ECE=22.4pp)",
+      "area": "calibration",
+      "priority": 3,
+      "status": "ready",
+      "trigger": {
+        "all": []
+      },
+      "depends_on": [],
+      "action": "Finding from calibration-curve's first real run (2026-09-14, n=54 resolved): Expected Calibration Error 22.4pp, verdict POOR. 8 of 9 covered probability-decile buckets show NEGATIVE gap (actual win rate below the predicted rate) -- a systematic pattern, not scattered noise. Most statistically meaningful: the 40-50% bucket (n=20, 37% of all resolved signals -- by far the largest bucket) predicted 40.0% avg confidence but actually won only 15.0% of the time (-25.0pp). The 90-100% bucket (n=8, the highest-conviction calls) predicted 95.3% but won only 62.5% (-32.8pp) -- even the most confident calls fall well short of their stated reliability. Only 60-70% (n=11) is close to well-calibrated (-8.0pp). This corroborates and sharpens the standing finding that brier_scorer has been worse than brier_market (market-price baseline) in every recorded run to date -- it is specifically overconfidence, not random miscalibration, and it is concentrated in exactly the bucket (40-50%) that contains the plurality of all real calls made. Directly relevant to auto-calibration-loop (adjusts heuristic confidence weights from tracked Brier/win-rate data) as the most evidence-backed candidate direction for that item, though this item does not decide HOW to fix it -- that's a methodology call for a human, matching this project's established discipline (see scripts/weekly_audit_prompt.md's own disqualifying-conditions checklist for exactly this kind of judgment call).",
+      "notes": "Filed alongside calibration-curve going done (2026-09-14). See core.logger.get_calibration_curve() / analysis/calibration.py's CALIBRATION CURVE section for the reusable tooling this finding came from -- re-run analysis/calibration.py any time to refresh these numbers as more signals resolve. Caveat: several buckets are still thin (n<5); the 40-50% and 90-100% findings above are the ones with real sample size behind them, the others should be treated as directional only until more data accumulates."
     }
   ]
 }

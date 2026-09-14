@@ -1896,6 +1896,95 @@ def test_market_baseline_brier_excludes_probe_rows(tmp_db):
     assert result["n"] == 0
 
 
+# ─── get_calibration_curve (backlog: calibration-curve) ──────────────────────
+
+def _insert_cal_row(call_id, direction, estimate, result, outcome="YES", source="paper"):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals "
+            "(call_id,timestamp,ticker,direction,our_estimate,result,outcome,source) "
+            "VALUES (?,datetime('now'),?,?,?,?,?,?)",
+            (call_id, f"KX{call_id}", direction, estimate, result, outcome, source)
+        )
+
+
+def test_calibration_curve_empty_returns_all_buckets_with_zero_n(tmp_db):
+    """No resolved signals -> still returns n_buckets entries, all n=0."""
+    curve = logger.get_calibration_curve(n_buckets=10)
+    assert len(curve) == 10
+    assert all(b["n"] == 0 for b in curve)
+    assert all(b["avg_predicted"] is None and b["win_rate"] is None for b in curve)
+    assert curve[0]["bucket"] == "0-10%"
+    assert curve[-1]["bucket"] == "90-100%"
+
+
+def test_calibration_curve_yes_call_uses_estimate_directly(tmp_db):
+    """A YES call's p_call is its own our_estimate."""
+    _insert_cal_row("a", "YES", 0.75, "WIN")
+    curve = logger.get_calibration_curve(n_buckets=10)
+    bucket_70_80 = curve[7]
+    assert bucket_70_80["n"] == 1
+    assert bucket_70_80["avg_predicted"] == pytest.approx(0.75)
+    assert bucket_70_80["win_rate"] == pytest.approx(100.0)
+
+
+def test_calibration_curve_no_call_uses_inverted_estimate(tmp_db):
+    """A NO call's p_call is 1 - our_estimate (the probability the call itself is correct)."""
+    _insert_cal_row("a", "NO", 0.20, "WIN")  # p_call = 0.80
+    curve = logger.get_calibration_curve(n_buckets=10)
+    bucket_80_90 = curve[8]
+    assert bucket_80_90["n"] == 1
+    assert bucket_80_90["avg_predicted"] == pytest.approx(0.80)
+    assert bucket_80_90["win_rate"] == pytest.approx(100.0)
+
+
+def test_calibration_curve_aggregates_multiple_rows_per_bucket(tmp_db):
+    _insert_cal_row("a", "YES", 0.65, "WIN")
+    _insert_cal_row("b", "YES", 0.68, "LOSS")
+    _insert_cal_row("c", "NO", 0.32, "WIN")  # p_call = 0.68
+    curve = logger.get_calibration_curve(n_buckets=10)
+    bucket_60_70 = curve[6]
+    assert bucket_60_70["n"] == 3
+    assert bucket_60_70["wins"] == 2
+    assert bucket_60_70["win_rate"] == pytest.approx(200 / 3, abs=1e-1)
+
+
+def test_calibration_curve_excludes_probe_rows(tmp_db):
+    _insert_cal_row("a", "YES", 0.9, "WIN", source="research_probe")
+    curve = logger.get_calibration_curve(n_buckets=10)
+    assert sum(b["n"] for b in curve) == 0
+
+
+def test_calibration_curve_excludes_pending_and_pass_rows(tmp_db):
+    with logger._db() as conn:
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,our_estimate,result,outcome,source) "
+            "VALUES ('pending',datetime('now'),'KXPEND','YES',0.9,'','', 'paper')"
+        )
+        conn.execute(
+            "INSERT INTO signals (call_id,timestamp,ticker,direction,our_estimate,result,outcome,source) "
+            "VALUES ('pass1',datetime('now'),'KXPASS','PASS',0.5,'WIN','YES','paper')"
+        )
+    curve = logger.get_calibration_curve(n_buckets=10)
+    assert sum(b["n"] for b in curve) == 0
+
+
+def test_calibration_curve_p_call_of_exactly_one_lands_in_top_bucket(tmp_db):
+    """p_call=1.0 must not overflow past the last bucket index (n_buckets)."""
+    _insert_cal_row("a", "YES", 1.0, "WIN")
+    curve = logger.get_calibration_curve(n_buckets=10)
+    assert curve[9]["n"] == 1
+    assert sum(b["n"] for b in curve) == 1
+
+
+def test_calibration_curve_custom_bucket_count(tmp_db):
+    _insert_cal_row("a", "YES", 0.75, "WIN")
+    curve = logger.get_calibration_curve(n_buckets=4)
+    assert len(curve) == 4
+    assert curve[3]["bucket"] == "75-100%"
+    assert curve[3]["n"] == 1
+
+
 # ─── _market_baseline_brier / backfill_market_baseline_brier ─────────────────
 
 def test_market_baseline_brier_helper_none_when_price_missing():

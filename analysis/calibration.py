@@ -410,6 +410,56 @@ def main():
     else:
         print("  No resolved data yet (leviathan_score field added recently).")
 
+    # Calibration curve (backlog: calibration-curve, unlocked at
+    # resolved_count>=50 -- see that item's own gate in backlog.json)
+    print()
+    print(_rule("="))
+    print("CALIBRATION CURVE  (predicted probability vs actual win rate, by decile)")
+    print(_rule("-"))
+    print()
+    curve = logger.get_calibration_curve(n_buckets=10)
+    covered = [b for b in curve if b["n"] > 0]
+    if covered:
+        print(f"  {'Bucket':<10}  {'N':>4}  {'Avg Predicted':>13}  {'Actual Win%':>11}  {'Gap':>6}")
+        print(f"  {'-'*10}  {'-'*4}  {'-'*13}  {'-'*11}  {'-'*6}")
+        weighted_abs_gap = 0.0
+        total_n = 0
+        for b in curve:
+            n = b["n"]
+            if n == 0:
+                print(f"  {b['bucket']:<10}  {n:>4}  {'--':>13}  {'--':>11}  {'--':>6}")
+                continue
+            avg_p = b["avg_predicted"] * 100
+            wr    = b["win_rate"]
+            gap   = wr - avg_p  # positive = underconfident in this bucket, negative = overconfident
+            print(f"  {b['bucket']:<10}  {n:>4}  {avg_p:>12.1f}%  {wr:>10.1f}%  {gap:>+5.1f}pp")
+            weighted_abs_gap += abs(gap) * n
+            total_n += n
+        ece = weighted_abs_gap / total_n if total_n else None
+        print()
+        if ece is not None:
+            print(f"  Expected Calibration Error (n-weighted |gap|): {ece:.1f}pp")
+            if ece <= 5:
+                print("  Calibration curve: TIGHT -- buckets track their own predicted range closely.")
+            elif ece <= 15:
+                print("  Calibration curve: LOOSE -- some buckets drift from their predicted range.")
+            else:
+                print("  Calibration curve: POOR -- buckets systematically miss their predicted range.")
+        print()
+        print("  Read this as: does the X0-Y0% bucket actually win X0-Y0% of the time?")
+        print("  Positive gap = underconfident in that bucket (wins more than predicted).")
+        print("  Negative gap = overconfident in that bucket (wins less than predicted).")
+        thin_buckets = [b for b in covered if b["n"] < 5]
+        if thin_buckets:
+            thin_n = ", ".join(f"{b['bucket']} (n={b['n']})" for b in thin_buckets)
+            print(f"\n  CAVEAT: {len(thin_buckets)}/{len(covered)} covered buckets have fewer than 5")
+            print(f"  points each -- {thin_n}.")
+            print("  Their individual win rates are noise, not signal, at this sample size.")
+            print("  Weight the well-populated buckets (n>=5) and the overall ECE more heavily")
+            print("  than any single thin bucket's gap.")
+    else:
+        print("  No resolved YES/NO signals yet.")
+
     # Heuristic label breakdown
     print()
     print(_rule("="))

@@ -1,12 +1,13 @@
 # Leviathan Backlog
-Last updated: 2026-09-14 | Metrics: resolved=49, fills=7
+Last updated: 2026-09-14 | Metrics: resolved=54, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (11)
+## Ready (13)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
+| 3 | calibration-systematic-overconfidence-2026-09 | Finding from calibration-curve's first real run (2026-09-14, n=54 resolved): Expected Calibration Error 22.4pp, verdict POOR. | calibration |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
@@ -16,25 +17,24 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | methodology-writeup | Write a public methodology document covering the pipeline architecture, the market-price anchoring problem, the baseline comparison, and the pre-registered kill criteria. | reporting |
 | 5 | polymarket-us-tuning-for-real-value | Follow-up to polymarket-us-integration's 2026-09-14 review. | data-quality |
 | 6 | auto-calibration-loop | Automatically adjust heuristic confidence weights based on tracked Brier scores and category win rates. | calibration |
+| 6 | calibration-curve-dashboard | Add the calibration curve chart to the Streamlit dashboard (dashboard/) -- targets Power BI until 2026-08-19, when the project moved off Power BI entirely (Streamlit already covers the same ground… | reporting |
 | 6 | litestream-log-unbounded-growth | Found 2026-09-13 while investigating a transient SSL blip in that day's main.py run (unrelated -- litestream itself logs only local 'replica sync' INFO lines every ~2s, no errors, no network calls,… | infra |
 
-## Locked (5)
+## Locked (4)
 | Priority | ID | Gate | Area |
 |----------|-----|------|------|
 | 4 | empirical-base-rates-poly | sufficient_per_heuristic_label_resolved_data == 1 | calibration |
 | 4 | per-wallet-track-record | resolved_count_per_wallet_max >= 10 | smart-money |
-| 5 | calibration-curve | resolved_count >= 50 | calibration |
 | 5 | skill-vs-luck-weighting | resolved_count_per_wallet_max >= 10 | smart-money |
 | 5 | slippage-tracking | fills_count >= 20 | execution |
 
-## Blocked (3)
+## Blocked (2)
 | Priority | ID | Waiting On | Area |
 |----------|-----|-----------|------|
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
-| 6 | calibration-curve-dashboard | calibration-curve | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (117)
+## Done (118)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -144,6 +144,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | whale-actionability-scorecard | User asked what we're actually doing with whale-flag data beyond identifying it -- the report's WHALE ACTIVITY table just lists sightings (a market a whale traded, no track record attached), so there… | reporting |
 | 5 | ai-github-research-scan | User-requested (2026-09-14) standing capability: a new weekly scheduled Claude-CLI research pass (scripts/ai_research_scan.py, Leviathan-AIResearchScan, Sundays 12:20pm) that searches… | infra |
 | 5 | betting-queue | Show top 5 unplaced signals sorted by urgency in daily report | reporting |
+| 5 | calibration-curve | Plot predicted probabilities against actual win rates in decile buckets. | calibration |
 | 5 | edge-decay-analysis | Measure how quickly identified edges decay as markets approach their resolution date. | validation |
 | 5 | ev-per-contract | Show EV/contract in signal blocks and top picks summary | reporting |
 | 5 | heuristic-sunsetting | Ran analysis/heuristic_backtest.py fresh and screened every label with n>=10 for underperformance -- but the correct comparison isn't raw Brier vs. | calibration |
