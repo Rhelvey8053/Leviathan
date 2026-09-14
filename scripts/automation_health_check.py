@@ -74,7 +74,10 @@ TASK_CADENCE_HOURS = {
                                                   # philosophy as the other daily entries below
     "Leviathan-CodeAudit":              192.0,   # weekly, Monday 11am (+~24h margin)
     "Leviathan-WeeklyAudit":            192.0,   # weekly, Monday 10am (+~24h margin)
-    "Leviathan-AIResearchScan":         192.0,   # weekly, Sunday 12:20pm (+~24h margin)
+    "Leviathan-AIResearchScan":         120.0,   # Wed+Sun 12:20pm (2026-09-14, was
+                                                  # Sunday-only) -- worst-case gap between
+                                                  # runs is 96h (Wed->Sun), +24h margin,
+                                                  # same philosophy as the other entries here
 }
 
 # Win32/Task-Scheduler result codes that are informational, not failures --

@@ -1,5 +1,9 @@
 """
-scripts/ai_research_scan.py - Unattended weekly AI/GitHub research scan.
+scripts/ai_research_scan.py - Unattended AI/GitHub research scan, twice
+weekly (Wednesday + Sunday, see scripts/setup_ai_research_scan_scheduler.ps1
+-- 2026-09-14: bumped from Sunday-only after a user PM-review conversation
+concluded weekly was too slow but daily would mostly restate "nothing new"
+and burn Pro/CLI usage for little incremental signal).
 
 Runs Claude Code headlessly (claude --print) against a fixed prompt
 (scripts/ai_research_scan_prompt.md): research GitHub repos, Anthropic/
@@ -7,11 +11,14 @@ Claude and other model updates, and agent techniques/patterns that could
 plausibly improve this project, filtered for actual relevance rather than
 general AI news. Report-only -- restricted via --allowedTools/
 --disallowedTools to Read/Grep/Glob for local context, WebSearch/WebFetch
-for research, and Write scoped only to reports/ai_research/ for the one
-output file. No Edit at all, git limited to read-only commands, never
-touches data/leviathan.db, never runs anything that places or implies a
-real trade, never files anything to backlog/backlog.json itself (findings
-land in the report; a human decides what's worth adding to the backlog).
+for research, and Edit(reports/ai_research/*) for the one output file
+(NOT Write(path) -- the CLI's own file-permission checks only match
+Edit(path) rules, Edit covering all file-editing tools including Write;
+the first live run hit this the hard way, see git history). No other Edit,
+git limited to read-only commands, never touches data/leviathan.db, never
+runs anything that places or implies a real trade, never files anything to
+backlog/backlog.json itself (findings land in the report; a human decides
+what's worth adding to the backlog).
 
 Scheduled via Windows Task Scheduler -- see
 scripts/setup_ai_research_scan_scheduler.ps1. Output also captured to

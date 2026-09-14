@@ -1,4 +1,4 @@
-# Registers a Windows Task Scheduler job for the weekly, report-only
+# Registers a Windows Task Scheduler job for the twice-weekly, report-only
 # Claude Code AI/GitHub research scan (scripts/ai_research_scan.py).
 # Read-only: never edits code, never touches Task Scheduler or a live
 # process, never touches data/leviathan.db, never commits/pushes, never
@@ -23,13 +23,18 @@ $Action = New-ScheduledTaskAction `
     -Argument "/c `"`"$PythonExe`" `"$ScriptPath`" >> `"$LogPath`" 2>&1`"" `
     -WorkingDirectory $WorkDir
 
-# Weekly, Sunday 12:20pm local -- after Leviathan-CodeAudit's 11:00am/65min
-# slot (ends by ~12:05pm) so this doesn't contend with it, and clear of
-# Leviathan-WakeCatchup's 12:00pm fallback trigger. Web research (multiple
-# searches/fetches) is I/O-bound, not CPU-bound, so running alongside the
-# quiet Sunday morning cluster is fine -- it just shouldn't start before
-# the other two Sunday audits have wrapped up.
-$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At "12:20PM"
+# Twice weekly, Wednesday + Sunday, both at 12:20pm local -- a middle
+# ground between weekly (too slow to catch anything mid-week) and daily
+# (AI/model releases and notable new repos don't shift day-to-day, so
+# daily would mostly restate "nothing new since last scan" and burn
+# Pro/CLI usage for little incremental signal). Sunday's slot is
+# unchanged: after Leviathan-CodeAudit's 11:00am/65min slot (ends by
+# ~12:05pm) so this doesn't contend with it, and clear of Leviathan-
+# WakeCatchup's 12:00pm fallback trigger. Wednesday has no competing
+# Leviathan-* task at this hour. Web research (multiple searches/
+# fetches) is I/O-bound, not CPU-bound, so timing only needs to avoid
+# starting before the Sunday audits it shares a slot with have wrapped.
+$Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Wednesday,Sunday -At "12:20PM"
 
 $Settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 45) `
@@ -59,7 +64,7 @@ Register-ScheduledTask `
     -Force
 
 Write-Host ""
-Write-Host "Task '$TaskName' registered. Runs weekly, Sunday 12:20pm, logon type S4U."
+Write-Host "Task '$TaskName' registered. Runs Wednesday + Sunday 12:20pm, logon type S4U."
 Write-Host "Findings land in reports\ai_research\<date>.md; raw output logs to $LogPath"
 Write-Host "To run immediately: Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host "To remove:          Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
