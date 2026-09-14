@@ -1832,13 +1832,13 @@
       "title": "litestream.log grows unbounded (~100MB, no rotation)",
       "area": "infra",
       "priority": 6,
-      "status": "ready",
+      "status": "done",
       "trigger": {
         "all": []
       },
       "depends_on": [],
       "action": "Found 2026-09-13 while investigating a transient SSL blip in that day's main.py run (unrelated -- litestream itself logs only local 'replica sync' INFO lines every ~2s, no errors, no network calls, so it was ruled out as the cause). logs/litestream.log has grown to ~100MB with no rotation or cleanup in place. Not urgent -- doesn't affect pipeline correctness -- but will keep growing indefinitely. Add log rotation (size- or age-based) for litestream's log output, or reduce its log level/verbosity if litestream supports it.",
-      "notes": "Filed at user's request after being surfaced as an aside during a weekend catch-up review."
+      "notes": "Filed at user's request after being surfaced as an aside during a weekend catch-up review.\n\nDONE 2026-09-14. Root cause: litestream's own \"replica sync\" line fires at INFO level roughly every 2s with nothing to report beyond \"still running\" -- that alone, with no rotation, grew logs/litestream.log to ~106MB, flagged unfixed by 4 consecutive weekly code audits. Fixed at the source rather than adding rotation to a log that never needed to be this verbose: added -log-level warn to Leviathan-Litestream's launch command in scripts/setup_litestream_scheduler.ps1 (litestream still surfaces real problems -- sync failures, replica errors -- at warn/error, just drops the routine heartbeat).\n\nApplied live: found and killed a lingering litestream.exe process (PID 12664, running since 2026-09-10) that Stop-ScheduledTask's own \"Ready\" status didn't actually reflect -- its cmd.exe wrapper had stopped but the grandchild litestream.exe process survived orphaned. Archived the old log to logs/litestream.log.pre-fix-2026-09-14.bak (kept, not deleted, in case the historical content is ever wanted) and re-registered + started the task fresh (new PID 7660). Verified healthy: the new log is 0 bytes (no warnings/errors), and the replica's last sync timestamp exactly matches leviathan.db's own last-write time (both 2026-09-14 08:30) -- confirms litestream is genuinely in sync, not silently broken, and was simply correctly quiet since nothing new had been written to the DB since the restart.\n"
     },
     {
       "id": "health-check-is-presence-not-outcome",

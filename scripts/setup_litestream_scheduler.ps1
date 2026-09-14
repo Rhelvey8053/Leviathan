@@ -25,9 +25,17 @@ Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Silent
 
 # cmd.exe wrapper + output redirection, same pattern as the other tasks --
 # litestream logs continuously to stdout, useful for confirming it's alive.
+# -log-level warn (2026-09-14, backlog: litestream-log-unbounded-growth):
+# litestream's own "replica sync" line fires at INFO roughly every 2s
+# with nothing to say beyond "still running" -- that alone grew
+# logs/litestream.log to ~100MB with no rotation, flagged unfixed by 4
+# consecutive weekly code audits. warn still surfaces real problems
+# (sync failures, replica errors); it just drops the routine heartbeat
+# noise at the source, which is a better fix than rotating a log that
+# never needed to be this verbose in the first place.
 $Action = New-ScheduledTaskAction `
     -Execute "cmd.exe" `
-    -Argument "/c `"`"$LitestreamExe`" replicate -config `"$ConfigPath`" >> `"$LogPath`" 2>&1`"" `
+    -Argument "/c `"`"$LitestreamExe`" replicate -config `"$ConfigPath`" -log-level warn >> `"$LogPath`" 2>&1`"" `
     -WorkingDirectory "$WorkDir\tools"
 
 # At log on -- runs as the logged-in Administrator (matches file ownership
