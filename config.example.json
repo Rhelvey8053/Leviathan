@@ -139,13 +139,14 @@
   "polymarket_us": {
     "enabled": false,
     "max_fetch": 300,
-    "min_match_score": 0.5,
+    "categories": ["climate", "politics", "economics"],
+    "min_match_score": 0.6,
     "min_price_gap": 0.0,
     "cross_market_promote": false,
     "cross_market_min_gap": 0.15,
     "cross_market_min_match_score": 0.65,
     "cross_market_max_candidates": 50,
-    "_polymarket_us_notes": "Polymarket US (gateway.polymarket.us) is a separate, CFTC-regulated product from international Polymarket (gamma-api.polymarket.com) -- different domain, different market schema (marketSides[] instead of outcomes/outcomePrices). Public market data, no API key needed; POLYMARKET_KEY_ID/POLYMARKET_SECRET_KEY in .env (if present) authenticate only trading/portfolio/WebSocket endpoints, unused by sources/polymarket_us.py. Off by default -- built and tested 2026-09-14, left disabled pending a live review before it can affect real signal generation."
+    "_polymarket_us_notes": "Polymarket US (gateway.polymarket.us) is a separate, CFTC-regulated product from international Polymarket (gamma-api.polymarket.com) -- different domain, different market schema (marketSides[] instead of outcomes/outcomePrices). Public market data, no API key needed; POLYMARKET_KEY_ID/POLYMARKET_SECRET_KEY in .env (if present) authenticate only trading/portfolio/WebSocket endpoints, unused by sources/polymarket_us.py. Off by default -- built and tested 2026-09-14, left disabled pending a live review before it can affect real signal generation. 2026-09-14 tuning pass (backlog: polymarket-us-tuning-for-real-value): categories restricted to climate/politics/economics (the uncategorized feed is sports-dominated -- confirmed live, a 200-market uncategorized sample was 100% 'sports'), and min_match_score raised 0.5->0.6 after finding a real false positive at 0.53 (a Kalshi rain-in-LA market matching a Polymarket US LA-temperature-band market -- same city/month, different actual question) that disappears at 0.6+. Tested end-to-end against 313 real recent flagged-signal titles: 0 matches at the new 0.6 threshold with category restriction, vs. the 1 false positive at the old 0.5/uncategorized settings -- safer, but still not yet demonstrating real positive matches; category restriction improved relevance, not yet precision on its own."
   },
   "blind_arm": {
     "enabled": false,

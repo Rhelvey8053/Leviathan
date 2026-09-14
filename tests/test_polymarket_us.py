@@ -302,9 +302,16 @@ def test_fetch_and_build_index_calls_fetch_and_build():
     fake_raw = [_raw("Will Q happen?")]
     with patch.object(polymarket_us, "fetch_markets", return_value=fake_raw) as mock_fetch:
         idx = polymarket_us.fetch_and_build_index(_CFG)
-    mock_fetch.assert_called_once_with(100)  # max_fetch from _CFG
+    mock_fetch.assert_called_once_with(100, categories=None)  # max_fetch from _CFG, no categories configured
     assert len(idx) == 1
     assert idx[0]["question"] == "Will Q happen?"
+
+
+def test_fetch_and_build_index_passes_configured_categories():
+    cfg = {"polymarket_us": {**_CFG["polymarket_us"], "categories": ["climate", "politics"]}}
+    with patch.object(polymarket_us, "fetch_markets", return_value=[]) as mock_fetch:
+        polymarket_us.fetch_and_build_index(cfg)
+    mock_fetch.assert_called_once_with(100, categories=["climate", "politics"])
 
 
 # ── enrich_flagged ────────────────────────────────────────────────────────────
@@ -338,3 +345,70 @@ def test_fetch_markets_handles_request_failure():
     with patch.object(polymarket_us.requests, "get", side_effect=Exception("boom")):
         markets = polymarket_us.fetch_markets(limit=10)
     assert markets == []
+
+
+# ── fetch_markets: categories (backlog: polymarket-us-tuning-for-real-value) ──
+
+def test_fetch_markets_no_categories_makes_one_uncategorized_call():
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"markets": [_raw("A", market_id="1")]}
+
+    with patch.object(polymarket_us.requests, "get", return_value=_Resp()) as mock_get:
+        markets = polymarket_us.fetch_markets(limit=10, categories=None)
+    assert len(markets) == 1
+    mock_get.assert_called_once()
+    assert "categories" not in mock_get.call_args.kwargs["params"]
+
+
+def test_fetch_markets_multiple_categories_uses_one_request_per_category():
+    """The gateway API doesn't accept a comma-joined category list (confirmed
+    live -- it's matched as one literal string, not an OR filter), so this
+    must issue one request per category."""
+    calls = []
+
+    class _Resp:
+        def __init__(self, cat):
+            self._cat = cat
+        def raise_for_status(self): pass
+        def json(self):
+            return {"markets": [_raw(f"Q-{self._cat}", market_id=self._cat)]}
+
+    def fake_get(url, params, timeout):
+        calls.append(params.get("categories"))
+        return _Resp(params.get("categories"))
+
+    with patch.object(polymarket_us.requests, "get", side_effect=fake_get):
+        markets = polymarket_us.fetch_markets(limit=10, categories=["climate", "politics"])
+    assert sorted(calls) == ["climate", "politics"]
+    assert len(markets) == 2
+
+
+def test_fetch_markets_categories_dedup_by_market_id():
+    """The same market_id returned by two different category calls (a
+    market can plausibly carry multiple tags) must not be double-counted."""
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"markets": [_raw("Shared", market_id="dup1")]}
+
+    with patch.object(polymarket_us.requests, "get", return_value=_Resp()):
+        markets = polymarket_us.fetch_markets(limit=10, categories=["climate", "politics"])
+    assert len(markets) == 1
+
+
+def test_fetch_markets_categories_splits_limit_across_categories():
+    """A limit of 100 across 2 categories should request ~50 per category,
+    not 100 each (which would silently multiply the effective fetch size)."""
+    seen_limits = []
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"markets": []}
+
+    def fake_get(url, params, timeout):
+        seen_limits.append(params["limit"])
+        return _Resp()
+
+    with patch.object(polymarket_us.requests, "get", side_effect=fake_get):
+        polymarket_us.fetch_markets(limit=100, categories=["climate", "politics"])
+    assert all(lim == 50 for lim in seen_limits)

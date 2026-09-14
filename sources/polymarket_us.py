@@ -32,30 +32,27 @@ from core import fees
 GATEWAY_BASE = "https://gateway.polymarket.us"
 
 
-def fetch_markets(limit: int = 300) -> list[dict]:
-    """
-    Fetches active, open Polymarket US markets with embedded prices.
-    Returns a flat list — one call, paginated as needed.
-    """
+def _fetch_markets_page(limit: int, category: str | None) -> list[dict]:
+    """One category's worth of active, open markets, paginated internally."""
     markets = []
     offset  = 0
 
     while len(markets) < limit:
+        params = {
+            "limit":  min(100, limit - len(markets)),
+            "offset": offset,
+            "active": "true",
+            "closed": "false",
+        }
+        if category:
+            params["categories"] = category
         try:
-            resp = requests.get(
-                f"{GATEWAY_BASE}/v1/markets",
-                params={
-                    "limit":  min(100, limit - len(markets)),
-                    "offset": offset,
-                    "active": "true",
-                    "closed": "false",
-                },
-                timeout=15,
-            )
+            resp = requests.get(f"{GATEWAY_BASE}/v1/markets", params=params, timeout=15)
             resp.raise_for_status()
             page = resp.json().get("markets", [])
         except Exception as e:
-            print(f"  [poly_us] fetch_markets failed at offset {offset}: {e}")
+            print(f"  [poly_us] fetch_markets failed at offset {offset}"
+                  f"{f' (category={category})' if category else ''}: {e}")
             break
 
         if not page:
@@ -65,6 +62,43 @@ def fetch_markets(limit: int = 300) -> list[dict]:
             break
         offset += 100
 
+    return markets[:limit]
+
+
+def fetch_markets(limit: int = 300, categories: list[str] | None = None) -> list[dict]:
+    """
+    Fetches active, open Polymarket US markets with embedded prices.
+
+    categories (backlog: polymarket-us-tuning-for-real-value): the
+    gateway API's own `categories` param does NOT accept a comma-
+    separated list (confirmed live 2026-09-14 -- "climate,politics"
+    returns zero rows, it's matched as one literal category string, not
+    an OR filter) -- one request per category, merged and deduped by
+    market id. None (default) fetches the uncategorized general feed,
+    same as before this parameter existed.
+
+    Why this matters: the uncategorized feed is sports-dominated
+    (confirmed live: a 200-market uncategorized sample was 100%
+    "sports"), which barely overlaps with what Leviathan actually flags
+    (weather, politics, entertainment). Restricting to the categories
+    that genuinely exist here and plausibly overlap Kalshi's own
+    coverage -- climate, politics, economics -- surfaces real candidate
+    matches instead of spending the whole fetch budget on team names
+    that will never match a Kalshi title.
+    """
+    if not categories:
+        return _fetch_markets_page(limit, None)
+
+    per_category = max(1, limit // len(categories))
+    seen_ids: set[str] = set()
+    markets: list[dict] = []
+    for cat in categories:
+        for m in _fetch_markets_page(per_category, cat):
+            mid = str(m.get("id", ""))
+            if mid and mid in seen_ids:
+                continue
+            seen_ids.add(mid)
+            markets.append(m)
     return markets[:limit]
 
 
@@ -189,10 +223,16 @@ def fetch_and_build_index(config: dict) -> list[dict]:
     """
     Fetches active Polymarket US markets and returns a pre-built matching index.
     Call once per run; pass the result to match_markets() to avoid double fetching.
+
+    config.polymarket_us.categories (backlog: polymarket-us-tuning-for-
+    real-value): optional list, e.g. ["climate", "politics", "economics"].
+    Empty/absent (default) preserves the original uncategorized-feed
+    behavior for any existing caller.
     """
-    cfg   = config.get("polymarket_us", {})
-    limit = cfg.get("max_fetch", 300)
-    return build_index(fetch_markets(limit))
+    cfg        = config.get("polymarket_us", {})
+    limit      = cfg.get("max_fetch", 300)
+    categories = cfg.get("categories") or None
+    return build_index(fetch_markets(limit, categories=categories))
 
 
 def match_markets(
