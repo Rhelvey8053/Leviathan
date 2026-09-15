@@ -648,8 +648,16 @@ def test_parses_and_96_items(backlog_data):
     dark-on-dark chart text/annotations). See dashboard/theme.py,
     dashboard/app.py, dashboard/pages/5_Backlog.py,
     dashboard/pages/2_Signal_Breakdown.py.
+
+    142, not 141: added cli-scorer-json-schema-and-cwd-isolation
+    (2026-09-15, done at filing) -- _score_via_cli now uses --json-schema/
+    structured_output instead of regex-extracting JSON from free text, and
+    runs from a neutral cwd so CLAUDE.md/the SessionStart hook never load
+    for a scoring call. Infra/parsing-reliability only, not a
+    scoring-logic change -- see core/scorer.py's own docstring on
+    _score_via_cli for why this isn't covered by the checkpoint halt.
     """
-    assert len(backlog_data["items"]) == 141
+    assert len(backlog_data["items"]) == 142
 
 
 def test_all_ids_unique(backlog_data):

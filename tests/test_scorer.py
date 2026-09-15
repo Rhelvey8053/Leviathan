@@ -1390,23 +1390,32 @@ def test_pre_claude_lv_gate_passes_strong_market_to_batch():
 
 # ─── _score_via_cli: response validation ─────────────────────────────────────
 
-def _mock_cli_result(model_text, returncode=0, usage=None, total_cost_usd=0.0):
+def _mock_cli_result(model_text, returncode=0, usage=None, total_cost_usd=0.0,
+                      structured_output=None):
     """
     2026-09-02: _score_via_cli switched --output-format from "text" to
     "json" to capture real usage/cache telemetry (see core/scorer.py's
     docstring). model_text is what used to be the bare stdout -- now
     wrapped in the envelope the real CLI emits, so every existing test
     call site (`_mock_cli_result(good_response)`) keeps working unchanged.
+
+    2026-09-15: structured_output (default None) lets a test also set the
+    envelope's "structured_output" field, the shape --json-schema actually
+    returns live -- omitted by default so every pre-existing call site
+    still exercises the free-text fallback path exactly as before, unchanged.
     """
     from unittest.mock import MagicMock
     import json as _json
     result = MagicMock()
     result.returncode = returncode
-    result.stdout = _json.dumps({
+    envelope = {
         "result": model_text,
         "usage": usage or {},
         "total_cost_usd": total_cost_usd,
-    })
+    }
+    if structured_output is not None:
+        envelope["structured_output"] = structured_output
+    result.stdout = _json.dumps(envelope)
     result.stderr = ""
     return result
 
@@ -1480,6 +1489,125 @@ def test_score_via_cli_accepts_valid_response(monkeypatch):
          patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
         scores, _token_info = scorer._score_via_cli("sys", "user")
     assert scores[0]["ticker"] == "KXTEST-01"
+
+
+# ─── _score_via_cli: --json-schema / structured_output (2026-09-15) ────────
+
+def test_score_via_cli_passes_json_schema_flag(monkeypatch):
+    """--json-schema must be RECORD_SCORES_TOOL["input_schema"] verbatim --
+    one canonical schema shared with the API backend's forced tool_choice,
+    not a second hand-copied one that could drift out of sync."""
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)) as mock_run:
+        scorer._score_via_cli("sys", "user")
+    args = mock_run.call_args[0][0]
+    assert "--json-schema" in args
+    schema_arg = args[args.index("--json-schema") + 1]
+    assert _json.loads(schema_arg) == scorer.RECORD_SCORES_TOOL["input_schema"]
+
+
+def test_score_via_cli_uses_structured_output_when_present(monkeypatch):
+    """The primary path (2026-09-15): structured_output, not a regex
+    extraction from free-text "result", is used when the CLI returns it."""
+    from unittest.mock import patch
+    structured = {"scores": [{
+        "ticker": "KXTEST-STRUCT", "market_price": 0.4, "our_estimate": 0.6, "edge": 0.2,
+        "direction": "YES", "confidence": "HIGH", "reasoning": "structured path",
+        "sources_checked": [],
+    }]}
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run",
+               return_value=_mock_cli_result("irrelevant free text, no JSON here at all",
+                                              structured_output=structured)):
+        scores, _token_info = scorer._score_via_cli("sys", "user")
+    assert scores[0]["ticker"] == "KXTEST-STRUCT"
+
+
+def test_score_via_cli_falls_back_to_free_text_when_structured_output_absent(monkeypatch):
+    """A CLI response with no structured_output field (older CLI, or a
+    response that skipped it) must still work via the original free-text
+    extraction -- the fallback path is kept, not deleted."""
+    import json as _json
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-FALLBACK", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)):
+        scores, _token_info = scorer._score_via_cli("sys", "user")
+    assert scores[0]["ticker"] == "KXTEST-FALLBACK"
+
+
+def test_score_via_cli_prefers_structured_output_over_free_text(monkeypatch):
+    """When both are present (the real, expected shape of a live response),
+    structured_output wins -- free-text "result" is never re-parsed on top
+    of it."""
+    import json as _json
+    from unittest.mock import patch
+    free_text_scores = _json.dumps([{
+        "ticker": "KXTEST-FREETEXT", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    structured = {"scores": [{
+        "ticker": "KXTEST-STRUCT", "market_price": 0.4, "our_estimate": 0.6, "edge": 0.2,
+        "direction": "YES", "confidence": "HIGH", "reasoning": "structured path",
+        "sources_checked": [],
+    }]}
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run",
+               return_value=_mock_cli_result(free_text_scores, structured_output=structured)):
+        scores, _token_info = scorer._score_via_cli("sys", "user")
+    assert scores[0]["ticker"] == "KXTEST-STRUCT"
+
+
+def test_score_via_cli_validates_structured_output_scores_too(monkeypatch):
+    """structured_output isn't exempt from _validate_scores -- a missing
+    required field must still raise, not sail through just because it came
+    from the schema-enforced field instead of free text."""
+    from unittest.mock import patch
+    bad_structured = {"scores": [{"ticker": "KXTEST-BAD", "direction": "YES"}]}
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run",
+               return_value=_mock_cli_result("", structured_output=bad_structured)):
+        with pytest.raises(ValueError):
+            scorer._score_via_cli("sys", "user")
+
+
+# ─── _score_via_cli: cwd isolation (2026-09-15) ─────────────────────────────
+
+def test_score_via_cli_runs_from_neutral_cwd_not_caller_cwd(monkeypatch):
+    """Must not inherit the caller's cwd (main.py's scheduled runs execute
+    from the repo root, which has CLAUDE.md + a SessionStart hook that a
+    scoring call has no use for and would pay for on every call). Asserts
+    against the actual repo root to catch a regression back to inheriting
+    cwd, not just "some non-None cwd was passed"."""
+    import json as _json
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+    good_response = _json.dumps([{
+        "ticker": "KXTEST-01", "market_price": 0.3, "our_estimate": 0.5, "edge": 0.2,
+        "direction": "YES", "confidence": "MED", "reasoning": "x",
+        "sources_checked": [],
+    }])
+    repo_root = Path(scorer.__file__).resolve().parent.parent
+    with patch("core.scorer._find_claude", return_value="claude"), \
+         patch("core.scorer.subprocess.run", return_value=_mock_cli_result(good_response)) as mock_run:
+        scorer._score_via_cli("sys", "user")
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs.get("cwd") is not None
+    assert Path(kwargs["cwd"]).resolve() != repo_root
+    assert Path(kwargs["cwd"]).resolve() == Path(tempfile.gettempdir()).resolve()
 
 
 def test_score_via_cli_omits_model_flag_when_no_override(monkeypatch):

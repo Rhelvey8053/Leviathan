@@ -26,6 +26,7 @@ import tempfile as _tempfile
 from .llm import (
     _find_claude, _validate_scores, score_via_api as _score_via_api,
     ground_citations_via_api as _ground_citations_via_api,
+    RECORD_SCORES_TOOL,
 )
 from .report import compute_leviathan_score
 
@@ -1107,14 +1108,49 @@ def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None
     meant to enable. Passing config=None (or a config with no override
     set) omits --model entirely, so today's behavior -- whatever the bare
     CLI's own default currently is -- is completely unchanged.
+
+    2026-09-15: added --json-schema (RECORD_SCORES_TOOL["input_schema"], the
+    exact schema the API backend already forces via tool_choice -- one
+    canonical schema, not a second hand-copied one) so Claude Code validates
+    the score-list shape itself and returns it pre-parsed in the envelope's
+    "structured_output" field, instead of this function regex-extracting a
+    JSON array out of free-text "result" (a fence match, then a find("[")/
+    rfind("]") fallback -- the fallback's own failure mode already caused a
+    real production crash, see the isinstance check below). Live-verified
+    2026-09-15: --json-schema is supported (installed CLI 2.1.271, flag
+    documented since well before that) and structured_output round-trips
+    exactly the requested shape. structured_output is used when present;
+    the original free-text extraction stays as a fallback for the
+    (currently unobserved) case of an older CLI or a response that skips
+    it -- never deleted, just no longer the primary path. Same model, same
+    system/user prompt content, same validated output shape either way --
+    this changes how the answer is elicited/parsed, not what's asked or
+    decided.
+
+    Also 2026-09-15: explicit cwd=<system temp dir> rather than inheriting
+    whatever directory the caller happens to run from (main.py's scheduled
+    runs execute from the repo root). Un-scoped, every one of these calls
+    auto-discovered and loaded this repo's own CLAUDE.md (~2.2k tokens of
+    project-development guidance, irrelevant to scoring a market) and fired
+    its SessionStart hook (.claude/hooks/scheduled-tasks-status.ps1, up to a
+    30s budget) -- pure overhead with no effect on the scoring task, paid on
+    every one of the ~4 CLI calls a live run makes. A neutral cwd has no
+    CLAUDE.md/.claude/ to discover, so neither fires; --system-prompt-file's
+    explicit content is completely unaffected either way. --bare would do
+    this too but was ruled out: bare mode never reads OAuth credentials, so
+    it would either fail outright (ANTHROPIC_API_KEY is deliberately absent
+    from clean_env below) or silently fall back to metered billing --
+    against this project's no-API-billing policy.
     """
     import os as _os, time as _time
     claude_cmd = _find_claude()
     clean_env = {k: v for k, v in _os.environ.items() if k != "ANTHROPIC_API_KEY"}
     _sp_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
     _sp_file.write(sys_prompt); _sp_file.close(); _sp_path = _sp_file.name
+    _run_cwd = _tempfile.gettempdir()
     cli_args = [claude_cmd, "--print", "--system-prompt-file", _sp_path,
-                "--allowedTools", "WebSearch", "--output-format", "json"]
+                "--allowedTools", "WebSearch", "--output-format", "json",
+                "--json-schema", json.dumps(RECORD_SCORES_TOOL["input_schema"])]
     model_override = (config or {}).get("llm", {}).get("cli_model_override")
     if model_override:
         cli_args += ["--model", model_override]
@@ -1126,7 +1162,7 @@ def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None
                 result = subprocess.run(
                     cli_args,
                     input=user_prompt, capture_output=True, text=True, timeout=600,
-                    encoding="utf-8", errors="replace", env=clean_env,
+                    encoding="utf-8", errors="replace", env=clean_env, cwd=_run_cwd,
                 )
             except subprocess.TimeoutExpired:
                 timed_out = True
@@ -1172,18 +1208,28 @@ def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None
         "cache_read_input_tokens":     usage.get("cache_read_input_tokens", 0),
         "cost_usd":                    round(envelope.get("total_cost_usd", 0.0) or 0.0, 6),
     }
-    if not all_text:
-        raise RuntimeError("scorer.py: claude CLI returned empty 'result' text")
-    fence_match = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", all_text, re.DOTALL)
-    if fence_match:
-        raw_json = fence_match.group(1).strip()
-    else:
-        start, end = all_text.find("["), all_text.rfind("]"  )
-        raw_json = all_text[start:end + 1] if start != -1 and end > start else all_text
-    try:
-        scores = json.loads(raw_json)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
+
+    structured = envelope.get("structured_output")
+    scores = structured.get("scores") if isinstance(structured, dict) else None
+
+    if scores is None:
+        # Fallback path -- kept for an older CLI or a response that skips
+        # structured_output despite --json-schema (unobserved as of
+        # 2026-09-15, but the schema-enforced path above is new; this is
+        # the exact extraction logic that ran unconditionally before it).
+        if not all_text:
+            raise RuntimeError("scorer.py: claude CLI returned empty 'result' text")
+        fence_match = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", all_text, re.DOTALL)
+        if fence_match:
+            raw_json = fence_match.group(1).strip()
+        else:
+            start, end = all_text.find("["), all_text.rfind("]"  )
+            raw_json = all_text[start:end + 1] if start != -1 and end > start else all_text
+        try:
+            scores = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"scorer.py: Failed to parse JSON: {exc}\nRaw output: {raw_json[:500]}") from exc
+
     if not isinstance(scores, list):
         # 2026-08-28: when the CLI's response has no top-level [...] array at
         # all (e.g. a plain-text non-JSON reply for one market), the find("[")/
@@ -1195,10 +1241,12 @@ def _score_via_cli(sys_prompt: str, user_prompt: str, config: dict | None = None
         # character, crashing with a confusing "'str' object has no attribute
         # 'keys'" instead of a clear, catchable parsing error. Caught live via
         # backtesting/replay_runner.py's corpus-build batch crashing entirely
-        # on one malformed market response.
+        # on one malformed market response. structured_output's own schema
+        # enforcement should make this unreachable on that path -- kept as
+        # the same hard guard for the fallback path above.
         raise RuntimeError(
             f"scorer.py: expected a JSON list of score objects, got {type(scores).__name__}. "
-            f"Raw output: {raw_json[:500]}"
+            f"Raw output: {(all_text or json.dumps(structured))[:500]}"
         )
     _validate_scores(scores)
     # db-audit-2026-08: the CLI's own JSON schema asks for "sources_checked"
