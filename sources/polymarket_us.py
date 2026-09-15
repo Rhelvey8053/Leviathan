@@ -31,6 +31,24 @@ from core import fees
 
 GATEWAY_BASE = "https://gateway.polymarket.us"
 
+#: backlog: polymarket-us-tuning-for-real-value, direction (2)'s other half
+#: (the min_match_score half already shipped 2026-09-14). A short,
+#: generic normalized title (e.g. "Both Teams To Score" -> {both, teams,
+#: score}, 3 words after stopword removal) has a small enough word set
+#: that a coincidental overlap -- or SequenceMatcher's character-level
+#: ratio, which is noisier on short strings -- can clear min_match_score
+#: purely by chance, not because the two markets are actually the same
+#: question. This was the exact real failure mode that made max_fetch
+#: 300->1500 surface 3 spurious matches (2026-09-14 review) before
+#: category restriction removed that specific sports-feed source of
+#: short titles. Set to 4, not 3: "Both Teams To Score" itself normalizes
+#: to exactly 3 words, so the floor must exceed that specific documented
+#: example, not just be a round number. Gating on word count (not
+#: character length) below _match_score's Jaccard/SequenceMatcher split,
+#: so it protects both components at once, and applies regardless of
+#: which side (Kalshi or Polymarket US) has the short title.
+MIN_TITLE_WORDS = 4
+
 
 def _fetch_markets_page(limit: int, category: str | None) -> list[dict]:
     """One category's worth of active, open markets, paginated internally."""
@@ -154,9 +172,14 @@ def _match_score(kalshi_title: str, poly_title: str) -> float:
     """
     Combined similarity score using Jaccard word overlap and sequence ratio.
     Jaccard handles word-order differences; sequence ratio catches paraphrases.
+
+    Returns 0.0 (never matches) when either title's normalized word count
+    is below MIN_TITLE_WORDS -- see that constant's own comment for why.
     """
     ka = _normalize(kalshi_title)
     pa = _normalize(poly_title)
+    if len(ka) < MIN_TITLE_WORDS or len(pa) < MIN_TITLE_WORDS:
+        return 0.0
     jaccard = len(ka & pa) / len(ka | pa) if (ka | pa) else 0.0
     seq     = SequenceMatcher(None, kalshi_title.lower(), poly_title.lower()).ratio()
     return max(jaccard, seq * 0.9)  # slight discount on sequence to prefer word overlap

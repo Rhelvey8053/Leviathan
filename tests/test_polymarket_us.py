@@ -13,7 +13,7 @@ from sources import polymarket_us
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _raw(question="Will X happen?", sides=None, market_id="1", volume=1000, title=""):
+def _raw(question="Will X definitely happen sometime soon?", sides=None, market_id="1", volume=1000, title=""):
     if sides is None:
         sides = [
             {"description": "Yes", "price": "0.70"},
@@ -29,7 +29,7 @@ def _raw(question="Will X happen?", sides=None, market_id="1", volume=1000, titl
     }
 
 
-def _kalshi(ticker="KXTEST-1", title="Will X happen?", mid_price=0.55):
+def _kalshi(ticker="KXTEST-1", title="Will X definitely happen sometime soon?", mid_price=0.55):
     return {"ticker": ticker, "title": title, "mid_price": mid_price}
 
 
@@ -163,8 +163,8 @@ def test_build_index_no_title_uses_question_alone():
 def test_build_index_title_matching_question_not_duplicated():
     """When title already restates the question (simple binary markets),
     don't glue it on again."""
-    idx = polymarket_us.build_index([_raw("Will X happen?", title="Will X happen?")])
-    assert idx[0]["question"].count("Will X happen?") == 1
+    idx = polymarket_us.build_index([_raw("Will X definitely happen sometime soon?", title="Will X definitely happen sometime soon?")])
+    assert idx[0]["question"].count("Will X definitely happen sometime soon?") == 1
 
 
 def test_find_match_distinguishes_correct_band_after_fix():
@@ -190,10 +190,10 @@ def _idx(*questions):
 
 
 def test_find_match_exact_returns_match():
-    idx = _idx("Will X happen?")
-    m = polymarket_us.find_match("Will X happen?", idx)
+    idx = _idx("Will X definitely happen sometime soon?")
+    m = polymarket_us.find_match("Will X definitely happen sometime soon?", idx)
     assert m is not None
-    assert m["question"] == "Will X happen?"
+    assert m["question"] == "Will X definitely happen sometime soon?"
     assert m["match_score"] >= 0.50
 
 
@@ -208,17 +208,66 @@ def test_find_match_empty_index():
 
 
 def test_find_match_picks_best():
-    idx = _idx("Will it rain tomorrow?", "Will X happen?")
-    m = polymarket_us.find_match("Will X happen?", idx)
+    idx = _idx("Will it rain tomorrow?", "Will X definitely happen sometime soon?")
+    m = polymarket_us.find_match("Will X definitely happen sometime soon?", idx)
     assert m is not None
-    assert "X happen" in m["question"]
+    assert "X definitely happen" in m["question"]
+
+
+# ── _match_score: MIN_TITLE_WORDS gate ──────────────────────────────────────
+# backlog: polymarket-us-tuning-for-real-value, direction (2)'s other half.
+# Regression guard against the exact documented failure class: a short,
+# generic title (e.g. "Both Teams To Score") can clear min_match_score by
+# coincidental word/character overlap alone, not because it's the same
+# question -- the 2026-09-14 review's max_fetch 300->1500 experiment
+# surfaced 3 such spurious matches before category restriction removed
+# that specific source. Gated on word count so this applies regardless of
+# which side (Kalshi or Polymarket US) has the short title.
+
+def test_match_score_zero_when_kalshi_title_too_short():
+    """An identical short title on both sides would otherwise score 1.0 --
+    the gate must still zero it out below MIN_TITLE_WORDS."""
+    assert polymarket_us._normalize("Score Win") .__len__() < polymarket_us.MIN_TITLE_WORDS
+    assert polymarket_us._match_score("Score Win", "Score Win") == 0.0
+
+
+def test_match_score_zero_when_poly_title_too_short():
+    assert polymarket_us._match_score("Will X definitely happen tomorrow?", "Score Win") == 0.0
+
+
+def test_match_score_nonzero_at_min_title_words_boundary():
+    """Exactly MIN_TITLE_WORDS normalized words on both sides must NOT be
+    gated -- the floor is a strict less-than, not less-than-or-equal."""
+    title = "Rain snow hail tomorrow"  # normalizes to 4 content words -- above floor
+    assert len(polymarket_us._normalize(title)) >= polymarket_us.MIN_TITLE_WORDS
+    assert polymarket_us._match_score(title, title) > 0.0
+
+
+def test_find_match_never_matches_short_generic_titles():
+    """End-to-end regression for the documented real failure: a short,
+    generic Kalshi title against an unrelated-but-lexically-similar short
+    Polymarket US title must not match, even though it would clear a
+    lenient threshold on raw score alone."""
+    idx = _idx("Both Teams To Score")
+    m = polymarket_us.find_match("Both Teams To Score", idx, threshold=0.10)
+    assert m is None
+
+
+def test_find_match_longer_titles_still_match_unaffected():
+    """Non-regression: the gate must not break ordinary longer-title
+    matching, which is most of what this module actually does."""
+    idx = _idx("Will the Federal Reserve cut interest rates in September?")
+    m = polymarket_us.find_match(
+        "Will the Federal Reserve cut interest rates in September?", idx,
+    )
+    assert m is not None
 
 
 # ── match_markets ─────────────────────────────────────────────────────────────
 
 def test_match_markets_returns_match():
-    idx = _idx("Will X happen?")
-    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.55)]
+    idx = _idx("Will X definitely happen sometime soon?")
+    markets = [_kalshi("KXTEST", "Will X definitely happen sometime soon?", mid_price=0.55)]
     result = polymarket_us.match_markets(markets, idx, _CFG)
     assert "KXTEST" in result
     assert result["KXTEST"]["poly_us_price"] == pytest.approx(0.70)
@@ -233,44 +282,44 @@ def test_match_markets_no_match():
 
 
 def test_match_markets_min_gap_filter():
-    idx = _idx("Will X happen?")
-    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.68)]
+    idx = _idx("Will X definitely happen sometime soon?")
+    markets = [_kalshi("KXTEST", "Will X definitely happen sometime soon?", mid_price=0.68)]
     result = polymarket_us.match_markets(markets, idx, _CFG, min_gap=0.15)
     assert "KXTEST" not in result
 
 
 def test_match_markets_min_gap_passes():
-    idx = _idx("Will X happen?")
-    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.50)]
+    idx = _idx("Will X definitely happen sometime soon?")
+    markets = [_kalshi("KXTEST", "Will X definitely happen sometime soon?", mid_price=0.50)]
     result = polymarket_us.match_markets(markets, idx, _CFG, min_gap=0.15)
     assert "KXTEST" in result
 
 
 def test_match_markets_no_mid_price_includes_match():
-    idx = _idx("Will X happen?")
-    markets = [{"ticker": "KXTEST", "title": "Will X happen?", "mid_price": None}]
+    idx = _idx("Will X definitely happen sometime soon?")
+    markets = [{"ticker": "KXTEST", "title": "Will X definitely happen sometime soon?", "mid_price": None}]
     result = polymarket_us.match_markets(markets, idx, _CFG)
     assert "KXTEST" in result
     assert result["KXTEST"]["price_gap"] is None
 
 
 def test_match_markets_skips_empty_title():
-    idx = _idx("Will X happen?")
+    idx = _idx("Will X definitely happen sometime soon?")
     markets = [{"ticker": "KXTEST", "title": "", "mid_price": 0.5}]
     result = polymarket_us.match_markets(markets, idx, _CFG)
     assert "KXTEST" not in result
 
 
 def test_match_markets_no_mid_price_excluded_when_gap_floor_set():
-    idx = _idx("Will X happen?")
-    markets = [{"ticker": "KXTEST", "title": "Will X happen?", "mid_price": None}]
+    idx = _idx("Will X definitely happen sometime soon?")
+    markets = [{"ticker": "KXTEST", "title": "Will X definitely happen sometime soon?", "mid_price": None}]
     result = polymarket_us.match_markets(markets, idx, _CFG, min_gap=0.15)
     assert "KXTEST" not in result
 
 
 def test_match_markets_net_price_gap_matches_manual_fee_calc():
-    idx = _idx("Will X happen?")
-    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.55)]
+    idx = _idx("Will X definitely happen sometime soon?")
+    markets = [_kalshi("KXTEST", "Will X definitely happen sometime soon?", mid_price=0.55)]
     result = polymarket_us.match_markets(markets, idx, _CFG)
     k_fee = fees.kalshi_fee(0.55, 10)
     p_fee = fees.polymarket_fee(0.70, 10, None)
@@ -280,16 +329,20 @@ def test_match_markets_net_price_gap_matches_manual_fee_calc():
 
 
 def test_match_markets_net_price_gap_never_flips_sign():
-    idx = _idx("Will X happen?")
-    markets = [_kalshi("KXTEST", "Will X happen?", mid_price=0.90)]
+    idx = _idx("Will X definitely happen sometime soon?")
+    markets = [_kalshi("KXTEST", "Will X definitely happen sometime soon?", mid_price=0.90)]
     result = polymarket_us.match_markets(markets, idx, _CFG)
     assert result["KXTEST"]["price_gap"] < 0
     assert result["KXTEST"]["net_price_gap"] <= 0
 
 
 def test_match_markets_min_match_score_override():
-    idx = _idx("Will the economy grow this year?")
-    markets = [_kalshi("KXTEST", "Will GDP rise in 2026?", mid_price=0.50)]
+    """Title pair deliberately >= MIN_TITLE_WORDS on both sides -- this
+    test is about the min_match_score override plumbing, not the
+    word-count gate, so it must not be silently zeroed out by that gate
+    the way a real short-title pair should be."""
+    idx = _idx("Will the United States economy grow significantly this year?")
+    markets = [_kalshi("KXTEST", "Will United States GDP rise sometime during 2026?", mid_price=0.50)]
     result_strict = polymarket_us.match_markets(markets, idx, _CFG, min_match_score=0.80)
     result_loose  = polymarket_us.match_markets(markets, idx, _CFG, min_match_score=0.10)
     assert "KXTEST" not in result_strict
@@ -317,10 +370,10 @@ def test_fetch_and_build_index_passes_configured_categories():
 # ── enrich_flagged ────────────────────────────────────────────────────────────
 
 def test_enrich_flagged():
-    fake_raw = [_raw("Will X happen?")]
+    fake_raw = [_raw("Will X definitely happen sometime soon?")]
     with patch.object(polymarket_us, "fetch_markets", return_value=fake_raw):
         result = polymarket_us.enrich_flagged(
-            [_kalshi("KXTEST", "Will X happen?", mid_price=0.50)],
+            [_kalshi("KXTEST", "Will X definitely happen sometime soon?", mid_price=0.50)],
             _CFG,
         )
     assert "KXTEST" in result
