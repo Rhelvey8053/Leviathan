@@ -9,10 +9,19 @@ confidence-tier sizing only looked better because n=2 HIGH-confidence
 signals both happened to win -- not a real sample. There's already a
 backlog item for this class of change, auto-calibration-loop ("adjust
 heuristic confidence weights based on tracked Brier scores and category
-win rates"), deliberately `blocked` until resolved_count>=30 AND
+win rates"), gated on the same resolved_count>=30 AND
 resolved_count_per_category_max>=15 -- the same numbers are mirrored here
 in MIN_RESOLVED_COUNT/MIN_RESOLVED_PER_CATEGORY (update both places
-together if that item's trigger ever changes).
+together if that item's trigger ever changes). NOTE 2026-09-15: that
+item's own gate has since cleared (its backlog status reads "ready"),
+but it must still not go live -- see this module's own distinction below
+between stake SIZING (this module: how much to bet on an already-decided
+call, unaffected by the checkpoint halt) and confidence-score CALIBRATION
+(auto-calibration-loop: changing the weights that produce the call itself,
+squarely inside the halt's scope per docs/PREREGISTRATION.md, since the
+pre-registered checkpoint FAILED on 2026-09-14). Do not let this module's
+own live/deployed status be read as precedent for auto-calibration-loop's
+readiness -- they are different classes of change with different rules.
 
 This module is infrastructure only: wired up and correct, but structurally
 unable to change any real number until the live DB metrics clear the same
