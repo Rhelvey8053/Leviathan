@@ -5,13 +5,25 @@ $TaskName   = "Leviathan-PositionReconciliation"
 $PythonExe  = (Get-Command python).Source
 $ScriptPath = "$PSScriptRoot\position_reconciliation.py"
 $WorkDir    = Split-Path $PSScriptRoot -Parent
+$LogPath    = "$WorkDir\logs\position_reconciliation.log"
 
 # Remove existing task if present
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 
+# cmd.exe wrapper + output redirection (2026-09-16, backlog:
+# smtp-send-no-timeout-hang-2026-09's own follow-up) -- this task was one
+# of two (with SmartMoneyScan) that hung its full ExecutionTimeLimit
+# during the 2026-09-13 systemic SSL/TLS incident with no stdout/stderr
+# captured at all -- its hang genuinely lost that day's reconciliation
+# output (data/reconciliation/2026-09-13.json was never written), and the
+# real hang point was never directly observed, only inferred (see
+# reports/code_audits/2026-09-13.md). Same pattern every other Leviathan-*
+# task with output capture already uses (GateNotifier, WeeklyAudit,
+# CodeAudit, AIResearchScan) -- python's own -u flag disables output
+# buffering so a hang still flushes whatever ran before it.
 $Action  = New-ScheduledTaskAction `
-    -Execute $PythonExe `
-    -Argument "`"$ScriptPath`"" `
+    -Execute "cmd.exe" `
+    -Argument "/c `"`"$PythonExe`" -u `"$ScriptPath`" >> `"$LogPath`" 2>&1`"" `
     -WorkingDirectory $WorkDir
 
 # Run daily at 9:15am local time -- after DailyRun (6:00am), SmartMoneyScan
@@ -48,5 +60,6 @@ Register-ScheduledTask `
 
 Write-Host ""
 Write-Host "Task '$TaskName' registered. Runs daily at 9:15am."
+Write-Host "Output logs to $LogPath"
 Write-Host "To run immediately: Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host "To remove:          Unregister-ScheduledTask -TaskName '$TaskName' -Confirm:`$false"
