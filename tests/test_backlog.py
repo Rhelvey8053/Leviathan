@@ -656,8 +656,15 @@ def test_parses_and_96_items(backlog_data):
     for a scoring call. Infra/parsing-reliability only, not a
     scoring-logic change -- see core/scorer.py's own docstring on
     _score_via_cli for why this isn't covered by the checkpoint halt.
+
+    143, not 142: added rain-heuristic-flat-estimate-degenerate
+    (2026-09-16, finding only, status=ready) -- every resolved 'weather'
+    heuristic_label bet is a rain market, 8/27 win rate (29.6%), and 25 of
+    26 KXRAIN YES calls use the identical our_estimate=0.4 regardless of
+    city -- a real, isolated heuristic defect, not a fix (blocked by the
+    checkpoint halt same as every other scoring-logic change right now).
     """
-    assert len(backlog_data["items"]) == 142
+    assert len(backlog_data["items"]) == 143
 
 
 def test_all_ids_unique(backlog_data):

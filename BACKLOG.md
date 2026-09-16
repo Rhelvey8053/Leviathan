@@ -1,15 +1,16 @@
 # Leviathan Backlog
-Last updated: 2026-09-15 | Metrics: resolved=54, fills=7
+Last updated: 2026-09-16 | Metrics: resolved=58, fills=7
 
 Action text below is summarized. Full narrative per item is `backlog/backlog.json`'s `action` field -- this file is auto-generated, never hand-edit it.
 
-## Ready (9)
+## Ready (10)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | preregistered-checkpoint-failed-2026-09-14 | The pre-registered kill criterion (docs/PREREGISTRATION.md, registered 2026-07-25) reached its n>=50 checkpoint on 2026-09-14 (paired n=54) and was evaluated per its own exact formula:… | calibration |
 | 2 | task-scheduler-manual-trigger-stuck-queued | Found 2026-08-24 while verifying automation_health_check.py and daily_digest.py's live scheduled-task runs: manually triggering an S4U-logon scheduled task (Start-ScheduledTask or schtasks /run) gets… | infra |
 | 3 | calibration-systematic-overconfidence-2026-09 | Finding from calibration-curve's first real run (2026-09-14, n=54 resolved): Expected Calibration Error 22.4pp, verdict POOR. | calibration |
 | 3 | cftc-rule-40-11-event-contract-rulemaking | Found 2026-08-25 via direct research (CFTC.gov press release, Federal Register, Greenberg Traurig's legal summary of the NPRM -- not just secondary news), prompted by expanding Liam's… | data-quality |
+| 3 | rain-heuristic-flat-estimate-degenerate | User asked (2026-09-16) how weather bets have been performing. | calibration |
 | 4 | ai-workflow-research-findings-2026-09 | PM-directed research pass 2026-09-05 (user asked to research repos/AI developments that could help this project's workflows). | infra |
 | 4 | cross-venue-expansion | Ingest more than two venues via a normalized aggregator layer, match identical markets across them, and surface fee-adjusted cross-venue gaps. | data-quality |
 | 4 | entertainment-award-emmy-coverage-gap | The same systematic sweep that produced political-coup-couples-misfire / fda-adcom-broadcom-misfire / nasa-mission-hataoka-partial-fix also flagged "entertainment award" (grammy/oscar/academy… | calibration |
