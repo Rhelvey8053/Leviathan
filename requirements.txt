@@ -3,5 +3,5 @@ python-dotenv
 cryptography
 anthropic
 mcp[cli]==1.28.1
-kalshi-sdk==9.0.0
+kalshi-sdk==13.0.0
 tzdata; sys_platform == "win32"
