@@ -4,6 +4,7 @@ import os
 import re
 import smtplib
 import textwrap
+import time as _time
 from datetime import datetime, date, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -2672,28 +2673,59 @@ def send_report(body: str, signals: list[dict], whale_flags: int, config: dict,
     )
     full_body = body + footer
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(email_from, app_password)
+    if html_body is not None:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(full_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+    else:
+        msg = MIMEText(full_body, "plain", "utf-8")
+    msg["Subject"]    = subject
+    msg["From"]       = email_from
+    msg["To"]         = email_to
+    # 2026-08-25: neither header was ever set -- automated mail with no
+    # Date/Message-ID is a real spam-filter risk, especially self-
+    # addressed mail sent via SMTP+app-password with no prior thread.
+    msg["Date"]       = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=email_from.rsplit("@", 1)[-1] or "localhost")
+    msg_string = msg.as_string()
 
-        if html_body is not None:
-            msg = MIMEMultipart("alternative")
-            msg.attach(MIMEText(full_body, "plain", "utf-8"))
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
-        else:
-            msg = MIMEText(full_body, "plain", "utf-8")
-        msg["Subject"]    = subject
-        msg["From"]       = email_from
-        msg["To"]         = email_to
-        # 2026-08-25: neither header was ever set -- automated mail with no
-        # Date/Message-ID is a real spam-filter risk, especially self-
-        # addressed mail sent via SMTP+app-password with no prior thread.
-        msg["Date"]       = formatdate(localtime=True)
-        msg["Message-ID"] = make_msgid(domain=email_from.rsplit("@", 1)[-1] or "localhost")
-        server.sendmail(email_from, email_to, msg.as_string())
+    # 2026-09-16 (ai_research_scan finding, 09-16 report): smtplib.SMTP()
+    # here previously had NO timeout at all -- Python's default resolves to
+    # socket._GLOBAL_DEFAULT_TIMEOUT, which is unset in this process, so a
+    # stalled connection (e.g. the 2026-09-13 systemic SSLEOFError incident)
+    # blocked forever instead of failing. This is the one and only smtplib
+    # call site in the whole project (grep-confirmed), so every email-
+    # sending script -- gate_notifier, daily_digest, heartbeat_check,
+    # automation_health_check, ai_research_scan, weekly digest -- shared
+    # this exposure. timeout=30 plus a short retry (matching the
+    # max_retries=2/sleep(5) pattern core/scorer.py's CLI call and
+    # core/llm.py's API retries already use elsewhere in this codebase)
+    # turns a stalled connection into a quick, logged failure within
+    # ~70s instead of hanging to the OS-level Task Scheduler
+    # ExecutionTimeLimit -- existing callers already wrap send_report() in
+    # their own try/except and log "will retry next run" on failure, so
+    # this doesn't change what a caller does on failure, only how fast a
+    # transient blip fails instead of hanging.
+    max_retries = 2
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(email_from, app_password)
+                server.sendmail(email_from, email_to, msg_string)
+            print(f"  [report] Sent to {email_to}")
+            return
+        except (smtplib.SMTPException, OSError, TimeoutError) as e:
+            last_exc = e
+            if attempt < max_retries:
+                print(f"  [report] send attempt {attempt + 1} failed ({e}), retrying...")
+                _time.sleep(5)
 
-    print(f"  [report] Sent to {email_to}")
+    raise RuntimeError(
+        f"send_report: SMTP send failed after {max_retries + 1} attempt(s): {last_exc}"
+    ) from last_exc
 
 
 # ── --dry-run CLI (PART D) ────────────────────────────────────────────────────

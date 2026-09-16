@@ -324,6 +324,101 @@ def test_send_report_sets_date_and_message_id_headers():
     assert "@example.com>" in raw  # domain derived from email_from
 
 
+# ─── send_report: SMTP timeout + retry (2026-09-16) ──────────────────────────
+# backlog finding (2026-09-16 ai_research_scan report): smtplib.SMTP() here
+# previously had no timeout at all, the one and only smtplib call site in the
+# project -- a stalled connection (the 2026-09-13 systemic SSLEOFError
+# incident) blocked forever instead of failing. These tests cover the fix
+# directly rather than just confirming the existing happy-path tests above
+# still pass.
+#
+# patch.object(report, "smtplib") replaces the WHOLE module with a MagicMock,
+# including smtplib.SMTPException -- the source's own
+# `except (smtplib.SMTPException, OSError, TimeoutError)` tuple is only
+# evaluated for validity when an exception actually needs to flow through
+# it (Python doesn't check an except clause's types until a raise reaches
+# it), so the happy-path tests above never noticed, but any test here that
+# deliberately raises inside the mocked block must restore a REAL exception
+# class onto the mock first, or `except (<MagicMock>, ...)` itself raises
+# TypeError: catching classes that do not inherit from BaseException.
+
+import smtplib as _real_smtplib  # noqa: E402 -- needed only by this section
+
+
+def _mock_smtplib(mock_smtplib):
+    """Every test below that can raise through send_report()'s except
+    clause must call this on its patched smtplib module first."""
+    mock_smtplib.SMTPException = _real_smtplib.SMTPException
+
+
+def test_send_report_passes_explicit_timeout_to_smtp():
+    mock_smtp = MagicMock()
+    mock_smtp.__enter__ = MagicMock(return_value=mock_smtp)
+    mock_smtp.__exit__ = MagicMock(return_value=False)
+
+    with patch.object(report, "smtplib") as mock_smtplib:
+        mock_smtplib.SMTP.return_value = mock_smtp
+        report.send_report("body", [], 0, _cfg_with_report())
+
+    args, kwargs = mock_smtplib.SMTP.call_args
+    assert kwargs.get("timeout") == 30
+
+
+def test_send_report_retries_after_transient_failure_then_succeeds():
+    """A stalled/failed first connection attempt (the exact SSLEOFError-class
+    failure mode from the 2026-09-13 incident) must not be fatal -- a
+    second attempt that succeeds should send normally."""
+    mock_smtp_ok = MagicMock()
+    mock_smtp_ok.__enter__ = MagicMock(return_value=mock_smtp_ok)
+    mock_smtp_ok.__exit__ = MagicMock(return_value=False)
+
+    with patch.object(report, "smtplib") as mock_smtplib, \
+         patch.object(report._time, "sleep") as mock_sleep:
+        _mock_smtplib(mock_smtplib)
+        mock_smtplib.SMTP.side_effect = [OSError("SSLEOFError-like failure"), mock_smtp_ok]
+        report.send_report("body", [], 0, _cfg_with_report())
+
+    assert mock_smtplib.SMTP.call_count == 2
+    mock_smtp_ok.sendmail.assert_called_once()
+    mock_sleep.assert_called_once_with(5)
+
+
+def test_send_report_raises_clear_error_after_exhausting_retries():
+    """After max_retries+1 failed attempts, raises rather than hanging or
+    silently swallowing the failure -- existing callers (gate_notifier,
+    heartbeat_check, etc.) already wrap send_report() in their own
+    try/except and log 'will retry next run', so this integrates with
+    that pattern rather than changing it."""
+    with patch.object(report, "smtplib") as mock_smtplib, \
+         patch.object(report._time, "sleep") as mock_sleep:
+        _mock_smtplib(mock_smtplib)
+        mock_smtplib.SMTP.side_effect = OSError("connection stalled")
+        with pytest.raises(RuntimeError, match="SMTP send failed after 3 attempt"):
+            report.send_report("body", [], 0, _cfg_with_report())
+
+    assert mock_smtplib.SMTP.call_count == 3
+    assert mock_sleep.call_count == 2
+
+
+def test_send_report_retries_on_smtp_exception_too():
+    """Not just OSError -- a real smtplib-specific exception (e.g. a bad
+    STARTTLS response) must also trigger the retry path, not propagate
+    immediately on attempt 1."""
+    mock_smtp_ok = MagicMock()
+    mock_smtp_ok.__enter__ = MagicMock(return_value=mock_smtp_ok)
+    mock_smtp_ok.__exit__ = MagicMock(return_value=False)
+
+    with patch.object(report, "smtplib") as mock_smtplib, \
+         patch.object(report._time, "sleep"):
+        _mock_smtplib(mock_smtplib)
+        mock_smtplib.SMTP.side_effect = [
+            _real_smtplib.SMTPException("bad response"), mock_smtp_ok,
+        ]
+        report.send_report("body", [], 0, _cfg_with_report())
+
+    assert mock_smtplib.SMTP.call_count == 2
+
+
 # ─── Track Record guard ───────────────────────────────────────────────────────
 
 def test_html_never_contains_track_record():

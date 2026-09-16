@@ -663,8 +663,16 @@ def test_parses_and_96_items(backlog_data):
     26 KXRAIN YES calls use the identical our_estimate=0.4 regardless of
     city -- a real, isolated heuristic defect, not a fix (blocked by the
     checkpoint halt same as every other scoring-logic change right now).
+
+    144, not 143: added smtp-send-no-timeout-hang-2026-09 (2026-09-16,
+    done at filing) -- core.report.send_report's smtplib.SMTP() had no
+    timeout at all, the one smtplib call site in the project; fixed with
+    timeout=30 + a short retry. Partial scope: explains GateNotifier/
+    DailyDigest's 2026-09-13 hangs, not SmartMoneyScan/
+    PositionReconciliation's (uninstrumented, no stdout capture on those
+    two tasks -- a separate, still-open gap named in the item's own notes).
     """
-    assert len(backlog_data["items"]) == 143
+    assert len(backlog_data["items"]) == 144
 
 
 def test_all_ids_unique(backlog_data):

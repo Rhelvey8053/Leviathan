@@ -31,7 +31,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 5 | wallet-tracking-dashboard | per-wallet-track-record | reporting |
 | 6 | graphify-skill-evaluation | - | infra |
 
-## Done (127)
+## Done (128)
 | Priority | ID | Action | Area |
 |----------|-----|--------|------|
 | 1 | brier-tracking | get_brier_score()/get_market_baseline_brier_score() already existed but only ever computed a single CURRENT-MOMENT aggregate over all resolved signals at call time -- nothing persisted a… | calibration |
@@ -135,6 +135,7 @@ Action text below is summarized. Full narrative per item is `backlog/backlog.jso
 | 4 | signal-csv-strategy-review-2026-08 | User asked for a strategy-standpoint review of signals.csv -- are we capturing everything useful, is there anything we could collect but aren't. | reporting |
 | 4 | signal-scan-log-split-2026-08 | User opened signals.csv directly in Excel and found it looked mostly empty/broken. | data-quality |
 | 4 | smart-money-fills-persistence-build | Split out 2026-08-26 from smart-money-fills-table-missing (which only fixed the silent-failure visibility problem, not the underlying gap). | infra |
+| 4 | smtp-send-no-timeout-hang-2026-09 | 2026-09-16 AI research scan flagged a retry/timeout gap across 4 scripts that hung during the 2026-09-13 systemic SSL/TLS incident (SmartMoneyScan, GateNotifier, PositionReconciliation, DailyDigest,… | infra |
 | 4 | streamlit-dashboard-2026-08 | Built a free local Streamlit dashboard (dashboard/) as a Power BI alternative -- three pages (Overview, Signal Breakdown, Signal Log) reading the existing data/powerbi_export CSV export, additive… | reporting |
 | 4 | trial-stronger-model-main-scoring | Using the now-live config.llm.cli_model_override (see wire-llm-model-cli-flag, done -- no depends_on here since that item is already done as of this item's own creation, not a real gate), run a… | calibration |
 | 4 | unattended-ops | Alert on absence rather than presence: notify if no successful run has completed within N hours. | infra |
