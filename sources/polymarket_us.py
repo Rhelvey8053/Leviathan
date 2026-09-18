@@ -219,13 +219,269 @@ def build_index(poly_markets: list[dict]) -> list[dict]:
         if price is None:
             continue
         index.append({
-            "question":   question,
-            "slug":       m.get("slug", ""),
-            "market_id":  str(m.get("id", "")),
-            "volume":     float(m.get("volume") or 0),
-            "yes_price":  price,
+            "question":      question,
+            "base_question": base_question,
+            "raw_title":      title,
+            "slug":          m.get("slug", ""),
+            "market_id":     str(m.get("id", "")),
+            "volume":        float(m.get("volume") or 0),
+            "yes_price":     price,
         })
     return index
+
+
+def _kalshi_match_title(m: dict) -> str:
+    """
+    Combines a Kalshi market's event_title with its own title for MATCHING
+    purposes only -- never mutates m["title"] itself, which downstream
+    consumers (signals persistence, dashboard, calibration) need to stay
+    exactly the specific-band title Kalshi gave it, not this enriched
+    version. Mirrors build_index()'s question+title combination on the
+    Polymarket side of the identical problem (see that function's own
+    docstring): a market's own title for a ladder/band family often
+    doesn't carry what actually identifies the real-world question --
+    for Kalshi weather markets specifically, that's the city, which lives
+    only on the event's own title (see
+    core.kalshi.attach_event_category_metadata's docstring, which is what
+    populates event_title -- absent on any market that never went through
+    it, in which case this falls back to the bare title, never worse than
+    before this fix existed).
+    """
+    event_title = (m.get("event_title") or "").strip()
+    title       = (m.get("title") or "").strip()
+    if event_title and title and title.lower() not in event_title.lower():
+        return f"{event_title} — {title}"
+    return event_title or title
+
+
+# ── Ladder/band numeric matching (backlog: polymarket-us-tuning-for-real-
+# value, 2026-09-18) ─────────────────────────────────────────────────────────
+#
+# event_title fixed WHICH city/date a Kalshi ladder market belongs to, but
+# not WHICH BAND within it -- confirmed live that combining event_title with
+# the band-specific title still doesn't reliably clear either platform's
+# real match_score threshold, because the two platforms format a band as
+# very different text ("82-83°" vs "82 to 83") that word/character overlap
+# can't reliably bridge. The actual band boundary is a NUMBER, so parse it
+# as one and compare numbers, not more text-similarity tuning.
+#
+# Deliberately EXACT-only, never overlap/nearest-bucket: live-checked across
+# every US city both platforms currently cover for "highest temperature" on
+# the same date (2026-09-18) -- Chicago's boundaries align exactly between
+# the two platforms (69/71/73/75/77), but Los Angeles and San Francisco's are
+# offset by 1 degree (Kalshi's are even numbers, Polymarket US's are odd, for
+# reasons neither platform documents). A Kalshi [72,74) band and a Polymarket
+# US [73,75) band describe DIFFERENT real-world outcomes -- pairing them on
+# "close enough" overlap would compute a price_gap between two different
+# questions, a fabricated signal, not a smaller version of a real one.
+# Returning no match for an offset city is the correct output, not a
+# shortfall to work around.
+
+_KALSHI_BAND_ABOVE_RE = re.compile(r"[>≥]\s*(-?\d+(?:\.\d+)?)")
+_KALSHI_BAND_BELOW_RE  = re.compile(r"[<≤]\s*(-?\d+(?:\.\d+)?)")
+_KALSHI_BAND_RANGE_RE  = re.compile(r"(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)")
+
+_POLY_BAND_ABOVE_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s+or\s+(?:above|more|higher)", re.I)
+_POLY_BAND_BELOW_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s+or\s+(?:below|less|lower)", re.I)
+_POLY_BAND_RANGE_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s+to\s+(-?\d+(?:\.\d+)?)", re.I)
+
+
+def parse_kalshi_band(title: str) -> "tuple[float, float] | None":
+    """
+    Parses a Kalshi ladder-market title's numeric band into (low, high),
+    using math.inf for an open end. Handles the three formats confirmed
+    live 2026-09-18 against real KXHIGH*/KXLOWT* titles: ">X"/"≥X"
+    (open above), "<X"/"≤X" (open below), "X-Y" (bounded range, e.g.
+    "Will the maximum temperature be 82-83° on Sep 18, 2026?"). Checks
+    above/below before range so a range regex can't accidentally consume
+    part of a ">"/"<" expression first. Returns None (never a fabricated
+    bound) when no recognizable band pattern is found -- a non-ladder
+    market, or a format not seen yet; callers must treat that as "can't
+    compare numerically."
+    """
+    m = _KALSHI_BAND_ABOVE_RE.search(title)
+    if m:
+        return (float(m.group(1)), math.inf)
+    m = _KALSHI_BAND_BELOW_RE.search(title)
+    if m:
+        return (-math.inf, float(m.group(1)))
+    m = _KALSHI_BAND_RANGE_RE.search(title)
+    if m:
+        lo, hi = float(m.group(1)), float(m.group(2))
+        return (lo, hi) if lo <= hi else (hi, lo)
+    return None
+
+
+def parse_poly_us_band(title: str) -> "tuple[float, float] | None":
+    """
+    Parses a Polymarket US ladder-market title's numeric band into (low,
+    high), using math.inf for an open end. Handles the three formats
+    confirmed live 2026-09-18 against real Polymarket US temperature-band
+    titles: "X or above/more/higher" (open above), "X or below/less/lower"
+    (open below), "X to Y" (bounded range). Same never-fabricate-a-bound
+    contract as parse_kalshi_band().
+    """
+    m = _POLY_BAND_ABOVE_RE.search(title)
+    if m:
+        return (float(m.group(1)), math.inf)
+    m = _POLY_BAND_BELOW_RE.search(title)
+    if m:
+        return (-math.inf, float(m.group(1)))
+    m = _POLY_BAND_RANGE_RE.search(title)
+    if m:
+        lo, hi = float(m.group(1)), float(m.group(2))
+        return (lo, hi) if lo <= hi else (hi, lo)
+    return None
+
+
+def _group_by(items: list[dict], key_fn) -> dict:
+    groups: dict = {}
+    for item in items:
+        k = key_fn(item)
+        if k:
+            groups.setdefault(k, []).append(item)
+    return groups
+
+
+_TEMP_METRIC_RE = re.compile(r"\b(highest|maximum|lowest|minimum)\b", re.I)
+
+
+def _temp_metric(text: str) -> "str | None":
+    """
+    Returns "high" or "low" for a temperature-family title/question that
+    names its metric, else None (non-temperature families, e.g. elections,
+    are never gated by this -- they simply have no metric word to find).
+
+    Added after live-testing match_ladder_markets against real data
+    2026-09-18 found "Lowest temperature in San Francisco on Sep 18,
+    2026?" scores 0.737 against "Highest temperature in San Francisco on
+    September 18?" -- only 0.013 below the 0.75 family_threshold, because
+    swapping one metric word in an otherwise-identical template barely
+    moves a generic word/character similarity score. That's too thin a
+    margin to trust for keeping "highest" and "lowest" families apart --
+    a fuzzy-score-only gate could silently pair a low-temperature Kalshi
+    market against a high-temperature Polymarket US band, a wrong-metric
+    match that's arguably worse than the wrong-city case the 0.75
+    threshold was raised for (see match_ladder_markets' own docstring).
+    Checked explicitly instead of trusted to the fuzzy score's margin.
+    """
+    m = _TEMP_METRIC_RE.search(text)
+    if not m:
+        return None
+    return "high" if m.group(1).lower() in ("highest", "maximum") else "low"
+
+
+def match_ladder_markets(
+    kalshi_markets: list[dict], index: list[dict], config: dict,
+    *, family_threshold: float = 0.75,
+) -> dict[str, dict]:
+    """
+    Two-stage matcher for ladder/band market families. Stage 1: groups
+    Kalshi markets by event_ticker and Polymarket US index entries by
+    base_question, then finds the best-scoring Polymarket US family for
+    each Kalshi event using event_title vs base_question ALONE (no band
+    text) -- confirmed live this scores far higher (~0.7-0.8) than
+    combining in the band-specific title (~0.55-0.57, see
+    _kalshi_match_title's own docstring), because the family-identifying
+    text (city + date) is exactly what both sides share, and appending
+    band text only dilutes that. Stage 2: within a matched family, pairs
+    individual markets ONLY when parse_kalshi_band()/parse_poly_us_band()
+    return EXACTLY equal (low, high) tuples -- see the module comment
+    above this function for why exact, not nearest/overlapping.
+
+    family_threshold defaults to 0.75, not the generic 0.6 used for
+    fuzzy-text matches elsewhere in this module. Measured directly
+    2026-09-18 across 6 real US cities' "Highest temperature in <city> on
+    <date>?" event titles: same-city pairs (Kalshi's "Sep 18, 2026"
+    phrasing vs Polymarket US's "September 18" phrasing) score 0.78-0.80,
+    while every cross-city pair among those 6 cities tops out at 0.704
+    (Chicago vs Miami) -- because the shared template words ("Highest
+    temperature in ... on ... 18?") dominate a generic word/character
+    similarity score and the city name is only one differentiating token,
+    the ordinary 0.6 threshold would have matched Chicago's Kalshi event
+    to Los Angeles's or Miami's Polymarket US family (both score >0.6),
+    silently pairing two different cities' prices. 0.75 sits with margin
+    on both sides of the measured gap; it is NOT a proven bound for every
+    possible city name pair, only verified safe for the six tested.
+
+    A Kalshi market with no event_ticker, or whose band doesn't parse, or
+    whose event has no confidently-matching Polymarket US family, is
+    simply absent from the result -- never a guessed pairing. Returns a
+    dict keyed by Kalshi ticker, same shape as match_markets()'s per-
+    ticker result (poly_us_question, poly_us_price, poly_us_slug,
+    market_id, match_score, price_gap, net_price_gap) so it's a drop-in
+    input to the same downstream consumers.
+    """
+    cfg       = config.get("polymarket_us", {})
+    gap_floor = cfg.get("min_price_gap", 0.0)
+    unit_size = config.get("betting", {}).get("unit_size", 10)
+
+    kalshi_by_event = _group_by(kalshi_markets, lambda m: m.get("event_ticker", ""))
+    poly_families   = _group_by(index, lambda e: e.get("base_question", ""))
+    family_keys     = list(poly_families.keys())
+
+    results: dict[str, dict] = {}
+    for event_ticker, event_markets in kalshi_by_event.items():
+        event_title = next((m.get("event_title", "") for m in event_markets if m.get("event_title")), "")
+        if not event_title:
+            continue
+
+        event_metric = _temp_metric(event_title)
+
+        best_family_key = None
+        best_family_score = 0.0
+        for fk in family_keys:
+            if event_metric is not None and _temp_metric(fk) not in (None, event_metric):
+                continue
+            score = _match_score(event_title, fk)
+            if score > best_family_score:
+                best_family_score = score
+                best_family_key   = fk
+        if best_family_key is None or best_family_score < family_threshold:
+            continue
+
+        poly_bands = []  # (band, entry) for this family, parsed once per event
+        for entry in poly_families[best_family_key]:
+            band = parse_poly_us_band(entry["raw_title"])
+            if band is not None:
+                poly_bands.append((band, entry))
+
+        for m in event_markets:
+            ticker = m.get("ticker", "")
+            kalshi_band = parse_kalshi_band(m.get("title", ""))
+            if kalshi_band is None:
+                continue
+            match_entry = next((entry for band, entry in poly_bands if band == kalshi_band), None)
+            if match_entry is None:
+                continue
+
+            kalshi_mid = m.get("mid_price")
+            poly_price = match_entry["yes_price"]
+            price_gap  = (poly_price - kalshi_mid) if kalshi_mid is not None else None
+            if gap_floor > 0 and price_gap is None:
+                continue
+            if price_gap is not None and abs(price_gap) < gap_floor:
+                continue
+
+            net_price_gap = None
+            if price_gap is not None and unit_size > 0:
+                k_fee = fees.kalshi_fee(kalshi_mid, unit_size)
+                p_fee = fees.polymarket_fee(poly_price, unit_size, m.get("category"))
+                total_fee_pp = (k_fee + p_fee) / unit_size
+                shrunk = max(abs(price_gap) - total_fee_pp, 0.0)
+                net_price_gap = round(math.copysign(shrunk, price_gap), 4) if price_gap != 0 else 0.0
+
+            results[ticker] = {
+                "poly_us_question": match_entry["question"],
+                "poly_us_price":    poly_price,
+                "poly_us_slug":     match_entry["slug"],
+                "market_id":        match_entry["market_id"],
+                "match_score":      round(best_family_score, 3),
+                "price_gap":        round(price_gap, 4) if price_gap is not None else None,
+                "net_price_gap":    net_price_gap,
+            }
+
+    return results
 
 
 def find_match(kalshi_title: str, index: list[dict], threshold: float = 0.50) -> dict | None:
@@ -281,20 +537,33 @@ def match_markets(
     polymarket_fee at config.betting.unit_size) -- purely informational,
     never changes price_gap itself or any flag/promotion threshold, which
     all key off the raw price_gap.
+
+    Ladder/band markets (backlog: polymarket-us-tuning-for-real-value,
+    2026-09-18 numeric-band follow-up) are tried first via
+    match_ladder_markets() -- family match on event_title alone plus an
+    EXACT numeric-band pairing, which is the only reliable path for these
+    markets (see match_ladder_markets' own docstring for why). Any ticker
+    it resolves is used as-is and skipped in the fuzzy-text pass below;
+    every other ticker (non-ladder markets like elections, or ladder
+    markets whose band/family didn't resolve) falls through to the
+    original find_match()/_kalshi_match_title() text path unchanged.
     """
     cfg       = config.get("polymarket_us", {})
     threshold = min_match_score if min_match_score is not None else cfg.get("min_match_score", 0.50)
     gap_floor = min_gap         if min_gap         is not None else cfg.get("min_price_gap",   0.0)
     unit_size = config.get("betting", {}).get("unit_size", 10)
 
-    results = {}
+    results = match_ladder_markets(markets, index, config)
+
     for m in markets:
         ticker = m.get("ticker", "")
+        if ticker in results:
+            continue
         title  = m.get("title", "")
         if not title:
             continue
 
-        match = find_match(title, index, threshold)
+        match = find_match(_kalshi_match_title(m), index, threshold)
         if not match:
             continue
 

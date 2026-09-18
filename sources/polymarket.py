@@ -120,6 +120,30 @@ def build_index(poly_markets: list[dict]) -> list[dict]:
     return index
 
 
+def _kalshi_match_title(m: dict) -> str:
+    """
+    Combines a Kalshi market's event_title with its own title for MATCHING
+    purposes only -- never mutates m["title"] itself, which downstream
+    consumers (signals persistence, dashboard, calibration) need to stay
+    exactly the specific-band title Kalshi gave it. backlog:
+    polymarket-us-tuning-for-real-value, 2026-09-18 -- same fix as
+    sources/polymarket_us.py's identically-named helper, ported here since
+    this module has the identical root cause: a market's own title for a
+    ladder/band family (e.g. Kalshi's weather markets) often omits what
+    actually identifies the real-world question -- the city, which lives
+    only on the event's own title (see
+    core.kalshi.attach_event_category_metadata's docstring, which is what
+    populates event_title -- absent on any market that never went through
+    it, in which case this falls back to the bare title, never worse than
+    before this fix existed).
+    """
+    event_title = (m.get("event_title") or "").strip()
+    title       = (m.get("title") or "").strip()
+    if event_title and title and title.lower() not in event_title.lower():
+        return f"{event_title} — {title}"
+    return event_title or title
+
+
 def find_match(kalshi_title: str, index: list[dict], threshold: float = 0.50) -> dict | None:
     """Returns the best-matching Polymarket market above the threshold, or None."""
     best_score = 0.0
@@ -188,7 +212,7 @@ def match_markets(
         if not title:
             continue
 
-        match = find_match(title, index, threshold)
+        match = find_match(_kalshi_match_title(m), index, threshold)
         if not match:
             continue
 

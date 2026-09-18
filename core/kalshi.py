@@ -259,26 +259,42 @@ def fetch_event_detail(config: dict, event_ticker: str) -> dict:
 
 def attach_event_category_metadata(config: dict, markets: list[dict]) -> list[dict]:
     """
-    Backfills series_ticker/category onto each market via one
+    Backfills series_ticker/category/event_title onto each market via one
     fetch_event_detail() call per UNIQUE event_ticker (many markets share
     one event_ticker, so this is far cheaper than one call per market).
     For any /markets-shaped result set that didn't come from fetch_events()
     (whose event objects already carry these fields) -- currently
     fetch_near_dated_markets() and main.py's fetch_markets() fallback path.
+
+    event_title (backlog: polymarket-us-tuning-for-real-value, 2026-09-18):
+    a market's own `title` for a ladder/band family (e.g. "Will the
+    maximum temperature be 82-83 degrees on Sep 18, 2026?") never carries
+    the thing that actually identifies WHICH real-world question this is
+    -- for Kalshi's weather markets specifically, that's the city, which
+    lives only on the EVENT's own title ("Highest temperature in Los
+    Angeles on Sep 18, 2026?"), never the individual market's. Confirmed
+    live: matching a bare market title against a genuinely-the-same
+    Polymarket US market scored 0.446 (below the 0.6 threshold, a missed
+    true positive); the same comparison using event_title instead scored
+    0.733. sources.polymarket_us and sources.polymarket's match_markets()
+    combine this with each market's own title before matching, mirroring
+    polymarket_us.build_index()'s existing question+title combination on
+    the Polymarket side of the same problem.
     """
     event_tickers = {m.get("event_ticker") for m in markets if m.get("event_ticker")}
-    event_meta: dict[str, tuple[str, str]] = {}
+    event_meta: dict[str, tuple[str, str, str]] = {}
     for et in event_tickers:
         try:
             ev = fetch_event_detail(config, et)
-            event_meta[et] = (ev.get("series_ticker", ""), ev.get("category", ""))
+            event_meta[et] = (ev.get("series_ticker", ""), ev.get("category", ""), ev.get("title", ""))
         except Exception as _e:
             print(f"      [warn] fetch_event_detail({et}): {_e}")
-            event_meta[et] = ("", "")
+            event_meta[et] = ("", "", "")
     for m in markets:
-        series_ticker, category = event_meta.get(m.get("event_ticker"), ("", ""))
+        series_ticker, category, event_title = event_meta.get(m.get("event_ticker"), ("", "", ""))
         m["series_ticker"] = series_ticker
         m["category"]      = category
+        m["event_title"]   = event_title
     return markets
 
 

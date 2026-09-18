@@ -294,3 +294,40 @@ def test_attach_event_category_metadata_one_call_per_unique_event():
     by_ticker = {m["ticker"]: m for m in result}
     assert by_ticker["A"]["category"] == "Sports"
     assert by_ticker["C"]["category"] == "Politics"
+
+
+# ─── event_title (backlog: polymarket-us-tuning-for-real-value, 2026-09-18) ──
+# A ladder/band market's own title (e.g. "Will the maximum temperature be
+# 82-83 degrees...") omits what identifies the real-world question -- for
+# Kalshi weather markets, the city, which lives only on the event's own
+# title. Confirmed live this was silently failing sources.polymarket_us's
+# matching (0.446 vs a 0.6 threshold using the bare title; 0.733 using
+# event_title) before this fix.
+
+def test_attach_event_category_metadata_backfills_event_title():
+    markets = [_market("A", "EVT-LAX")]
+    with patch("core.kalshi.fetch_event_detail",
+               return_value={"series_ticker": "SER1", "category": "Climate and Weather",
+                             "title": "Highest temperature in Los Angeles on Sep 18, 2026?"}):
+        result = kalshi.attach_event_category_metadata({"environment": "demo"}, markets)
+    assert result[0]["event_title"] == "Highest temperature in Los Angeles on Sep 18, 2026?"
+
+
+def test_attach_event_category_metadata_event_title_defaults_empty_on_failure():
+    markets = [_market("A", "EVT-BROKEN")]
+    with patch("core.kalshi.fetch_event_detail", side_effect=Exception("network error")):
+        result = kalshi.attach_event_category_metadata({"environment": "demo"}, markets)
+    assert result[0]["event_title"] == ""
+
+
+def test_fetch_near_dated_markets_also_backfills_event_title():
+    """The near-dated path (where the real Kalshi weather markets this bug
+    was found against actually come from) must get event_title too, not
+    just the bare attach_event_category_metadata() unit."""
+    page = _resp({"markets": [_market("A", "EVT-LAX")], "cursor": None})
+    with patch("core.kalshi._sdk_json", return_value=page), \
+         patch("core.kalshi.fetch_event_detail",
+               return_value={"series_ticker": "SER1", "category": "Climate and Weather",
+                             "title": "Highest temperature in Los Angeles on Sep 18, 2026?"}):
+        markets = kalshi.fetch_near_dated_markets({"environment": "demo"})
+    assert markets[0]["event_title"] == "Highest temperature in Los Angeles on Sep 18, 2026?"

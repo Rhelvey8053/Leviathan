@@ -171,6 +171,50 @@ def test_match_markets_skips_empty_title():
     assert "KXTEST" not in result
 
 
+# ─── _kalshi_match_title / event_title enrichment ────────────────────────────
+# backlog: polymarket-us-tuning-for-real-value, 2026-09-18. Same root cause
+# and fix as sources/polymarket_us.py's identically-named helper -- a Kalshi
+# ladder market's own title omits the city; only the event's own title has it.
+
+def test_kalshi_match_title_combines_event_title_and_title():
+    m = {"title": "82 to 83", "event_title": "Highest temperature in Los Angeles on Sep 18, 2026?"}
+    combined = polymarket._kalshi_match_title(m)
+    assert "Los Angeles" in combined
+    assert "82 to 83" in combined
+
+
+def test_kalshi_match_title_no_event_title_falls_back_to_bare_title():
+    m = {"title": "Will X happen?"}
+    assert polymarket._kalshi_match_title(m) == "Will X happen?"
+
+
+def test_kalshi_match_title_missing_both_returns_empty_string():
+    assert polymarket._kalshi_match_title({}) == ""
+
+
+def test_match_markets_finds_true_positive_only_when_event_title_present():
+    """
+    Unlike the identically-shaped polymarket_us test (which found this
+    improvement clears its own fixture's 0.50 floor but not polymarket_us's
+    real 0.6 production threshold), international Polymarket's own real
+    production min_match_score is 0.5 (config.json's polymarket section)
+    -- so this same ~0.45->~0.56 improvement DOES clear its actual real
+    threshold, not just this test's fixture. Confirmed with an explicit
+    min_match_score=0.5 call below, not just relying on _CFG matching by
+    coincidence.
+    """
+    idx = _idx("Highest temperature in Los Angeles on September 18? — 82 to 83")
+    bare = [{"ticker": "KXHIGHLAX-1", "title": "Will the maximum temperature be 82-83° on Sep 18, 2026?",
+             "mid_price": 0.55}]
+    enriched = [{**bare[0], "event_title": "Highest temperature in Los Angeles on Sep 18, 2026?"}]
+
+    result_bare = polymarket.match_markets(bare, idx, _CFG, min_match_score=0.5)
+    result_enriched = polymarket.match_markets(enriched, idx, _CFG, min_match_score=0.5)
+
+    assert "KXHIGHLAX-1" not in result_bare
+    assert "KXHIGHLAX-1" in result_enriched
+
+
 def test_match_markets_no_mid_price_excluded_when_gap_floor_set():
     """Markets with None mid_price must be excluded when a gap floor is configured."""
     idx = _idx("Will X happen?")

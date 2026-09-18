@@ -671,8 +671,60 @@ def test_parses_and_96_items(backlog_data):
     DailyDigest's 2026-09-13 hangs, not SmartMoneyScan/
     PositionReconciliation's (uninstrumented, no stdout capture on those
     two tasks -- a separate, still-open gap named in the item's own notes).
+
+    145, not 144: added dashboard-pnl-scaled-flat-multiply-bug-2026-09
+    (2026-09-16, done at filing) -- found while wiring a Hypothetical P&L
+    chart into dashboard/app.py's first page. signals.csv's pnl_scaled
+    column was a hardcoded pnl_if_traded*10 for every row regardless of
+    source, stale since dynamic stake sizing went live (core.logger's
+    get_stats() was fixed for this on 2026-09-08, but core/export_to_csv.py
+    never was) -- wrong for confidence-weighted paper stakes and, worse,
+    double-scaling real_fill rows that are already real dollars. Fixed to
+    mirror get_stats()'s own formula, source-aware.
+
+    146, not 145: added dashboard-formatting-pass-2026-09-16 (2026-09-16,
+    done at filing) -- user asked to verify every dashboard page's filters
+    and spacing via the browser. Found and fixed 3 real bugs: Smart Money's
+    "Direction split" pie title rendered behind its own modebar icons;
+    Backlog's Status filter pills still truncated to a single letter
+    despite the 2026-08-14 flex-shrink fix (BaseWeb's own label span has
+    its own independent max-width/ellipsis); Trader Profile's qualification
+    checklist rendered a $...$ dollar-amount pair as garbled LaTeX math,
+    same bug class just fixed the same day in app.py's own new caption.
+
+    147, not 146: added anchoring-deviation-diagnostic-2026-09-16 (finding
+    only, status=ready) -- free due-diligence pass ahead of price-blind-arm
+    (PM strategy for the checkpoint halt): regressed the checkpoint's own
+    per-row delta against |our_estimate - market_price| on the identical
+    paired population. Slope -1.0020, 95% CI entirely negative
+    [-1.2971,-0.7068], n=58 -- bigger disagreements with the market price
+    predict systematically worse relative performance (20pp+ deviation
+    bucket, n=35: mean delta -17.5pp). Consistent with an anchoring/
+    overconfidence story, not just diffuse noise -- does not substitute
+    for price-blind-arm itself, which docs/PREREGISTRATION.md still names
+    as the actual instrument for the price-blind-scorer question.
+
+    148, not 147: added smart-money-watchlist-audit-2026-09-17 (2026-09-17,
+    done at filing) -- user asked to check the smart money wallets. Found
+    and fixed a real bug (sources.accounts.fetch_user_positions silently
+    truncated any wallet over 500 positions -- Poligarch's true record is
+    3,533 resolved/72.7% win rate/+$68,267, not the 343/68.8%/$14,956 the
+    truncated fetch showed), then live-audited the other 20 watchlist
+    wallets: every one with enough resolved history showed 0% real win
+    rate and large negative P&L. User approved pruning all 20, keeping
+    only Poligarch.
+
+    149, not 148: added blind-arm-title-blank-bug-2026-09-17 (2026-09-17,
+    done at filing) -- user asked to check the blind arm results. Every
+    blind_scores row ever logged had title="" -- RECORD_SCORES_TOOL's
+    schema has no title field, so scored_by_ticker (built from raw
+    claude_scores) never carried one; the real title only ever landed on
+    a separate `signal` dict elsewhere in main() that never wrote back
+    into scored_by_ticker. Extracted main._build_blind_score_row() as a
+    testable helper, sourced title from sampled_by_ticker instead, 5 new
+    tests, backfilled the 3 existing blank rows from the signals table.
     """
-    assert len(backlog_data["items"]) == 144
+    assert len(backlog_data["items"]) == 149
 
 
 def test_all_ids_unique(backlog_data):

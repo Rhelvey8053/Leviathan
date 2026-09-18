@@ -1,11 +1,12 @@
 """
 tests/test_blind_arm_main.py — Offline tests for main._sample_for_blind_arm()
-(backlog: price-blind-arm).
+and main._build_blind_score_row() (backlog: price-blind-arm).
 
-Pure function, no network/DB/LLM. main.py's own orchestration of the
-blind-arm block has no test harness, consistent with this session's other
-main.py additions (e.g. _validate_market_shape) -- this covers the one
-piece of new logic that's a testable, standalone function.
+Pure functions, no network/DB/LLM. main.py's own orchestration of the
+blind-arm block (the try/except wiring these two together, plus the
+logger.log_blind_score() call) has no test harness, consistent with this
+session's other main.py additions (e.g. _validate_market_shape) -- this
+covers the testable, standalone pieces.
 """
 
 import sys
@@ -75,3 +76,56 @@ def test_fewer_eligible_markets_than_n_returns_all_of_them():
     scored  = {"A": {}, "B": {}}
     result  = main._sample_for_blind_arm(markets, scored, 10)
     assert len(result) == 2
+
+
+# ─── _build_blind_score_row (2026-09-17 title bug fix) ─────────────────────
+# Every blind_scores row ever logged had title="" -- RECORD_SCORES_TOOL's
+# schema (core/llm.py) has no "title" field at all, so scored_by_ticker's raw
+# Claude-score dicts never carry one. title must come from sampled_by_ticker
+# (the raw flagged-market dicts _sample_for_blind_arm selected from) instead.
+
+def test_title_comes_from_sampled_market_not_scored_by_ticker():
+    br = {"ticker": "KXFOO-1", "estimate": 0.4, "confidence": "MED",
+          "reasoning": "x", "sources_checked": []}
+    sampled_by_ticker = {"KXFOO-1": {"ticker": "KXFOO-1", "title": "Will foo happen?"}}
+    # scored_by_ticker's own dict has NO title key at all -- matches the real
+    # shape RECORD_SCORES_TOOL produces, not a hypothetical one.
+    scored_by_ticker = {"KXFOO-1": {"ticker": "KXFOO-1", "market_price": 0.55,
+                                     "our_estimate": 0.6, "edge": 0.05}}
+    row = main._build_blind_score_row(br, sampled_by_ticker, scored_by_ticker, "run1", 0.02)
+    assert row["title"] == "Will foo happen?"
+
+
+def test_market_price_at_score_still_comes_from_scored_by_ticker():
+    """Regression guard: only title was broken. market_price_at_score must
+    stay sourced from the anchored scorer's own self-reported price, not
+    silently switch to the raw market dict alongside the title fix."""
+    br = {"ticker": "KXFOO-1", "estimate": 0.4, "confidence": "MED",
+          "reasoning": "x", "sources_checked": []}
+    sampled_by_ticker = {"KXFOO-1": {"ticker": "KXFOO-1", "title": "Will foo happen?",
+                                      "market_price": 0.99}}  # deliberately different
+    scored_by_ticker = {"KXFOO-1": {"ticker": "KXFOO-1", "market_price": 0.55}}
+    row = main._build_blind_score_row(br, sampled_by_ticker, scored_by_ticker, "run1", 0.02)
+    assert row["market_price_at_score"] == 0.55
+
+
+def test_missing_ticker_in_lookups_yields_blank_title_not_a_crash():
+    br = {"ticker": "KXUNKNOWN", "estimate": 0.4, "confidence": "MED",
+          "reasoning": "x", "sources_checked": []}
+    row = main._build_blind_score_row(br, {}, {}, "run1", None)
+    assert row["title"] == ""
+    assert row["market_price_at_score"] is None
+
+
+def test_carries_through_run_id_and_cost_and_blind_fields():
+    br = {"ticker": "KXFOO-1", "estimate": 0.42, "confidence": "HIGH",
+          "reasoning": "reasoning text", "sources_checked": ["headline"]}
+    sampled_by_ticker = {"KXFOO-1": {"ticker": "KXFOO-1", "title": "t"}}
+    row = main._build_blind_score_row(br, sampled_by_ticker, {}, "run-abc", 0.031)
+    assert row["run_id"] == "run-abc"
+    assert row["ticker"] == "KXFOO-1"
+    assert row["estimate"] == 0.42
+    assert row["confidence"] == "HIGH"
+    assert row["reasoning"] == "reasoning text"
+    assert row["sources_checked"] == ["headline"]
+    assert row["cost_usd"] == 0.031

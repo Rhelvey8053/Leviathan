@@ -136,6 +136,48 @@ def _sample_for_blind_arm(flagged_markets: list[dict], scored_by_ticker: dict,
     return random.Random(run_id).sample(eligible, n)
 
 
+def _build_blind_score_row(
+    br: dict, sampled_by_ticker: dict, scored_by_ticker: dict,
+    run_id: str, cost_usd: "float | None",
+) -> dict:
+    """
+    Assembles one core.logger.log_blind_score() row from a single blind-
+    scoring result (backlog: price-blind-arm).
+
+    title MUST come from sampled_by_ticker (a ticker-keyed lookup over
+    _sample_for_blind_arm's own return value -- the raw flagged-market
+    dicts, which carry a real title), never from scored_by_ticker. Found
+    2026-09-17, live: every blind_scores row ever logged had title="" --
+    RECORD_SCORES_TOOL's schema (core/llm.py) has no "title" field at
+    all, so scored_by_ticker's raw Claude-score dicts never carry one.
+    The enriched title only ever lands on the separate `signal` dict
+    main()'s "Merge Claude scores with full market context" loop builds
+    a few hundred lines above this function -- that loop never writes
+    back into scored_by_ticker itself, so this is the only place a blind
+    row can get a real title from.
+
+    market_price_at_score is intentionally still sourced from
+    scored_by_ticker (the anchored scorer's own self-reported price at
+    the moment it scored this ticker), not from the raw market dict --
+    that field was never broken, only title was; kept on its original
+    source rather than changed alongside the title fix.
+    """
+    ticker = br.get("ticker", "")
+    market = sampled_by_ticker.get(ticker, {})
+    cs     = scored_by_ticker.get(ticker, {})
+    return {
+        "run_id":                run_id,
+        "ticker":                ticker,
+        "title":                 market.get("title", ""),
+        "estimate":              br.get("estimate"),
+        "confidence":            br.get("confidence"),
+        "reasoning":             br.get("reasoning"),
+        "sources_checked":       br.get("sources_checked"),
+        "market_price_at_score": cs.get("market_price"),
+        "cost_usd":              cost_usd,
+    }
+
+
 def _rescore_shortlist_for_clean_sources(
     final_signals: list[dict],
     flagged_markets: list[dict],
@@ -363,12 +405,19 @@ def main():
             event_ticker = event.get("event_ticker") or event.get("ticker", "")
             if not event_ticker or "KXMVE" in event_ticker:
                 continue
-            # series_ticker and category live on the EVENT object only (not
-            # the raw market object) — capture them here and attach to each
-            # market so they're available downstream, the same way
-            # event_ticker is already carried through.
+            # series_ticker/category/event_title live on the EVENT object
+            # only (not the raw market object) -- capture them here and
+            # attach to each market so they're available downstream, the
+            # same way event_ticker is already carried through. event_title
+            # (backlog: polymarket-us-tuning-for-real-value, 2026-09-18):
+            # see core.kalshi.attach_event_category_metadata's own docstring
+            # for why this matters -- mirrors that function's own attachment
+            # of the same field for the near-dated/fallback paths, so every
+            # market in all_markets carries it regardless of which path
+            # fetched it.
             series_ticker = event.get("series_ticker", "")
             category      = event.get("category", "")
+            event_title   = event.get("title", "")
             try:
                 for m in kalshi.fetch_event_markets(config, event_ticker):
                     t = m.get("ticker")
@@ -376,6 +425,7 @@ def main():
                         seen.add(t)
                         m["series_ticker"] = series_ticker
                         m["category"]      = category
+                        m["event_title"]   = event_title
                         all_markets.append(m)
             except Exception as _e:
                 print(f"      [warn] fetch_event_markets({event_ticker}): {_e}")
@@ -1278,29 +1328,28 @@ def main():
     # signal selection above is already final; results are logged to their
     # own DB table (core.logger.log_blind_score) and never read back into
     # scored_by_ticker/final_signals. Off by default (config.blind_arm.enabled)
-    # since, unlike the main scan (Pro subscription, no per-token bill), this
-    # goes through the metered Anthropic API on every run it fires.
+    # -- an explicit opt-in for the extra CLI usage/rate-limit draw this adds
+    # on top of the main scan, not because of metered spend: as of the
+    # 2026-09-16 CLI-backend rewrite, core.blind_scorer.score_blind() shares
+    # config["llm"]["backend"]'s own default ("cli", the Pro subscription) the
+    # same way the main scan does, and only spends real metered $ if backend
+    # is explicitly set to "api" (its own separate, still-gated opt-in). The
+    # printed cost below is the CLI's own advisory cost telemetry either way
+    # -- see core.scorer._score_via_cli's 2026-09-02 note -- not proof of real
+    # billing.
     if config.get("blind_arm", {}).get("enabled", False) and claude_scores:
         try:
             from core import blind_scorer
             sample_size = int(config.get("blind_arm", {}).get("sample_size", 3))
             sampled = _sample_for_blind_arm(flagged_markets, scored_by_ticker, sample_size, run_id=run_id)
             if sampled:
+                sampled_by_ticker = {m.get("ticker", ""): m for m in sampled}
                 blind_results, blind_token_info = blind_scorer.score_blind(sampled, config)
                 for br in blind_results:
-                    ticker = br.get("ticker", "")
-                    cs = scored_by_ticker.get(ticker, {})
-                    logger.log_blind_score({
-                        "run_id":                run_id,
-                        "ticker":                ticker,
-                        "title":                 cs.get("title", ""),
-                        "estimate":              br.get("estimate"),
-                        "confidence":            br.get("confidence"),
-                        "reasoning":             br.get("reasoning"),
-                        "sources_checked":       br.get("sources_checked"),
-                        "market_price_at_score": cs.get("market_price"),
-                        "cost_usd":              blind_token_info.get("cost_usd"),
-                    })
+                    logger.log_blind_score(_build_blind_score_row(
+                        br, sampled_by_ticker, scored_by_ticker,
+                        run_id, blind_token_info.get("cost_usd"),
+                    ))
                 print(f"      Blind-arm: scored {len(blind_results)} market(s), "
                       f"cost {_fmt_usd(blind_token_info.get('cost_usd', 0))}")
         except Exception as e:
